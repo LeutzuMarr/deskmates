@@ -1,0 +1,19 @@
+node_modules/
+out/
+dist/
+.spike/
+.superpowers/
+test-results/
+playwright-report/
+*.log
+CHAT-HISTORY.md
+
+# Local-only material, not part of the published project
+.freebuff/
+.scratch-terminal-test/
+animations/
+docs/superpowers/
+docs/HANDOFF-OPENCODE.md
+# Base prompts are supplied by each user; only the folder's README is published
+prompts/*
+!prompts/README.md

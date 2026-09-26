@@ -1,0 +1,133 @@
+{
+  "name": "deskmates",
+  "productName": "Deskmates",
+  "version": "0.2.0-beta.1",
+  "description": "Open-source Windows app: an AI assistant for your folders, bots with their own PC, and a router for your terminal coding agents.",
+  "keywords": [
+    "ai",
+    "ai-agent",
+    "desktop-app",
+    "electron",
+    "windows",
+    "llm",
+    "gemini",
+    "openai",
+    "opencode",
+    "mcp",
+    "computer-use",
+    "motion-graphics",
+    "video-export",
+    "web-design",
+    "automation",
+    "bots",
+    "byok"
+  ],
+  "homepage": "https://github.com/LeutzuMarr/deskmates#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LeutzuMarr/deskmates.git"
+  },
+  "bugs": {
+    "url": "https://github.com/LeutzuMarr/deskmates/issues"
+  },
+  "author": "LeutzuMarr",
+  "license": "MIT",
+  "type": "module",
+  "main": "./out/main/index.js",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "postinstall": "install-electron",
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "tsc -p tsconfig.node.json --noEmit --composite false && tsc -p tsconfig.web.json --noEmit --composite false && tsc -p tsconfig.preview.json && tsc -p tsconfig.e2e.json",
+    "test": "vitest run",
+    "test:e2e": "electron-vite build && playwright test",
+    "icon": "node scripts/make-icon.mjs",
+    "dist": "electron-vite build && electron-builder --win"
+  },
+  "build": {
+    "appId": "com.deskmates.app",
+    "productName": "Deskmates",
+    "directories": {
+      "output": "dist",
+      "buildResources": "resources"
+    },
+    "files": [
+      "out/**",
+      "resources/**",
+      "package.json",
+      "!**/*.map"
+    ],
+    "extraResources": [
+      {
+        "from": "prompts",
+        "to": "prompts"
+      }
+    ],
+    "asarUnpack": [
+      "resources/**"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "resources/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "Deskmates-Setup-${version}.exe"
+    },
+    "portable": {
+      "artifactName": "Deskmates-${version}-portable.exe"
+    }
+  },
+  "dependencies": {
+    "@ai-sdk/google": "^4.0.75",
+    "@ai-sdk/openai": "^4.0.70",
+    "@ai-sdk/openai-compatible": "^3.0.52",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@pdf-lib/fontkit": "^1.1.1",
+    "ai": "^7.0.106",
+    "docx": "^9.7.1",
+    "exceljs": "^4.4.0",
+    "jszip": "^3.10.2",
+    "mammoth": "^1.12.3",
+    "pdf-lib": "^1.17.1",
+    "pptxgenjs": "^4.0.1",
+    "unpdf": "^1.8.1",
+    "ws": "^8.21.3",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@fontsource-variable/source-serif-4": "^5.3.0",
+    "@playwright/test": "^1.63.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^24.13.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/ws": "^8.18.1",
+    "@vitejs/plugin-react": "^5.2.0",
+    "electron": "^44.4.2",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "happy-dom": "^20.14.5",
+    "lottie-web": "^5.13.0",
+    "lucide-react": "^1.47.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2",
+    "vite": "^7.3.6",
+    "vitest": "^5.0.1",
+    "zustand": "^5.0.15"
+  }
+}
