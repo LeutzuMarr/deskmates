@@ -30,8 +30,8 @@
   "bugs": {
     "url": "https://github.com/LeutzuMarr/deskmates/issues"
   },
-  "author": "LeutzuMarr",
-  "license": "MIT",
+  "author": "David Catrina (LeutzuMarr)",
+  "license": "AGPL-3.0-or-later",
   "type": "module",
   "main": "./out/main/index.js",
   "engines": {

@@ -6,7 +6,7 @@
 
 **Your AI coworkers for Windows.** An open-source desktop app where AI agents work in your folders, design and animate web pages you can edit like a slide, export motion graphics to MP4, run bots on their own Linux PC, drive your terminal coding agents, and even use your mouse and keyboard, all with your own API key.
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-d97757)](LICENSE)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-d97757)](LICENSE)
 ![Windows 10/11](https://img.shields.io/badge/platform-Windows%2010%2F11-6a9bcc)
 ![Electron](https://img.shields.io/badge/Electron-React%20%2B%20TypeScript-141413)
 ![Bring your own key](https://img.shields.io/badge/models-bring%20your%20own%20key-788c5d)
@@ -116,7 +116,11 @@ Contributions are welcome: open an issue to discuss an idea, or send a pull requ
 
 ## License
 
-[MIT](LICENSE)
+Copyright © 2026 David Catrina (LeutzuMarr).
+
+Deskmates is free software under the [GNU Affero General Public License v3.0](LICENSE) or any later version. You may use, study, share and change it. If you distribute a modified version, or run one as a service others use over a network, you must release its full source code under the same license.
+
+The name "Deskmates" and its logo are not covered by this license. Forks and modified versions must use a different name and logo.
 
 ## Support Deskmates
 
