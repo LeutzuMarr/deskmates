@@ -117,3 +117,9 @@ Contributions are welcome: open an issue to discuss an idea, or send a pull requ
 ## License
 
 [MIT](LICENSE)
+
+## Support Deskmates
+
+Deskmates is free and built in spare time. If it saves you time, you can support its development with a donation:
+
+**[☕ Donate via Revolut](https://revolut.me/leutzumarr)**
