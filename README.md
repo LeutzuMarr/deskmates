@@ -52,7 +52,11 @@ Import skills (the open `SKILL.md` format), install plugins from GitHub, and con
 
 ## Get started
 
-Deskmates runs on Windows 10/11 (x64). Build it from source; installers will follow in [Releases](../../releases).
+Deskmates runs on Windows 10/11 (x64).
+
+**[⬇ Download the latest release](https://github.com/LeutzuMarr/deskmates/releases/latest)**: pick `Deskmates-Setup-….exe` (installer) or the portable `.exe`. The build isn't code-signed yet, so Windows SmartScreen may warn about it: click **More info → Run anyway**.
+
+Or build it from source:
 
 ```bash
 git clone https://github.com/LeutzuMarr/deskmates.git
@@ -71,7 +75,7 @@ Then:
 - WSL2 for bots. The app checks for it and walks you through setup.
 - [OpenCode](https://opencode.ai) or Antigravity for the Agents tab.
 
-To build the installer and a portable `.exe` yourself, run `npm run dist`. The build isn't code-signed, so Windows SmartScreen will warn about it: click **More info → Run anyway**.
+To build the installer and a portable `.exe` yourself, run `npm run dist`.
 
 ## WhatsApp setup for bots
 
