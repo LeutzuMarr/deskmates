@@ -1,6 +1,7 @@
 import type { CommandRunner } from '../bots/command-runner'
 import type { EventBus } from '../events'
 import { detectTerminalAgents } from './detect'
+import type { CliRunOptions, CliRunResult } from './managed'
 import { ManagedTerminalRunner } from './managed'
 import type { ProcessSpawner } from './process'
 import { AttachTerminalRunner } from './attach'
@@ -29,8 +30,17 @@ export interface TerminalsService {
 
   /** Runs one bounded CLI turn (OpenCode `run` / agy `-p`) with no visible session or primer, for
    *  tasks routed to a CLI-backed model provider. Resolves with the assistant's reply text, or the
-   *  parsed error when the run failed. */
-  execute(tool: TerminalTool, folder: string, prompt: string, model?: string): Promise<{ text: string; error?: string }>
+   *  parsed error when the run failed.
+   *
+   *  `runOptions.signal` cancels the run — this is how the Work tab's Stop button reaches a CLI
+   *  provider, whose turn has no tool loop for the task runner's AbortController to interrupt. */
+  execute(
+    tool: TerminalTool,
+    folder: string,
+    prompt: string,
+    model?: string,
+    runOptions?: CliRunOptions
+  ): Promise<CliRunResult>
 
   /** Attaches to a terminal the user already has open (spec 5.14) and returns its session. */
   attach(pid: number, tool: TerminalTool): AttachedTerminalSession
@@ -112,8 +122,8 @@ export class TerminalsManager implements TerminalsService {
     return this.managed.items(id)
   }
 
-  execute(tool: TerminalTool, folder: string, prompt: string, model?: string): Promise<{ text: string; error?: string }> {
-    return this.managed.execute(tool, folder, prompt, model)
+  execute(tool: TerminalTool, folder: string, prompt: string, model?: string, runOptions?: CliRunOptions): Promise<CliRunResult> {
+    return this.managed.execute(tool, folder, prompt, model, runOptions)
   }
 
   attach(pid: number, tool: TerminalTool): AttachedTerminalSession {

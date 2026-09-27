@@ -356,7 +356,7 @@ export class TaskRunner {
       // CLI-backed providers (OpenCode/agy): run the whole turn through a terminal session instead
       // of the tool-calling loop — their own agents/tools execute inside the CLI.
       if (resolved.cli) {
-        await this.executeCliTurn(taskId, task, project, resolved, instructions)
+        await this.executeCliTurn(taskId, task, project, resolved, instructions, controller)
         return
       }
 
@@ -469,13 +469,18 @@ export class TaskRunner {
 
   /** CLI-backed provider runs: send the turn (instructions + the user's latest message) to a
    *  terminal session through `TerminalsService.execute`, and append the CLI's reply as the
-   *  assistant message. Throws on a failed run, like the tool loop's errors do. */
+   *  assistant message. Throws on a failed run, like the tool loop's errors do.
+   *
+   *  Takes the run's AbortController because a CLI turn has no tool loop for it to interrupt: the
+   *  only thing that can stop one is the CLI process, so the signal is handed to the terminal service
+   *  to kill. Without this the Work tab's Stop button is a no-op for OpenCode/agy tasks. */
   private async executeCliTurn(
     taskId: string,
     task: { projectId: string },
     project: { kind: string; folder: string },
     resolved: { provider: ProviderId; modelId: string },
-    instructions: string
+    instructions: string,
+    controller: AbortController
   ): Promise<void> {
     const { repos, bus } = this.deps
     const terminals = this.deps.getTerminals?.()
@@ -491,18 +496,39 @@ export class TaskRunner {
         : content.map((part) => ('text' in part ? part.text : String(part))).join(' ')
     const prompt = `${instructions.trimEnd()}\n\n${userText.trim()}`.trim()
 
+    const live = new LiveTimeline(taskId, bus, () => Date.now())
     const result = await terminals.execute(
       resolved.provider as 'opencode' | 'agy',
       project.folder,
       prompt,
-      resolved.modelId
+      resolved.modelId,
+      {
+        signal: controller.signal,
+        onItem: (item) => {
+          if (item.kind === 'assistant') {
+            live.appendText(item.text)
+            return
+          }
+          // A CLI turn's first output can be a long way off, so its tool activity (reading the
+          // spilled prompt, running a command) is the only sign of life in between. Surfaced as the
+          // Agents tab surfaces the same items.
+          bus.emit({ type: 'task.item', taskId, item })
+        }
+      }
     )
+    live.flush()
 
-    if (result.error) throw new Error(result.error)
-
+    // Whatever the CLI managed to say is kept even when the run was cut short — stopping a run that
+    // had already answered shouldn't throw the answer away.
     if (result.text) {
       repos.tasks.appendMessages(taskId, [{ role: 'assistant', content: result.text }])
     }
+
+    if (result.stopped || controller.signal.aborted) {
+      repos.tasks.update(taskId, { status: 'idle', error: 'Stopped.' })
+      return
+    }
+    if (result.error) throw new Error(result.error)
 
     repos.tasks.update(taskId, { status: 'idle', error: null })
 

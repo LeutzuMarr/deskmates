@@ -113,6 +113,16 @@ export class LiveTimeline {
     }
   }
 
+  /** Feeds one chunk of already-formed text into the live timeline.
+   *
+   *  The CLI provider path gets whole text blocks off a CLI's JSON stream rather than SDK
+   *  `text-delta` parts, but it should still stream into the transcript the same way — otherwise a
+   *  run whose first output takes the CLI's whole cold start (measured at 15–45s) shows nothing at
+   *  all and reads as hung. Contained here so the cast stays in one place. */
+  appendText(text: string): void {
+    this.apply({ type: 'text-delta', text } as unknown as TextStreamPart<ToolSet>)
+  }
+
   /** Flush any remaining text. */
   flush(): void {
     this.flushText()

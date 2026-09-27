@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { TaskRunner } from '../../src/core/engine/runner'
 import { createRepos, type Repos } from '../../src/core/store/repos'
 import { openDatabase } from '../../src/core/store/db'
@@ -605,5 +605,140 @@ describe('TaskRunner', () => {
 
     expect(repos.tasks.require(designTask.id).status).toBe('idle')
     expect(seen).toContain(design.id)
+  })
+
+  // The Work tab routes a whole turn through OpenCode, and OpenCode's cold start was measured at
+  // 15–45s before the model is even reached. These two cover the two ways that used to read as a
+  // hung app: no output at all, and a Stop button that did nothing.
+
+  it("hands the CLI turn the run's abort signal, so the Work tab's Stop actually stops it", async () => {
+    const models = {
+      resolve: () => ({
+        model: new MockLanguageModelV4({ doStream: async () => { throw new Error('never called') } }),
+        provider: 'opencode' as const,
+        modelId: 'opencode/big-pickle',
+        cli: true as const
+      })
+    }
+
+    let seenSignal: AbortSignal | undefined
+    let killIt: (() => void) | undefined
+    const cliKilled = new Promise<void>((resolve) => {
+      killIt = resolve
+    })
+
+    const runner = new TaskRunner({
+      repos,
+      bus,
+      models,
+      changes,
+      createTools: (ctx) => fileTools(ctx),
+      getTerminals: () =>
+        ({
+          execute: async (_tool: string, _folder: string, _prompt: string, _model: string | undefined, options?: any) => {
+            seenSignal = options?.signal
+            // A real CLI run only ends when the process is killed; hold here until Stop does it.
+            options?.signal?.addEventListener('abort', () => killIt?.(), { once: true })
+            await cliKilled
+            return { text: '', stopped: true }
+          }
+        }) as any
+    })
+
+    await runner.send(taskId, 'What model are you?')
+    await vi.waitFor(() => expect(repos.tasks.require(taskId).status).toBe('running'))
+
+    runner.stop(taskId)
+    await runner.whenIdle(taskId)
+
+    // The signal reached the terminal service, and stopping ended the run instead of waiting it out.
+    expect(seenSignal).toBeInstanceOf(AbortSignal)
+    const task = repos.tasks.require(taskId)
+    expect(task.status).toBe('idle')
+    expect(task.error).toBe('Stopped.')
+  })
+
+  it('streams a CLI reply into the timeline as it arrives instead of only after the process exits', async () => {
+    const models = {
+      resolve: () => ({
+        model: new MockLanguageModelV4({ doStream: async () => { throw new Error('never called') } }),
+        provider: 'opencode' as const,
+        modelId: 'opencode/big-pickle',
+        cli: true as const
+      })
+    }
+
+    const streamed: string[] = []
+    bus.on((ev: any) => {
+      if (ev.type === 'task.item' && ev.item?.kind === 'assistant') streamed.push(ev.item.text)
+    })
+
+    let finishRun: (() => void) | undefined
+    const holdOpen = new Promise<void>((resolve) => {
+      finishRun = resolve
+    })
+
+    const runner = new TaskRunner({
+      repos,
+      bus,
+      models,
+      changes,
+      createTools: (ctx) => fileTools(ctx),
+      getTerminals: () =>
+        ({
+          execute: async (_tool: string, _folder: string, _prompt: string, _model: string | undefined, options?: any) => {
+            // The CLI answers, then stays alive for a while — the shape that used to show nothing.
+            options?.onItem?.({ kind: 'assistant', id: 'a1', at: 1, text: 'I am big-pickle' })
+            await holdOpen
+            return { text: 'I am big-pickle' }
+          }
+        }) as any
+    })
+
+    await runner.send(taskId, 'What model are you?')
+    await vi.waitFor(() => expect(streamed).toContain('I am big-pickle'))
+
+    // The user could read the reply while the CLI was still running.
+    expect(repos.tasks.require(taskId).status).toBe('running')
+    expect(repos.tasks.messages(taskId).some((m) => m.message.role === 'assistant')).toBe(false)
+
+    finishRun?.()
+    await runner.whenIdle(taskId)
+
+    expect(repos.tasks.require(taskId).status).toBe('idle')
+    const stored = repos.tasks.messages(taskId)
+    expect(stored[stored.length - 1].message.content).toBe('I am big-pickle')
+  })
+
+  it('keeps the answer a stopped CLI run had already produced, and reports the stop', async () => {
+    const models = {
+      resolve: () => ({
+        model: new MockLanguageModelV4({ doStream: async () => { throw new Error('never called') } }),
+        provider: 'opencode' as const,
+        modelId: 'opencode/big-pickle',
+        cli: true as const
+      })
+    }
+
+    const runner = new TaskRunner({
+      repos,
+      bus,
+      models,
+      changes,
+      createTools: (ctx) => fileTools(ctx),
+      getTerminals: () =>
+        ({
+          execute: async () => ({ text: 'I am big-pickle', stopped: true })
+        }) as any
+    })
+
+    await runner.send(taskId, 'What model are you?')
+    await runner.whenIdle(taskId)
+
+    const task = repos.tasks.require(taskId)
+    expect(task.status).toBe('idle')
+    expect(task.error).toBe('Stopped.')
+    const stored = repos.tasks.messages(taskId)
+    expect(stored[stored.length - 1].message.content).toBe('I am big-pickle')
   })
 })

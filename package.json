@@ -1,7 +1,7 @@
 {
   "name": "deskmates",
   "productName": "Deskmates",
-  "version": "0.2.0-beta.1",
+  "version": "0.2.0-beta.2",
   "description": "Open-source Windows app: an AI assistant for your folders, bots with their own PC, and a router for your terminal coding agents.",
   "keywords": [
     "ai",

@@ -3,7 +3,7 @@ import type { KeyboardEvent } from 'react'
 import { ListChecks, Undo2 } from 'lucide-react'
 import { core } from '../lib/rpc'
 import { useStore } from '../lib/store'
-import { formatClock, formatDay, statusLabel } from '../lib/format'
+import { formatClock, formatDay, statusLabel, startingNotice } from '../lib/format'
 import { Composer } from '../components/Composer'
 import { Conversation } from '../components/Conversation'
 import type { FileChange, PlanItem, Task } from '../../../shared/protocol'
@@ -22,6 +22,10 @@ export function TaskView({ projectId, taskId }: { projectId: string; taskId: str
   const task = (tasks ?? []).find((t) => t.id === taskId)
   const timeline = timelines[taskId] ?? []
   const taskChanges = changes[taskId] ?? []
+
+  // A CLI-backed provider boots a whole agent process before it says anything, and on a cold start
+  // that is tens of seconds of silence. Naming it stops the wait reading as a hang.
+  const starting = startingNotice(project?.model)
 
   useEffect(() => {
     if (task && task.plan.length > 0) setPanelOpen(true)
@@ -101,6 +105,7 @@ export function TaskView({ projectId, taskId }: { projectId: string; taskId: str
           timeline={timeline}
           running={task?.status === 'running'}
           emptyHint="No messages yet — ask something in the box below."
+          starting={starting}
         />
 
         {panelOpen && (

@@ -1,4 +1,5 @@
-import type { TaskStatus, ToolItem } from '../../../shared/protocol'
+import { isCliProvider, PROVIDER_LABELS } from '../../../shared/protocol'
+import type { ModelRef, TaskStatus, TimelineItem, ToolItem } from '../../../shared/protocol'
 
 const DAY_MS = 86_400_000
 
@@ -51,6 +52,39 @@ export function statusLabel(status: TaskStatus): string {
       return 'Error'
     case 'idle':
       return 'Idle'
+  }
+}
+
+/** What to say while a run is up but has produced nothing yet. */
+export interface StartingNotice {
+  label: string
+  hint: string
+}
+
+/** Whether a run is up but has produced nothing since the prompt — the window in which a CLI-backed
+ *  provider is still booting.
+ *
+ *  Keyed off the shape of the timeline rather than a status flag because the user bubble is persisted
+ *  and broadcast *before* the run starts: for the whole of the cold start the transcript holds one
+ *  item, the prompt, and nothing after it. */
+export function awaitingFirstOutput(timeline: TimelineItem[], running: boolean): boolean {
+  if (!running) return false
+  for (let k = timeline.length - 1; k >= 0; k--) if (timeline[k].kind === 'user') return k === timeline.length - 1
+  // Running with no prompt in this timeline at all (a scheduled bot run, say) is silent by definition.
+  return true
+}
+
+/** The notice to show for this model's start-up, or null when it doesn't need one.
+ *
+ *  A CLI-backed provider boots a whole agent process before it says anything, and on a cold start
+ *  that is tens of seconds of silence. Naming it stops the wait reading as a hang. API-backed
+ *  providers stream a token almost immediately, so they keep the plain working row. */
+export function startingNotice(model: ModelRef | null | undefined): StartingNotice | null {
+  const provider = model?.provider
+  if (!provider || !isCliProvider(provider)) return null
+  return {
+    label: `Starting ${PROVIDER_LABELS[provider]}…`,
+    hint: 'It boots a whole agent process before it replies — this can take a minute.'
   }
 }
 

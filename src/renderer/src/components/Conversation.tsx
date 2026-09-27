@@ -5,8 +5,9 @@ import { ActivityGroup } from './ActivityGroup'
 import { ApprovalCard } from './ApprovalCard'
 import { AgentCard, CARD_TOOLS } from './AgentCards'
 import { BrandMark } from './Mascot'
-import { formatElapsed } from '../lib/format'
+import { formatElapsed, awaitingFirstOutput } from '../lib/format'
 import { WorkingLine, WorkingPill } from './Working'
+import type { StartingNotice } from '../lib/format'
 import type { TimelineItem, ToolItem } from '../../../shared/protocol'
 
 interface ConversationProps {
@@ -23,6 +24,9 @@ interface ConversationProps {
   contentClassName?: string
   /** Show the floating "working" popup while running. The Design tab shows its own over the preview. */
   pill?: boolean
+  /** Replaces the working row's rotating verb while the run is up but silent, for providers whose
+   *  start-up is long enough that a timer over an empty transcript reads as a freeze. */
+  starting?: StartingNotice | null
 }
 
 /** The user item that started the turn an assistant item belongs to. */
@@ -39,7 +43,7 @@ function ReplyTime({ startAt, doneAt }: { startAt: number; doneAt: number }) {
 }
 
 /** Renders a task's (or bot run's) timeline: user bubbles, assistant replies, collapsed tool activity and approval cards. */
-export function Conversation({ taskId, mode = 'task', timeline, running, emptyHint, contentClassName, pill = true }: ConversationProps) {
+export function Conversation({ taskId, mode = 'task', timeline, running, emptyHint, contentClassName, pill = true, starting = null }: ConversationProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const nearBottomRef = useRef(true)
   // For a run that started without a prompt in this timeline (e.g. a scheduled bot run).
@@ -59,6 +63,9 @@ export function Conversation({ taskId, mode = 'task', timeline, running, emptyHi
   let lastUserIdx = -1
   for (let k = 0; k < timeline.length; k++) if (timeline[k].kind === 'user') lastUserIdx = k
   const workingSince = running ? (lastUserIdx >= 0 ? timeline[lastUserIdx].at : runningSince) : null
+  // True only during start-up; once the reply starts arriving the working row goes back to its
+  // rotating verb, which no longer has anything to disclaim.
+  const silent = running && awaitingFirstOutput(timeline, running)
 
   const nodes: ReactNode[] = []
   let i = 0
@@ -153,7 +160,13 @@ export function Conversation({ taskId, mode = 'task', timeline, running, emptyHi
             </div>
           )}
           {nodes}
-          {running && <WorkingLine since={workingSince} />}
+          {running && (
+            <WorkingLine
+              since={workingSince}
+              label={silent ? starting?.label : undefined}
+              hint={silent ? starting?.hint : undefined}
+            />
+          )}
         </div>
       </div>
     </div>

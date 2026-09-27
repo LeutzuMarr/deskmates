@@ -199,7 +199,47 @@ interface Entry {
    *  call is one bounded turn, not a long-lived stream, so there's no separate 90s timer — once the
    *  process exits with no ready line in its output, none is coming). */
   primerText: string[]
+  /** Set by `stop()` on a turn that is still waiting its turn in the OpenCode queue: the process
+   *  doesn't exist yet, so `proc` is null and the kill would go nowhere. Checked before spawning. */
+  cancelled: boolean
 }
+
+/** Optional handles a caller can use to watch and cut short one CLI run. */
+export interface CliRunOptions {
+  /** Aborting kills the run and resolves it immediately with whatever text had already arrived,
+   *  rather than waiting for the process to close. This is what the Work tab's Stop button needs:
+   *  without it `TaskRunner.stop()` aborts a signal nothing is listening to, and the run keeps going
+   *  to completion. */
+  signal?: AbortSignal
+  /** Called with every timeline item the CLI's stream produces, as it arrives. Without this the
+   *  caller learns nothing until the process exits, and OpenCode's cold start alone was measured at
+   *  15–45s on this machine before the model has even been reached — a run that looks hung. */
+  onItem?: (item: TimelineItem) => void
+}
+
+export interface CliRunResult {
+  text: string
+  error?: string
+  /** The caller aborted this run, so it is a deliberate stop rather than a failure. A run ended by
+   *  a watchdog arrives as an `error` instead, since the user never asked for it. */
+  stopped?: boolean
+}
+
+/** Hard cap on one CLI run. Generous: a CLI agent reading files and running commands can legitimately
+ *  work for many minutes. It exists so a wedged run reports an error instead of leaving the task
+ *  `running` forever. */
+export const CLI_RUN_TIMEOUT_MS = 15 * 60_000
+
+/** A run that has gone this long without a single line of output is wedged, not working. OpenCode
+ *  emits a line as it starts and as each step finishes, so a genuine long stretch with nothing at all
+ *  means the process is stuck. This is what catches the deadlock below, minutes before the hard cap. */
+export const CLI_RUN_STALL_MS = 5 * 60_000
+
+/** How long a killed run may hold the OpenCode slot while waiting for its process to actually
+ *  disappear. Killing is asynchronous, so the slot has to outlive the kill by a moment; the ceiling
+ *  stops a process that never closes from blocking OpenCode forever. */
+export const PROCESS_EXIT_GRACE_MS = 15_000
+
 
 export interface ManagedTerminalRunnerOptions {
   spawner: ProcessSpawner
@@ -224,8 +264,42 @@ export interface ManagedTerminalRunnerOptions {
 export class ManagedTerminalRunner {
   private readonly entries = new Map<string, Entry>()
   private readonly onboarding = new OnboardingTracker()
+  /** Whether an OpenCode run holds the slot, and the runs waiting for it — see `acquireOpenCode`. */
+  private opencodeBusy = false
+  private readonly opencodeWaiters: Array<() => void> = []
 
   constructor(private readonly options: ManagedTerminalRunnerOptions) {}
+
+  /**
+   * Claims the single OpenCode slot and returns the function that gives it back, waiting first if
+   * another run holds it. Other tools have no such constraint and skip this entirely.
+   *
+   * OpenCode deadlocks when two `run` processes overlap — reproduced on this machine: launched
+   * together, the second one prints its full reply and then simply never exits, hanging the caller
+   * forever. Since OpenCode is both a selectable provider (the Work tab spawns one per turn) and a
+   * managed session (the Agents tab spawns one per turn), the two could collide on their own, and
+   * nothing in the app prevented it. One slot at a time makes the second call wait its turn rather
+   * than hang.
+   *
+   * Returns the release function directly when the slot is free, so an uncontended run spawns
+   * synchronously exactly as it did before; only a contended one waits.
+   */
+  private acquireOpenCode(): (() => void) | Promise<() => void> {
+    if (!this.opencodeBusy) {
+      this.opencodeBusy = true
+      return () => this.releaseOpenCode()
+    }
+    return new Promise<() => void>((resolve) => {
+      this.opencodeWaiters.push(() => resolve(() => this.releaseOpenCode()))
+    })
+  }
+
+  private releaseOpenCode(): void {
+    // The slot passes straight to the next waiter, so it stays busy; only an empty queue frees it.
+    const next = this.opencodeWaiters.shift()
+    if (next) next()
+    else this.opencodeBusy = false
+  }
 
   list(): TerminalSession[] {
     return [...this.entries.values()].map((entry) => entry.session)
@@ -250,7 +324,7 @@ export class ManagedTerminalRunner {
       createdAt: now,
       updatedAt: now
     }
-    this.entries.set(id, { session, proc: null, items: [], primerText: [] })
+    this.entries.set(id, { session, proc: null, items: [], primerText: [], cancelled: false })
     this.options.onSessionUpdated(session)
 
     this.onboarding.markPrimed(id, this.options.guideVersion, now)
@@ -278,50 +352,169 @@ export class ManagedTerminalRunner {
 
   stop(id: string): void {
     const entry = this.entries.get(id)
-    entry?.proc?.kill()
+    if (!entry) return
+    // A turn still queued behind another OpenCode run has no process to kill yet, so mark it and
+    // let the queue drop it on arrival — otherwise Stop would be a no-op for exactly the turns that
+    // look most stuck.
+    entry.cancelled = true
+    entry.proc?.kill()
   }
 
   /** Runs one bounded CLI turn and resolves with the assistant's reply text (or an error). This is
    *  the "run a prompt through the CLI like a model provider" path: no visible session, no primer,
-   *  no onboarding — just spawn, parse, resolve. A non-zero exit or a parsed error line rejects. */
-  execute(tool: TerminalTool, folder: string, prompt: string, model?: string): Promise<{ text: string; error?: string }> {
-    return new Promise((resolve) => {
-      const spilled = spillPrompt(tool, folder, prompt)
-      const args =
-        tool === 'opencode'
-          ? buildOpenCodeArgs({ folder, model: model?.trim() || OPENCODE_DEFAULT_MODEL, sessionId: null, prompt: spilled.prompt, files: spilled.files })
-          : buildAgyArgs({ model: model?.trim() || null, sessionId: null, prompt: spilled.prompt })
-      const proc = this.options.spawner.spawn(tool, args, { cwd: folder })
-      proc.onExit(() => spilled.cleanup())
-      const parts: string[] = []
-      let error: string | undefined
-      let sawError = false
-
-      proc.onStdoutLine((line) => {
-        const parsed = tool === 'opencode' ? parseOpenCodeLine(line) : parseAgyLine(line)
-        if (!parsed) return
-        if (parsed.item?.kind === 'assistant') parts.push(parsed.item.text)
-        if (parsed.item?.kind === 'tool' && parsed.item.state === 'error') {
-          sawError = true
-          if (parsed.item.error) error = parsed.item.error
+   *  no onboarding — just spawn, parse, resolve. A non-zero exit or a parsed error line rejects.
+   *
+   *  The run is watchable (`onItem`) and cuttable (`signal`), and is always bounded: a caller that
+   *  passes neither still gets a resolution, because both watchdogs below fire on their own. */
+  execute(
+    tool: TerminalTool,
+    folder: string,
+    prompt: string,
+    model?: string,
+    runOptions?: CliRunOptions
+  ): Promise<CliRunResult> {
+    const spawnAndRun = (releaseSlot?: () => void): Promise<CliRunResult> =>
+      new Promise((resolve) => {
+        // Checked before anything is created: a run cancelled on the way in shouldn't start a CLI
+        // process just to kill it a moment later.
+        if (runOptions?.signal?.aborted) {
+          releaseSlot?.()
+          resolve({ text: '', stopped: true })
+          return
         }
+
+        const spilled = spillPrompt(tool, folder, prompt)
+        const args =
+          tool === 'opencode'
+            ? buildOpenCodeArgs({ folder, model: model?.trim() || OPENCODE_DEFAULT_MODEL, sessionId: null, prompt: spilled.prompt, files: spilled.files })
+            : buildAgyArgs({ model: model?.trim() || null, sessionId: null, prompt: spilled.prompt })
+        const proc = this.options.spawner.spawn(tool, args, { cwd: folder })
+        const parts: string[] = []
+        let error: string | undefined
+        let sawError = false
+        let settled = false
+
+        // One timer for each watchdog, both cleared the moment the run settles. The cap is only
+        // armed once we know the run is actually going ahead.
+        let capTimer: ReturnType<typeof setTimeout> | undefined
+        let stallTimer: ReturnType<typeof setTimeout> | undefined
+
+        const clearTimers = (): void => {
+          if (capTimer) clearTimeout(capTimer)
+          if (stallTimer) clearTimeout(stallTimer)
+        }
+
+        /** Frees the OpenCode slot once the process is genuinely gone.
+         *
+         *  A stop resolves the caller straight away — waiting for a process to be reaped is what made
+         *  Stop feel dead — but the slot must not come back at the same moment, because killing is
+         *  asynchronous: `taskkill` returns before the tree has actually died. Releasing there let
+         *  the next run spawn straight on top of the dying one, and OpenCode deadlocks on exactly
+         *  that overlap (reproduced: the following run then printed nothing for minutes). So the
+         *  caller is let go immediately while the slot waits for the real exit.
+         *
+         *  The grace timer is the backstop for the case this whole mechanism exists for — a process
+         *  that never closes. Without it, one wedged run would hold the slot forever. */
+        const releaseWhenGone = (): void => {
+          let released = false
+          const release = (): void => {
+            if (released) return
+            released = true
+            clearTimeout(grace)
+            releaseSlot?.()
+          }
+          const grace = setTimeout(release, PROCESS_EXIT_GRACE_MS)
+          grace.unref?.()
+          proc.onExit(release)
+        }
+
+        /** The single exit point. Resolves immediately on a stop: waiting for the child to actually
+         *  close after killing it would make Stop feel broken all over again. */
+        function finish(code: number | null, failure?: string, stopped = false): void {
+          if (settled) return
+          settled = true
+          clearTimers()
+          spilled.cleanup()
+          proc.kill()
+          runOptions?.signal?.removeEventListener('abort', onAbort)
+          releaseWhenGone()
+          if (sawError && !error) error = 'The CLI reported an error running this prompt.'
+          if (failure) error = failure
+          else if (code !== null && code !== 0 && !error) {
+            error = 'The CLI run failed. See the console for details.'
+          }
+          resolve({ text: parts.join('\n').trim(), ...(error ? { error } : {}), ...(stopped ? { stopped: true } : {}) })
+        }
+
+        /** The stall watchdog resets on every line the CLI prints. */
+        const resetStall = (): void => {
+          if (stallTimer) clearTimeout(stallTimer)
+          stallTimer = setTimeout(() => {
+            finish(null, `The ${tool} run stopped responding, so it was stopped. Try again, or use a different model.`)
+          }, CLI_RUN_STALL_MS)
+          stallTimer.unref?.()
+        }
+
+        function onAbort(): void {
+          finish(null, undefined, true)
+        }
+
+        capTimer = setTimeout(() => {
+          finish(null, `The ${tool} run went over ${Math.round(CLI_RUN_TIMEOUT_MS / 60_000)} minutes without finishing, so it was stopped.`)
+        }, CLI_RUN_TIMEOUT_MS)
+        capTimer.unref?.()
+        runOptions?.signal?.addEventListener('abort', onAbort, { once: true })
+        resetStall()
+
+        proc.onStdoutLine((line) => {
+          resetStall()
+          const parsed = tool === 'opencode' ? parseOpenCodeLine(line) : parseAgyLine(line)
+          if (!parsed) return
+          if (parsed.item) {
+            if (parsed.item.kind === 'assistant') parts.push(parsed.item.text)
+            if (parsed.item.kind === 'tool' && parsed.item.state === 'error') {
+              sawError = true
+              if (parsed.item.error) error = parsed.item.error
+            }
+            runOptions?.onItem?.(parsed.item)
+          }
+        })
+
+        proc.onStderrLine((line) => {
+          resetStall()
+          if (tool !== 'agy') return
+          const item = parseAgyStderrLine(line)
+          if (item) {
+            sawError = true
+            if (item.error) error = item.error
+            runOptions?.onItem?.(item)
+          }
+        })
+
+        proc.onExit((code) => {
+          if (settled) return
+          settled = true
+          clearTimers()
+          spilled.cleanup()
+          releaseSlot?.()
+          if (sawError && !error) error = 'The CLI reported an error running this prompt.'
+          if (code !== null && code !== 0 && !error) {
+            error = 'The CLI run failed. See the console for details.'
+          }
+          resolve({ text: parts.join('\n').trim(), ...(error ? { error } : {}) })
+        })
       })
 
-      proc.onStderrLine((line) => {
-        if (tool !== 'agy') return
-        const item = parseAgyStderrLine(line)
-        if (item) {
-          sawError = true
-          if (item.error) error = item.error
-        }
-      })
-
-      proc.onExit((code) => {
-        if (sawError || (code !== null && code !== 0)) {
-          if (!error) error = 'The CLI run failed. See the console for details.'
-        }
-        resolve({ text: parts.join('\n').trim(), error })
-      })
+    // OpenCode only — see acquireOpenCode. Aborting while queued drops the run before it spawns.
+    if (tool !== 'opencode') return spawnAndRun()
+    const claim = this.acquireOpenCode()
+    if (typeof claim === 'function') return spawnAndRun(claim)
+    return claim.then((releaseSlot) => {
+      if (runOptions?.signal?.aborted) {
+        releaseSlot()
+        return { text: '', stopped: true } as CliRunResult
+      }
+      return spawnAndRun(releaseSlot)
     })
   }
 
@@ -345,60 +538,103 @@ export class ManagedTerminalRunner {
     const entry = this.requireEntry(id)
     if (flags.visible) this.pushItem(entry, { kind: 'user', id: randomUUID(), at: Date.now(), text: prompt })
     this.updateSession(entry, { state: 'busy' })
+    entry.cancelled = false
 
-    const { session } = entry
-    const file = session.tool
-    const spilled = spillPrompt(session.tool, session.folder, prompt)
-    const args =
-      session.tool === 'opencode'
-        ? buildOpenCodeArgs({ folder: session.folder, model: session.model ?? OPENCODE_DEFAULT_MODEL, sessionId: session.cliSessionId, prompt: spilled.prompt, files: spilled.files })
-        : buildAgyArgs({ model: session.model, sessionId: session.cliSessionId, prompt: spilled.prompt })
+    const turn = (release?: () => void): Promise<void> => this.runTurn(id, prompt, flags, onDone, release)
+    // OpenCode only — see acquireOpenCode: a session turn overlapping any other OpenCode run
+    // deadlocks the CLI, so this one waits its turn rather than hanging.
+    if (entry.session.tool !== 'opencode') {
+      void turn()
+      return
+    }
+    const claim = this.acquireOpenCode()
+    if (typeof claim === 'function') {
+      void turn(claim)
+      return
+    }
+    void claim.then((release) => turn(release))
+  }
 
-    let sawError = false
-    const proc = this.options.spawner.spawn(file, args, { cwd: session.folder })
-    proc.onExit(() => spilled.cleanup())
-    entry.proc = proc
-
-    proc.onStdoutLine((line) => {
-      const parsed = session.tool === 'opencode' ? parseOpenCodeLine(line) : parseAgyLine(line)
-      if (!parsed) return
-      if (parsed.sessionId && !session.cliSessionId) session.cliSessionId = parsed.sessionId
-      if (parsed.item) {
-        if (flags.isPrimer && parsed.item.kind === 'assistant') entry.primerText.push(parsed.item.text)
-        if (parsed.item.kind === 'tool' && parsed.item.state === 'error') sawError = true
-        // The primer's own request and reply (including the raw "DESKMATES READY ..." line) stay out
-        // of the visible transcript — only the onboarding badge reflects its outcome.
-        if (!flags.isPrimer) this.pushItem(entry, parsed.item)
+  /** One session turn, from spawn to exit. `release` hands the OpenCode slot back once the process
+   *  is done, so the next queued run can start. */
+  private runTurn(
+    id: string,
+    prompt: string,
+    flags: { visible: boolean; isPrimer: boolean },
+    onDone?: () => void,
+    release?: () => void
+  ): Promise<void> {
+    return new Promise((resolve) => {
+      // The session may have been cleared, or stopped while queued, while this turn waited its turn.
+      const entry = this.entries.get(id)
+      if (!entry) {
+        release?.()
+        resolve()
+        return
       }
-    })
-
-    proc.onStderrLine((line) => {
-      if (session.tool !== 'agy') return
-      const item = parseAgyStderrLine(line)
-      if (item) {
-        sawError = true
-        this.pushItem(entry, item)
+      if (entry.cancelled) {
+        release?.()
+        this.updateSession(entry, { state: 'idle' })
+        resolve()
+        return
       }
-    })
 
-    proc.onExit((code) => {
-      entry.proc = null
-      const failed = sawError || (code !== null && code !== 0)
-      if (flags.isPrimer) {
-        const observed = this.onboarding.observe(id, entry.primerText.join('\n'), this.options.phrase, Date.now())
-        const onboardingState: TerminalOnboardingState = observed === 'confirmed' ? 'confirmed' : 'failed'
-        this.updateSession(entry, {
-          state: failed ? 'error' : 'idle',
-          onboarding: onboardingState,
-          error: failed ? "The agent's check-in run didn't finish cleanly. See the transcript above." : null
-        })
-      } else {
-        this.updateSession(entry, {
-          state: failed ? 'error' : 'idle',
-          error: failed ? 'The last prompt failed. See the transcript above.' : null
-        })
-      }
-      onDone?.()
+      const { session } = entry
+      const file = session.tool
+      const spilled = spillPrompt(session.tool, session.folder, prompt)
+      const args =
+        session.tool === 'opencode'
+          ? buildOpenCodeArgs({ folder: session.folder, model: session.model ?? OPENCODE_DEFAULT_MODEL, sessionId: session.cliSessionId, prompt: spilled.prompt, files: spilled.files })
+          : buildAgyArgs({ model: session.model, sessionId: session.cliSessionId, prompt: spilled.prompt })
+
+      let sawError = false
+      const proc = this.options.spawner.spawn(file, args, { cwd: session.folder })
+      proc.onExit(() => spilled.cleanup())
+      entry.proc = proc
+
+      proc.onStdoutLine((line) => {
+        const parsed = session.tool === 'opencode' ? parseOpenCodeLine(line) : parseAgyLine(line)
+        if (!parsed) return
+        if (parsed.sessionId && !session.cliSessionId) session.cliSessionId = parsed.sessionId
+        if (parsed.item) {
+          if (flags.isPrimer && parsed.item.kind === 'assistant') entry.primerText.push(parsed.item.text)
+          if (parsed.item.kind === 'tool' && parsed.item.state === 'error') sawError = true
+          // The primer's own request and reply (including the raw "DESKMATES READY ..." line) stay out
+          // of the visible transcript — only the onboarding badge reflects its outcome.
+          if (!flags.isPrimer) this.pushItem(entry, parsed.item)
+        }
+      })
+
+      proc.onStderrLine((line) => {
+        if (session.tool !== 'agy') return
+        const item = parseAgyStderrLine(line)
+        if (item) {
+          sawError = true
+          this.pushItem(entry, item)
+        }
+      })
+
+      proc.onExit((code) => {
+        entry.proc = null
+        release?.()
+        const failed = sawError || (code !== null && code !== 0)
+        if (flags.isPrimer) {
+          const observed = this.onboarding.observe(id, entry.primerText.join('\n'), this.options.phrase, Date.now())
+          const onboardingState: TerminalOnboardingState = observed === 'confirmed' ? 'confirmed' : 'failed'
+          this.updateSession(entry, {
+            state: failed ? 'error' : 'idle',
+            onboarding: onboardingState,
+            error: failed ? "The agent's check-in run didn't finish cleanly. See the transcript above." : null
+          })
+        } else {
+          this.updateSession(entry, {
+            state: failed ? 'error' : 'idle',
+            error: failed ? 'The last prompt failed. See the transcript above.' : null
+          })
+        }
+        onDone?.()
+        resolve()
+      })
     })
   }
 }

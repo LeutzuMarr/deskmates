@@ -62,6 +62,18 @@ export class ChildProcessSpawner implements ProcessSpawner {
       onStderrLine: (listener) => stderrListeners.add(listener),
       onExit: (listener) => exitListeners.add(listener),
       kill: () => {
+        // Windows' TerminateProcess — what `child.kill()` uses there — only ever reaches the direct
+        // child. A CLI agent spawns children of its own (ripgrep, git, shell tools), so killing just
+        // the process Deskmates started leaves that work running after the app reports a stop, and
+        // the tree keeps the folder's files locked. `taskkill /T` takes the whole tree down at once.
+        if (process.platform === 'win32' && child.pid !== undefined) {
+          try {
+            spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
+            return
+          } catch {
+            // Fall through to the direct kill below.
+          }
+        }
         try {
           child.kill()
         } catch {

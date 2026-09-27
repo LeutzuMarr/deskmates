@@ -47,14 +47,25 @@ function WorkingVerb() {
   return <span className="shimmer-txt">{VERBS[index]}…</span>
 }
 
-/** The live "working" row at the bottom of a conversation, counting from the moment the prompt was sent. */
-export function WorkingLine({ since }: { since: number | null }) {
+/** The live "working" row at the bottom of a conversation, counting from the moment the prompt was sent.
+ *
+ *  `label` replaces the rotating verb for as long as something more specific is true of the run — the
+ *  CLI's cold start, say, which is long enough and empty enough that a whimsical "Pondering…" reads
+ *  as a freeze rather than as progress. */
+export function WorkingLine({ since, label, hint }: { since: number | null; label?: string; hint?: string }) {
   const elapsed = useElapsed(since)
   return (
-    <div className="msg-in flex items-center gap-2 text-[13px]" role="status" aria-live="polite">
+    <div className="msg-in flex items-start gap-2 text-[13px]" role="status" aria-live="polite">
       <WorkingSpark />
-      <WorkingVerb />
-      <span className="tabular-nums text-ink-faint">{formatElapsed(elapsed)}</span>
+      {/* Text in its own column so a second line hangs off the label rather than needing a magic
+          indent to line up with the spark. */}
+      <div className="min-w-0">
+        <div className="flex items-center gap-2">
+          {label ? <span className="shimmer-txt">{label}</span> : <WorkingVerb />}
+          <span className="tabular-nums text-ink-faint">{formatElapsed(elapsed)}</span>
+        </div>
+        {hint && <p className="mt-0.5 text-[12px] text-ink-faint">{hint}</p>}
+      </div>
     </div>
   )
 }
