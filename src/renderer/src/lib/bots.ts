@@ -47,6 +47,15 @@ export function handoffStateLabel(state: HandoffState): string {
 
 export const ENGINE_STEP_ORDER: readonly EngineStep[] = ['wsl', 'distro', 'docker', 'image']
 
+/** True when bot PCs run inside a WSL distro this app has to create, which is Windows-only: on
+ *  Linux and macOS they run on the host's own Docker, so the first two steps don't exist. Read from
+ *  the preload-exposed platform rather than `navigator`, which can't tell the user agents apart. */
+export const USES_WSL_ENGINE = window.deskmates.platform === 'win32'
+
+/** The setup steps that apply on this platform. On Windows that's all four; elsewhere it's Docker and
+ *  the image, since there's no distro to create or WSL to enable. */
+export const ENGINE_STEPS: readonly EngineStep[] = USES_WSL_ENGINE ? ENGINE_STEP_ORDER : ['docker', 'image']
+
 export const ENGINE_STEP_LABELS: Record<EngineStep, string> = {
   wsl: 'Windows Subsystem for Linux',
   distro: 'Deskmates engine',
@@ -57,6 +66,7 @@ export const ENGINE_STEP_LABELS: Record<EngineStep, string> = {
 export function engineStepNote(state: EngineStepState): string | null {
   switch (state) {
     case 'needs-admin':
+      // Only ever reached on Windows — off it, nothing needs elevation, so the prompt never appears.
       return 'This step needs your permission — Windows will show an administrator prompt.'
     case 'needs-restart':
       return 'Restart your PC to finish this step, then reopen Deskmates and continue setup.'

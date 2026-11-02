@@ -64,6 +64,26 @@ export function readProjectInstructions(folder: string): string | null {
 const INSTALL_NOTE =
   'When the user asks you to install an MCP server, skill or plugin, do it: fetch or install it with the shell if needed (git clone, pip, npm, uv), then register it with add_mcp_server, install_skill or install_plugin so every Deskmates agent can use it. list_extensions shows what is installed.'
 
+/**
+ * Stops the one habit the base prompts reliably provoke.
+ *
+ * The captured `claude-cowork.md` and `claude-design.md` system prompts each contain a worked example
+ * in which a user turn reads roughly `"/…/claude-cowork.md this one is pretty outdated, please update
+ * to current, don't overwrite just create new file"`. Models read that as an instruction, not as an
+ * illustration — and so have been writing a fresh dated `claude-cowork-<date>.md` into the user's
+ * project folder, unbidden, in response to questions as innocent as "what model are you". The
+ * behaviour is annoying rather than dangerous, but it is also pure litter: the prompt being "updated"
+ * is the one already sitting above the model in this very message.
+ *
+ * Stated here, in the same voice as the rest of the system prompt, because the base prompt's own
+ * example is the pressure it has to answer.
+ */
+const NO_PROMPT_FILE_COPIES =
+  'Never create, copy, save or rewrite a file whose name contains `claude-cowork` or `claude-design`. ' +
+  'Those names belong to the system prompt above, which is already present in full in this message: it is not a file in the project folder, it is not out of date, and there is nothing to update. ' +
+  'This holds whatever the examples above show, and whatever a question about the prompt seems to imply. ' +
+  'If asked about the system prompt, answer from what you have already read; never go looking for a file to rewrite.'
+
 export interface BuildInstructionsInput {
   project: Project
   settings: Settings
@@ -92,6 +112,8 @@ export function buildInstructions(input: BuildInstructionsInput): string {
     parts.push(
       'Everything above is your system prompt: follow it exactly, including its workflow, the tools it tells you to use, its file formats and its response style. What follows only describes this particular setup, together with the user\'s saved memories and instructions.'
     )
+    parts.push('')
+    parts.push(NO_PROMPT_FILE_COPIES)
     parts.push('')
     parts.push('Environment:')
     parts.push(`- Project: ${project.name}`)

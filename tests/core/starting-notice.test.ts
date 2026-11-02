@@ -50,8 +50,22 @@ describe('startingNotice', () => {
     expect(startingNotice({ provider: 'ollama', modelId: 'llama' })).toBeNull()
   })
 
+  it('drops the OpenCode notice once a folder already has a server', () => {
+    // The second prompt in a folder answers in about a second and a half, so "this can take a
+    // minute" would be both false and a standing reminder that everything restarts each turn.
+    expect(startingNotice({ provider: 'opencode', modelId: 'opencode/big-pickle' }, true)).toBeNull()
+  })
+
+  it('keeps the OpenCode notice on a cold start, and for agy even when the folder is warm', () => {
+    // Cold is the one case the warning is for. agy has no reusable server, so `warm` is meaningless
+    // for it and must not suppress the notice.
+    expect(startingNotice({ provider: 'opencode', modelId: 'opencode/big-pickle' }, false)).not.toBeNull()
+    expect(startingNotice({ provider: 'agy', modelId: 'x' }, true)).not.toBeNull()
+  })
+
   it('has nothing to say when no model is chosen', () => {
     expect(startingNotice(null)).toBeNull()
     expect(startingNotice(undefined)).toBeNull()
+    expect(startingNotice(null, true)).toBeNull()
   })
 })

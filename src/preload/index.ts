@@ -1,8 +1,28 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { DesktopApi, DesignExportFormat, VideoExportOptions } from '../shared/desktop-api'
+import type { DesktopApi, DesignExportFormat, HostPlatform, VideoExportOptions } from '../shared/desktop-api'
 import type { ProviderId } from '../shared/protocol'
 
+function hostPlatform(): HostPlatform {
+  const { platform } = process
+  return platform === 'win32' || platform === 'darwin' || platform === 'linux' ? platform : 'other'
+}
+
 const deskmates: DesktopApi = {
+  platform: hostPlatform(),
+
+  window: {
+    minimize: () => ipcRenderer.send('window:minimize'),
+    toggleMaximize: () => ipcRenderer.send('window:toggleMaximize'),
+    close: () => ipcRenderer.send('window:close'),
+    onMaximizeChange: (listener) => {
+      const handler = (_event: Electron.IpcRendererEvent, maximized: boolean): void => listener(maximized)
+      ipcRenderer.on('window:maximizeChange', handler)
+      return () => {
+        ipcRenderer.removeListener('window:maximizeChange', handler)
+      }
+    }
+  },
+
   getCoreConnection: () => ipcRenderer.invoke('core:connection'),
 
   onCoreRestarted: (listener) => {

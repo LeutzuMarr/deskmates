@@ -1,5 +1,10 @@
 import { spawn } from 'node:child_process'
-import { DISTRO, WSL_EXE } from './host-paths'
+import { DISTRO, USES_WSL } from './host-paths'
+
+/** The program every command in this module runs through — always `wsl.exe`, never a bare `wsl`, so
+ *  Windows never has to resolve it through a shell or PATHEXT search. Windows-only: off Windows
+ *  there is no distro to keep alive, so nothing here spawns anything. */
+const WSL_EXE = 'wsl.exe'
 
 /** A long-lived child process that runs until it's killed. */
 export interface BackgroundProcess {
@@ -54,6 +59,10 @@ export class ChildProcessBackgroundSpawner implements BackgroundSpawner {
  * dockerd and containers are running inside it — which kills every bot PC mid-run (the container
  * exits with 255 and the bot's tools fail with "fetch failed"). `.wslconfig`'s `vmIdleTimeout` doesn't
  * prevent it. Holding one idle `wsl.exe` open for as long as any PC is in use keeps the distro up.
+ *
+ * A no-op on Linux and macOS, where dockerd is a normal system service that outlives the app. The
+ * class is still constructed and `hold()`/`release()` still called from the same places, so callers
+ * don't need to branch on platform themselves.
  */
 export class EngineKeepAlive {
   private child: BackgroundProcess | null = null
@@ -69,7 +78,7 @@ export class EngineKeepAlive {
 
   /** Starts the keep-alive process if it isn't already running. Safe to call repeatedly. */
   hold(): void {
-    if (this.child) return
+    if (!USES_WSL || this.child) return
     const child = this.spawner.spawn(WSL_EXE, ['-d', this.distro, '-u', 'root', '--', 'sh', '-c', 'cat >/dev/null'])
     this.child = child
     child.onExit(() => {

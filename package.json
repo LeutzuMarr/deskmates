@@ -46,7 +46,8 @@
     "test": "vitest run",
     "test:e2e": "electron-vite build && playwright test",
     "icon": "node scripts/make-icon.mjs",
-    "dist": "electron-vite build && electron-builder --win"
+    "dist": "electron-vite build && electron-builder --win",
+    "dist:linux": "electron-vite build && electron-builder --linux AppImage deb"
   },
   "build": {
     "appId": "com.deskmates.app",
@@ -76,6 +77,27 @@
         "portable"
       ],
       "icon": "resources/icon.ico"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "resources/icon.png",
+      "category": "Development",
+      "synopsis": "AI assistant for your folders and your own computer"
+    },
+    "deb": {
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libsecret-1-0"
+      ]
     },
     "nsis": {
       "oneClick": false,

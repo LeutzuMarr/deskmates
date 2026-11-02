@@ -127,6 +127,10 @@ function installWsl(): Promise<InstallWslResult> {
 }
 
 async function doInstallWsl(): Promise<InstallWslResult> {
+  // Bot PCs run on the host's own Docker outside Windows, so there is nothing to install. Returning
+  // this rather than throwing keeps the wizard's call site simple and honest about what happened.
+  if (process.platform !== 'win32') return { outcome: 'unsupported' }
+
   const resultPath = join(app.getPath('temp'), `deskmates-wsl-install-${randomUUID()}.json`)
 
   try {
@@ -160,6 +164,32 @@ async function doInstallWsl(): Promise<InstallWslResult> {
 }
 
 export function registerIpc({ core, secrets, getWindow, dataDir }: RegisterIpcDeps): void {
+  // ---- Window controls ----
+  //
+  // On Windows the frame supplies these through `titleBarOverlay`; everywhere else the app draws its
+  // own title bar, so the renderer asks for them here. Fire-and-forget `send`, not `invoke`: a button
+  // press wants no answer, and `close` in particular ends the frame.
+  ipcMain.on('window:minimize', (event) => {
+    assertTrustedSender(event)
+    getWindow()?.minimize()
+  })
+
+  ipcMain.on('window:toggleMaximize', (event) => {
+    assertTrustedSender(event)
+    const window = getWindow()
+    if (!window) return
+    if (window.isMaximized()) window.unmaximize()
+    else window.maximize()
+  })
+
+  ipcMain.on('window:close', (event) => {
+    assertTrustedSender(event)
+    const window = getWindow()
+    // `index.ts` turns a close into a hide so the tray icon keeps the app alive; going through
+    // `close()` preserves that, whereas `destroy()` would kill it outright.
+    window?.close()
+  })
+
   ipcMain.handle('core:connection', (event) => {
     assertTrustedSender(event)
     return core.connectionInfo()

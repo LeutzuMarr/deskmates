@@ -44,7 +44,12 @@ const VALID_ACTIONS = 'Use one of: open, click, double_click, right_click, move,
 const NUDGE =
   'You did not use the computer tool. Act now by calling the `computer` tool (for example a click, a key press or typing). Reply without a tool call only when the whole task is finished.'
 
-const INSTRUCTIONS = `You are operating the user's own Windows computer through the \`computer\` tool. You see the screen as screenshots and act with the mouse and keyboard, exactly like a person sitting at the desk.
+/** The key that opens the desktop's app launcher: Windows and macOS have one, GNOME shows its
+ *  overview on Super alone. On Linux, where the key is the same as Windows', this is what makes the
+ *  `open` action work at all. */
+const LAUNCHER_KEY = process.platform === 'darwin' ? 'cmd' : 'win'
+
+const INSTRUCTIONS = `You are operating the user's own computer through the \`computer\` tool. You see the screen as screenshots and act with the mouse and keyboard, exactly like a person sitting at the desk.
 
 How to work:
 - Coordinates are pixels in the most recent screenshot (top-left is 0,0).
@@ -187,6 +192,9 @@ export class ComputerUseService {
     let acted = false
     let nudges = 0
     try {
+      // Before any screen work, so a session that can't be driven at all (no X11, no tool
+      // installed) ends with that reason instead of a failed screenshot.
+      await desktop.check?.()
       let shot = await desktop.screenshot(SHOT_WIDTH)
       const messages: ModelMessage[] = [
         {
@@ -491,7 +499,7 @@ export async function perform(
         await sleep(2500)
         return `open ${url}`
       }
-      await desktop.key('win')
+      await desktop.key(LAUNCHER_KEY)
       await sleep(700)
       await desktop.type(target)
       await sleep(900)

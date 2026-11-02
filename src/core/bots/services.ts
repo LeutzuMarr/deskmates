@@ -13,9 +13,9 @@ export interface EngineService {
 }
 
 /**
- * Creates, runs and talks to each bot's PC (the BotHost/LocalWslHost task). This is deliberately
- * a subset of `BotHost` (see `host.ts`) plus the two extra methods `LocalWslHost` exposes for mode
- * and live settings changes — chosen so `LocalWslHost` satisfies this interface as-is, with no
+ * Creates, runs and talks to each bot's PC (the BotHost/LocalDockerHost task). This is deliberately
+ * a subset of `BotHost` (see `host.ts`) plus the two extra methods `LocalDockerHost` exposes for mode
+ * and live settings changes — chosen so `LocalDockerHost` satisfies this interface as-is, with no
  * adapter. Optional on `HandlerServices`.
  */
 export interface PcService {

@@ -23,10 +23,33 @@ export interface VideoExportOptions {
  * `needs-restart` is the expected outcome of a successful run: enabling WSL needs a reboot before
  * it's usable, so this never claims WSL is ready right after the elevated command returns.
  */
-export type InstallWslResult = { outcome: 'needs-restart' } | { outcome: 'cancelled' } | { outcome: 'error'; message: string }
+export type InstallWslResult =
+  | { outcome: 'needs-restart' }
+  | { outcome: 'cancelled' }
+  | { outcome: 'unsupported' }
+  | { outcome: 'error'; message: string }
+
+/**
+ * The host OS, as seen by the renderer. It decides whether the app draws its own window controls
+ * (everywhere but Windows, whose `titleBarOverlay` supplies them) and how it words OS-specific help.
+ */
+export type HostPlatform = 'win32' | 'darwin' | 'linux' | 'other'
 
 /** API that the preload script exposes to the renderer as `window.deskmates`. */
 export interface DesktopApi {
+  /** The host OS. A plain value, known before any call — the renderer never reads `process` itself. */
+  platform: HostPlatform
+  /**
+   * Window controls for the app's own title bar. Only used where the OS doesn't draw its own:
+   * on Windows the frame supplies minimize/maximize/close through `titleBarOverlay`.
+   */
+  window: {
+    minimize(): void
+    toggleMaximize(): void
+    close(): void
+    /** Fires when the window is maximized or restored, so the title bar can swap its glyph. */
+    onMaximizeChange(listener: (maximized: boolean) => void): () => void
+  }
   getCoreConnection(): Promise<CoreConnection>
   onCoreRestarted(listener: () => void): () => void
   secrets: {
@@ -66,6 +89,8 @@ export interface DesktopApi {
      * Runs exactly `wsl.exe --install --no-distribution`, elevated through a Windows administrator
      * prompt — always that one fixed command, nothing the renderer supplies. Resolves once the
      * elevated process has finished; never rejects just because the user declined the prompt.
+     * Windows-only: `platform !== 'win32'` always resolves `{ outcome: 'unsupported' }`, because
+     * bot PCs run on the host's own Docker there and there is nothing to install.
      */
     installWsl(): Promise<InstallWslResult>
   }

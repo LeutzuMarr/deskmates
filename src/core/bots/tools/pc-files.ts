@@ -13,7 +13,7 @@ import type { AgentClient } from './agent-client'
 
 const MAX_READ_BYTES = 512 * 1024
 
-// Fixed container-side roots (see `bot-image/Dockerfile` and `local-wsl-host.ts`'s `runContainer`,
+// Fixed container-side roots (see `bot-image/Dockerfile` and `local-docker-host.ts`'s `runContainer`,
 // which always bind-mounts a bot's storage to `/home/bot/data` and the shared folder to `/shared`).
 const DATA_ROOT = '/home/bot/data'
 const SHARED_ROOT = '/shared'

@@ -19,7 +19,7 @@ import { useStore } from '../lib/store'
 import { core } from '../lib/rpc'
 import type { BotTemplateInfo } from '../../../shared/protocol'
 import { concentricVars } from '../lib/design'
-import { ENGINE_STEP_LABELS } from '../lib/bots'
+import { ENGINE_STEP_LABELS, USES_WSL_ENGINE } from '../lib/bots'
 import type { EngineStatus, EngineStep, EngineStepState } from '../../../shared/protocol'
 
 type WizardScreenId = EngineStep | 'first-bot'
@@ -28,22 +28,42 @@ type StepInfo = EngineStatus['steps'][EngineStep]
 /** The first step whose engine status isn't `ok` yet, in order — except `image`, which never blocks
  *  progress (it downloads on its own the first time a bot's PC starts; see `ImageStep`). Everything
  *  here is derived straight from live `engineStatus`, never from separate wizard-only state, so
- *  closing and reopening the app lands on the same screen the real system state implies. */
+ *  closing and reopening the app lands on the same screen the real system state implies.
+ *
+ *  Only the WSL-specific steps are skipped off Windows, and only because `EngineManager` reports
+ *  them `ok` there — the same live status decides it, just read through this platform's step list. */
 function resolveScreen(status: EngineStatus, imageAcknowledged: boolean): WizardScreenId {
-  if (status.steps.wsl.state !== 'ok') return 'wsl'
-  if (status.steps.distro.state !== 'ok') return 'distro'
+  if (USES_WSL_ENGINE) {
+    if (status.steps.wsl.state !== 'ok') return 'wsl'
+    if (status.steps.distro.state !== 'ok') return 'distro'
+  }
   if (status.steps.docker.state !== 'ok') return 'docker'
   if (status.steps.image.state !== 'ok' && !imageAcknowledged) return 'image'
   return 'first-bot'
 }
 
+/**
+ * The progress strip. The WSL and distro steps only appear on Windows — on Linux and macOS bot PCs
+ * run on the host's own Docker, so a "Step 1 of 5: WSL" the user can't act on would be a lie.
+ * `stepNumber` is what each screen prints in its own badge.
+ */
 const STEP_META: readonly { id: WizardScreenId; short: string; icon: LucideIcon }[] = [
-  { id: 'wsl', short: 'WSL', icon: Terminal },
-  { id: 'distro', short: 'Engine', icon: Box },
+  ...(USES_WSL_ENGINE
+    ? ([
+        { id: 'wsl', short: 'WSL', icon: Terminal },
+        { id: 'distro', short: 'Engine', icon: Box }
+      ] as const)
+    : []),
   { id: 'docker', short: 'Docker', icon: Container },
   { id: 'image', short: 'Image', icon: Download },
   { id: 'first-bot', short: 'First bot', icon: Bot }
 ]
+
+/** "Step 2 of 5" for the screen at `id`, counting only the steps this platform actually has. */
+function stepLabel(id: WizardScreenId): string {
+  const index = STEP_META.findIndex((s) => s.id === id)
+  return `Step ${index + 1} of ${STEP_META.length}`
+}
 
 const STATE_ICON: Record<EngineStepState, LucideIcon> = {
   ok: Check,
@@ -156,7 +176,7 @@ function WslStep({ status, busy, onContinue }: { status: EngineStatus; busy: boo
   const heading = (children: ReactNode): ReactNode => (
     <StepShell
       icon={Terminal}
-      stepLabel="Step 1 of 5"
+      stepLabel={stepLabel('wsl')}
       heading={ENGINE_STEP_LABELS.wsl}
       subheading="Bot PCs run inside a small Linux environment called WSL — a one-time Windows setting, not something Deskmates installs on its own."
     >
@@ -256,9 +276,13 @@ function DistroStep({ status, busy, onContinue }: { status: EngineStatus; busy: 
   return (
     <StepShell
       icon={Box}
-      stepLabel="Step 2 of 5"
+      stepLabel={stepLabel('distro')}
       heading={ENGINE_STEP_LABELS.distro}
-      subheading="A small Linux system that runs your bots' PCs. It downloads once and lives on this computer from then on."
+      subheading={
+        USES_WSL_ENGINE
+          ? "A small Linux system that runs your bots' PCs. It downloads once and lives on this computer from then on."
+          : "Your bots' PCs run on the Docker you already have installed. Deskmates only adds a small engine container, which downloads once."
+      }
     >
       <StatusRow info={info} />
       {info.state === 'error' && (
@@ -284,18 +308,35 @@ function DistroStep({ status, busy, onContinue }: { status: EngineStatus; busy: 
 
 function DockerStep({ status, busy, onContinue }: { status: EngineStatus; busy: boolean; onContinue: () => void }) {
   const info = status.steps.docker
-  const label = busy || info.state === 'working' ? 'Working…' : info.state === 'error' ? 'Try again' : 'Continue setup'
+  // Off Windows this step can't be advanced by the button — Docker is a separate program the user
+  // installs themselves — so it must read as a re-check, not as "keep going".
+  const label =
+    busy || info.state === 'working'
+      ? 'Checking…'
+      : info.state === 'error' || (!USES_WSL_ENGINE && info.state === 'missing')
+        ? 'Check again'
+        : 'Continue setup'
   return (
     <StepShell
       icon={Container}
-      stepLabel="Step 3 of 5"
+      stepLabel={stepLabel('docker')}
       heading={ENGINE_STEP_LABELS.docker}
-      subheading="Each bot's PC runs as a lightweight container inside the Deskmates engine."
+      subheading={
+        USES_WSL_ENGINE
+          ? "Each bot's PC runs as a lightweight container inside the Deskmates engine."
+          : "Each bot's PC runs as a lightweight container, using the Docker already installed on this computer."
+      }
     >
       <StatusRow info={info} />
       {info.state === 'error' && (
         <p className="mt-3 text-[12px] italic text-ink-faint">
           This usually means no internet connection inside the Linux engine. Check your connection, then try again.
+        </p>
+      )}
+      {info.state === 'missing' && !USES_WSL_ENGINE && (
+        <p className="mt-3 text-[12px] italic text-ink-faint">
+          Docker is a separate program, so installing it needs your system password — Deskmates never asks for one. The
+          message above says what to install; once it's running, choose Try again.
         </p>
       )}
       {info.state !== 'ok' && (
@@ -328,7 +369,7 @@ function ImageStep({
   return (
     <StepShell
       icon={Download}
-      stepLabel="Step 4 of 5"
+      stepLabel={stepLabel('image')}
       heading={ENGINE_STEP_LABELS.image}
       subheading="What a bot's PC actually runs: a small Linux desktop with a browser, built for Deskmates."
     >
@@ -407,7 +448,7 @@ function FirstBotStep() {
   return (
     <StepShell
       icon={Bot}
-      stepLabel="Step 5 of 5"
+      stepLabel={stepLabel('first-bot')}
       heading="Create your first bot"
       subheading="Bot PCs are ready. Start from the template below, or make one from scratch any time with New bot."
     >

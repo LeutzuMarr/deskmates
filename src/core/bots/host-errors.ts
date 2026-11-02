@@ -9,7 +9,7 @@ interface Match {
 /**
  * Recognizes the docker/wsl failures this module needs to turn into plain sentences. Returns
  * `null` for anything it doesn't recognize, so callers that don't want to treat every non-zero
- * exit as a host failure (see `exec` in `local-wsl-host.ts`) can tell "docker itself failed"
+ * exit as a host failure (see `exec` in `local-docker-host.ts`) can tell "docker itself failed"
  * apart from "the command inside the container exited non-zero".
  */
 function matchDockerError(text: string): Match | null {

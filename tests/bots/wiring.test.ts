@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DEFAULT_SETTINGS, type PcCloudConnection, type Settings } from '../../src/shared/protocol'
 import { CloudHost } from '../../src/core/bots/cloud-host'
-import { LocalWslHost } from '../../src/core/bots/local-wsl-host'
+import { LocalDockerHost } from '../../src/core/bots/local-docker-host'
 import { BotHostError } from '../../src/core/bots/host'
 import { resolveBotHost, UnavailableHost } from '../../src/core/bots/wiring'
 
@@ -36,9 +36,9 @@ describe('resolveBotHost', () => {
     dirs.length = 0
   })
 
-  it('returns a LocalWslHost when pcHost is local', () => {
+  it('returns a LocalDockerHost when pcHost is local', () => {
     const host = resolveBotHost({ settings: settings({ pcHost: 'local' }), dataDir: tmpDir(), runner })
-    expect(host).toBeInstanceOf(LocalWslHost)
+    expect(host).toBeInstanceOf(LocalDockerHost)
   })
 
   it('returns null for cloud mode without a connection object', () => {

@@ -56,7 +56,7 @@ export class BotHostError extends Error {
 }
 
 /**
- * Creates, runs and talks to each bot's PC. `LocalWslHost` implements this over Docker inside
+ * Creates, runs and talks to each bot's PC. `LocalDockerHost` implements this over Docker inside
  * the app's own WSL distro; a future `CloudHost` can implement the same interface against a
  * Docker server on the network, so callers never need to know which one they're using.
  *

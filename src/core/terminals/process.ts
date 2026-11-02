@@ -18,6 +18,8 @@ export interface SpawnedProcess {
 
 export interface SpawnOptions {
   cwd?: string
+  /** Extra environment variables layered over the parent's, for the child only. */
+  env?: Record<string, string>
 }
 
 export interface ProcessSpawner {
@@ -30,7 +32,8 @@ export class ChildProcessSpawner implements ProcessSpawner {
     const child = spawn(file, args, {
       cwd: options.cwd,
       windowsHide: true,
-      stdio: ['ignore', 'pipe', 'pipe']
+      stdio: ['ignore', 'pipe', 'pipe'],
+      ...(options.env ? { env: { ...process.env, ...options.env } } : {})
     })
 
     const stdoutListeners = new Set<(line: string) => void>()

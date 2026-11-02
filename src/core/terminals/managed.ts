@@ -3,6 +3,8 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { buildPrimer, isContextReset, OnboardingTracker } from '../agents/onboarding'
+import { OpenCodeServerPool } from './opencode-server'
+import type { OpenCodeEvent, OpenCodeUsage } from './opencode-server'
 import type { ProcessSpawner, SpawnedProcess } from './process'
 import type { TerminalOnboardingState, TerminalSession, TerminalTool, TimelineItem, ToolItem, ToolItemState } from '../../shared/protocol'
 
@@ -16,6 +18,22 @@ function assistantItem(text: string, at = Date.now()): TimelineItem {
 
 function toolItem(toolName: string, input: unknown, state: ToolItemState, extra?: Partial<ToolItem>): ToolItem {
   return { kind: 'tool', id: randomUUID(), at: Date.now(), toolName, input, state, ...extra }
+}
+
+/** One event from the shared OpenCode server, as a timeline item. The server's own part id becomes the
+ *  item id, so a tool call that goes running → done → error updates a single line instead of stacking
+ *  three — which is what the id-keyed renderer expects. `step-start` has no line of its own; the tool
+ *  that follows it is the visible marker. */
+function toTimelineItem(event: OpenCodeEvent): TimelineItem | null {
+  if (event.kind === 'step-start') return null
+  if (event.kind === 'text') return event.text ? assistantItem(event.text) : null
+  if (event.state === 'error') {
+    return toolItem(event.tool, event.input, 'error', {
+      id: event.id,
+      error: event.error ?? 'The tool call failed.'
+    })
+  }
+  return toolItem(event.tool, event.input, event.state, { id: event.id })
 }
 
 /** One line of a managed-mode CLI's JSON stream, turned into (at most) one timeline item, plus the
@@ -215,6 +233,13 @@ export interface CliRunOptions {
    *  caller learns nothing until the process exits, and OpenCode's cold start alone was measured at
    *  15–45s on this machine before the model has even been reached — a run that looks hung. */
   onItem?: (item: TimelineItem) => void
+  /** The caller's standing instructions, kept out of the prompt itself.
+   *
+   *  Only OpenCode honours this: it is delivered as the message's `system` field on the
+   *  conversation's first turn and then lives in the session, so a 175KB Work-tab system prompt is
+   *  sent once per session rather than before every question. For agy — a one-shot `-p` call with no
+   *  session to persist into — it is prepended to the prompt instead, as it always was. */
+  system?: string
 }
 
 export interface CliRunResult {
@@ -267,8 +292,35 @@ export class ManagedTerminalRunner {
   /** Whether an OpenCode run holds the slot, and the runs waiting for it — see `acquireOpenCode`. */
   private opencodeBusy = false
   private readonly opencodeWaiters: Array<() => void> = []
+  /** The long-lived per-folder `opencode serve` behind the Work tab — see opencode-server.ts. */
+  private readonly openCode: OpenCodeServerPool
 
-  constructor(private readonly options: ManagedTerminalRunnerOptions) {}
+  constructor(private readonly options: ManagedTerminalRunnerOptions) {
+    this.openCode = new OpenCodeServerPool({ spawner: options.spawner })
+  }
+
+  /** Shuts down every `opencode serve` this runner started. Called when the app quits. */
+  dispose(): void {
+    this.openCode.disposeAll()
+  }
+
+  /** Whether this folder already has a server up holding a conversation, so the next prompt will be a
+   *  warm follow-up rather than a cold boot. Drives the Work tab's start-up notice. */
+  warm(folder: string): boolean {
+    return this.openCode.isWarm(folder)
+  }
+
+  /** How much of the model's context window this folder's conversation is using. Null when there is no
+   *  conversation to measure. */
+  usage(folder: string): Promise<OpenCodeUsage | null> {
+    return this.openCode.usage(folder)
+  }
+
+  /** Folds the conversation into a summary of itself, in place, on the same session — so a 20k-context
+   *  agent keeps its thread instead of overflowing. Returns the usage afterwards. */
+  compact(folder: string): Promise<OpenCodeUsage | null> {
+    return this.openCode.compact(folder)
+  }
 
   /**
    * Claims the single OpenCode slot and returns the function that gives it back, waiting first if
@@ -383,7 +435,14 @@ export class ManagedTerminalRunner {
           return
         }
 
-        const spilled = spillPrompt(tool, folder, prompt)
+        // Built here rather than in `execute` so that the OpenCode path, which is routed to the shared
+        // server below and never reaches this, does not concatenate a throwaway copy of the ~175KB
+        // instructions on every turn.
+        // agy is a genuine one-shot `-p` call — no session to continue, no server to attach to — so when
+        // a caller supplies `system` it is prepended here, as it always was.
+        const effectivePrompt = runOptions?.system ? `${runOptions.system.trimEnd()}\n\n${prompt}` : prompt
+
+        const spilled = spillPrompt(tool, folder, effectivePrompt)
         const args =
           tool === 'opencode'
             ? buildOpenCodeArgs({ folder, model: model?.trim() || OPENCODE_DEFAULT_MODEL, sessionId: null, prompt: spilled.prompt, files: spilled.files })
@@ -505,17 +564,52 @@ export class ManagedTerminalRunner {
         })
       })
 
-    // OpenCode only — see acquireOpenCode. Aborting while queued drops the run before it spawns.
-    if (tool !== 'opencode') return spawnAndRun()
-    const claim = this.acquireOpenCode()
-    if (typeof claim === 'function') return spawnAndRun(claim)
-    return claim.then((releaseSlot) => {
-      if (runOptions?.signal?.aborted) {
-        releaseSlot()
-        return { text: '', stopped: true } as CliRunResult
+    // The Work tab's OpenCode turns go through a server that outlives the turn, so the conversation,
+    // the warm process and the 175KB system prompt all carry from one prompt to the next. See
+    // opencode-server.ts for the measurements behind that.
+    if (tool === 'opencode') return this.runOpenCodeTurn(folder, prompt, model, runOptions)
+
+    // agy keeps the one-shot spawn path.
+    return spawnAndRun()
+  }
+
+  /** One OpenCode turn on this folder's shared server.
+   *
+   *  Deliberately still takes the single OpenCode slot: the Agents tab's managed sessions keep using
+   *  `opencode run`, and a `run` process overlapping a server-backed turn is the same overlap that
+   *  deadlocks the CLI. The pool's own per-folder queue sits inside this gate and so never contends. */
+  private async runOpenCodeTurn(
+    folder: string,
+    prompt: string,
+    model: string | undefined,
+    runOptions: CliRunOptions | undefined
+  ): Promise<CliRunResult> {
+    if (runOptions?.signal?.aborted) return { text: '', stopped: true }
+    const claim = await this.acquireOpenCode()
+    try {
+      if (runOptions?.signal?.aborted) return { text: '', stopped: true }
+      const result = await this.openCode.run(folder, {
+        model: model?.trim() || OPENCODE_DEFAULT_MODEL,
+        prompt,
+        ...(runOptions?.system ? { system: runOptions.system } : {}),
+        ...(runOptions?.signal ? { signal: runOptions.signal } : {}),
+        onEvent: (event) => {
+          const item = toTimelineItem(event)
+          if (item) runOptions?.onItem?.(item)
+        },
+        stallMs: CLI_RUN_STALL_MS,
+        timeoutMs: CLI_RUN_TIMEOUT_MS
+      })
+      return {
+        text: result.text,
+        ...(result.error ? { error: result.error } : {}),
+        ...(result.stopped ? { stopped: true } : {})
       }
-      return spawnAndRun(releaseSlot)
-    })
+    } catch (error) {
+      return { text: '', error: error instanceof Error ? error.message : String(error) }
+    } finally {
+      claim()
+    }
   }
 
   private requireEntry(id: string): Entry {

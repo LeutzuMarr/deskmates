@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseFontRegistry } from '../../src/main/system-fonts'
+import { parseFontRegistry, parseFontconfigList } from '../../src/main/system-fonts'
 
 describe('parseFontRegistry', () => {
   it('extracts the family name and drops type markers and style words', () => {
@@ -42,5 +42,31 @@ describe('parseFontRegistry', () => {
       .map((f) => `${f} (TrueType)    REG_SZ    f.ttf`)
       .join('\n')
     expect(parseFontRegistry(output)).toEqual(['Apple Chancery', 'berlin.ttf', 'Verdana', 'zapf.ttf'])
+  })
+})
+
+// Real `fc-list --format '%{family}\n'` output from Ubuntu 24.04: every font file prints its own
+// family list, so one family appears many times and a single line may name several.
+
+describe('parseFontconfigList', () => {
+  it('dedupes the repeats fontconfig gives for every font file', () => {
+    const output = [
+      'DejaVu Sans',
+      'DejaVu Sans',
+      'DejaVu Sans,Bitstream Vera Sans',
+      'DejaVu Sans Mono',
+      'Liberation Sans'
+    ].join('\n')
+    expect(parseFontconfigList(output)).toEqual(['Bitstream Vera Sans', 'DejaVu Sans', 'DejaVu Sans Mono', 'Liberation Sans'])
+  })
+
+  it('keeps style words that belong to the family name, and tolerates a style suffix', () => {
+    const output = ['Noto Sans Display', 'DejaVu Sans Mono|Light'].join('\n')
+    expect(parseFontconfigList(output)).toEqual(['DejaVu Sans Mono', 'Noto Sans Display'])
+  })
+
+  it('handles empty output', () => {
+    expect(parseFontconfigList('')).toEqual([])
+    expect(parseFontconfigList('  \n \n')).toEqual([])
   })
 })

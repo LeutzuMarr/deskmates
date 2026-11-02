@@ -72,7 +72,7 @@ interface SharedWaiter {
 export interface CloudHostOptions {
   /** The Docker Engine HTTP client every container/network/exec call goes through. */
   api: DockerApi
-  /** The app's data folder, e.g. `D:\DeskmatesData`. Owns `<dataDir>/pcs/` exactly like `LocalWslHost`. */
+  /** The app's data folder, e.g. `D:\DeskmatesData`. Owns `<dataDir>/pcs/` exactly like `LocalDockerHost`. */
   dataDir: string
   /** Image to pull/run when a caller doesn't name one. Default 'ghcr.io/deskmates/bot-pc:latest'. */
   image?: string
@@ -89,7 +89,7 @@ export interface CloudHostOptions {
   endpointsHost: string
 }
 
-/** `BotHost` over a remote Docker Engine's HTTP API — the counterpart to `LocalWslHost`'s WSL CLI, so `main.ts` can swap hosts behind one type. */
+/** `BotHost` over a remote Docker Engine's HTTP API — the counterpart to `LocalDockerHost`'s WSL CLI, so `main.ts` can swap hosts behind one type. */
 export class CloudHost implements BotHost {
   private readonly api: DockerApi
   private readonly dataDir: string

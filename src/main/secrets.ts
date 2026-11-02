@@ -1,25 +1,22 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { PROVIDERS, type ProviderId } from '../shared/protocol'
-import type { Dpapi } from './dpapi'
+import type { SecretCipher } from './secret-cipher'
 
 type StoredSecrets = Partial<Record<ProviderId, string>>
 type Keys = Partial<Record<ProviderId, string>>
 
-/** Marks an entry encrypted straight with Windows DPAPI; entries without it are the older safeStorage format. */
-const DPAPI_PREFIX = 'dpapi:'
-
 export interface SecretStoreDeps {
-  dpapi: Dpapi
+  cipher: SecretCipher
   /**
    * Reads an entry in the older format (Electron safeStorage), or throws. Those entries depend on a
    * key Chromium keeps in its `Local State` file, which isn't always written to disk before the app
-   * exits, so they could become unreadable after a restart; each readable one is moved to DPAPI.
+   * exits, so they could become unreadable after a restart; each readable one is moved to the cipher.
    */
   legacyDecrypt: (base64: string) => string
 }
 
-/** Encrypted-at-rest API key storage: a JSON file of Windows DPAPI blobs, bound to this Windows user. */
+/** Encrypted-at-rest API key storage: a JSON file of keyring blobs, bound to this OS user. */
 export class SecretStore {
   private cache: Keys | null = null
   private loading: Promise<Keys> | null = null
@@ -28,6 +25,11 @@ export class SecretStore {
     private readonly file: string,
     private readonly deps: SecretStoreDeps
   ) {}
+
+  /** The marker this platform's cipher writes, e.g. `dpapi:` on Windows, `oskeyring:` on Linux. */
+  private get prefix(): string {
+    return this.deps.cipher.prefix
+  }
 
   private read(): StoredSecrets {
     if (!existsSync(this.file)) return {}
@@ -75,8 +77,8 @@ export class SecretStore {
     for (const provider of PROVIDERS) {
       const entry = stored[provider]
       if (!entry) continue
-      if (entry.startsWith(DPAPI_PREFIX)) {
-        blobs[provider] = entry.slice(DPAPI_PREFIX.length)
+      if (entry.startsWith(this.prefix)) {
+        blobs[provider] = entry.slice(this.prefix.length)
         continue
       }
       try {
@@ -86,16 +88,16 @@ export class SecretStore {
       }
     }
 
-    const opened = await this.deps.dpapi.unprotect(blobs)
+    const opened = await this.deps.cipher.unprotect(blobs)
     for (const [provider, plain] of Object.entries(opened)) {
       if (plain) keys[provider as ProviderId] = plain
       else console.warn(`[secrets] the saved ${provider} key can't be decrypted; it needs to be entered again.`)
     }
 
     if (Object.keys(migrate).length > 0) {
-      const sealed = await this.deps.dpapi.protect(migrate as Record<string, string>)
+      const sealed = await this.deps.cipher.protect(migrate as Record<string, string>)
       const latest = this.read()
-      for (const [provider, blob] of Object.entries(sealed)) latest[provider as ProviderId] = DPAPI_PREFIX + blob
+      for (const [provider, blob] of Object.entries(sealed)) latest[provider as ProviderId] = this.prefix + blob
       this.write(latest)
       Object.assign(keys, migrate)
     }
@@ -114,7 +116,7 @@ export class SecretStore {
     return PROVIDERS.filter((provider) => {
       const entry = stored[provider]
       if (!entry) return false
-      return entry.startsWith(DPAPI_PREFIX) || this.legacyReadable(entry)
+      return entry.startsWith(this.prefix) || this.legacyReadable(entry)
     })
   }
 
@@ -126,8 +128,8 @@ export class SecretStore {
       delete stored[provider]
       delete current[provider]
     } else {
-      const sealed = await this.deps.dpapi.protect({ [provider]: key })
-      stored[provider] = DPAPI_PREFIX + sealed[provider]
+      const sealed = await this.deps.cipher.protect({ [provider]: key })
+      stored[provider] = this.prefix + sealed[provider]
       current[provider] = key
     }
     this.write(stored)

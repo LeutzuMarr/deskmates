@@ -42,11 +42,36 @@ export function parseFontRegistry(output: string): string[] {
   return [...families.values()].sort((a, b) => a.localeCompare(b))
 }
 
+/**
+ * Parses `fc-list --format` output into family names, sorted and deduplicated. Each line is
+ * `family|style` per `--format '%{family}|%{style}\n'`, and a font may list several families
+ * separated by commas (`DejaVu Sans,Bitstream Vera Sans`), so all of them are kept.
+ */
+export function parseFontconfigList(output: string): string[] {
+  const families = new Map<string, string>()
+  for (const line of output.split(/\r?\n/)) {
+    const [rawFamily] = line.split('|')
+    if (!rawFamily) continue
+    for (const part of rawFamily.split(',')) {
+      const family = stripStyleWords(part)
+      const key = family.toLowerCase()
+      if (family && !families.has(key)) families.set(key, family)
+    }
+  }
+  return [...families.values()].sort((a, b) => a.localeCompare(b))
+}
+
 let cache: string[] | null = null
 
 /** Font family names installed on this PC, sorted and without duplicates. */
 export async function listSystemFonts(): Promise<string[]> {
   if (cache) return cache
+  if (process.platform !== 'win32') {
+    // fontconfig is the only place Linux/macOS enumerate from; a machine without it has no list.
+    const listed = await run('fc-list', ['--format', '%{family}\n']).catch(() => ({ stdout: '' }))
+    cache = parseFontconfigList(listed.stdout)
+    return cache
+  }
   const [hklm, hkcu] = await Promise.all([
     run('reg', ['query', FONT_KEY_HKLM]).catch(() => ({ stdout: '' })),
     run('reg', ['query', FONT_KEY_HKCU]).catch(() => ({ stdout: '' }))
