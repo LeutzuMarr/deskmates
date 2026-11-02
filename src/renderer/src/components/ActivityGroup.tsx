@@ -68,9 +68,12 @@ function StatusMark({ state }: { state: ToolItemState }) {
 }
 
 export function ActivityGroup({ items }: { items: ToolItem[] }) {
-  const [expanded, setExpanded] = useState(false)
+  // Open while the steps are live, so you can watch the work happen; folded once they finish,
+  // unless you opened or closed it yourself.
+  const [chosen, setChosen] = useState<boolean | null>(null)
   const [opened, setOpened] = useState<string | null>(null)
   const summary = summarizeActivity(items)
+  const expanded = chosen ?? summary.running
 
   return (
     <div className="msg-in">
@@ -78,7 +81,7 @@ export function ActivityGroup({ items }: { items: ToolItem[] }) {
         type="button"
         className="activity-line"
         aria-expanded={expanded}
-        onClick={() => setExpanded((value) => !value)}
+        onClick={() => setChosen(!expanded)}
       >
         {summary.running ? (
           <Loader2 size={13} className="spin shrink-0" style={{ color: 'var(--ink-muted)' }} aria-hidden="true" />
@@ -95,13 +98,13 @@ export function ActivityGroup({ items }: { items: ToolItem[] }) {
       </button>
 
       {expanded && (
-        <div className="mb-2 flex flex-col">
+        <div className="steps mb-2 flex flex-col">
           {items.map((item) => {
             const Icon = iconFor(item.toolName)
             const isOpen = opened === item.id
             const imageUrl = extractImageUrl(item.output)
             return (
-              <div key={item.id}>
+              <div key={item.id} className="step msg-in">
                 <button
                   type="button"
                   className="flex w-full items-start gap-2 rounded-lg px-1 py-1.5 text-left font-mono text-[13px] text-ink hover:bg-oat"
@@ -109,8 +112,14 @@ export function ActivityGroup({ items }: { items: ToolItem[] }) {
                   aria-label={toolLabel(item.toolName, item.input)}
                   onClick={() => setOpened(isOpen ? null : item.id)}
                 >
-                  <Icon size={13} className="mt-0.5 shrink-0 text-ink-faint" aria-hidden="true" />
-                  <span className="min-w-0 flex-1 break-words">{toolLabel(item.toolName, item.input)}</span>
+                  {item.state === 'running' ? (
+                    <Loader2 size={13} className="spin mt-0.5 shrink-0 text-ink-muted" aria-hidden="true" />
+                  ) : (
+                    <Icon size={13} className="mt-0.5 shrink-0 text-ink-faint" aria-hidden="true" />
+                  )}
+                  <span className={`min-w-0 flex-1 break-words ${item.state === 'running' ? 'shimmer-txt' : ''}`}>
+                    {toolLabel(item.toolName, item.input)}
+                  </span>
                   <span className="shrink-0">
                     <StatusMark state={item.state} />
                   </span>

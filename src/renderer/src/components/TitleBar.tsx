@@ -1,12 +1,14 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
-import { Copy, Minus, Square, X } from 'lucide-react'
+import { Copy, Minus, PanelLeft, Search, Square, X } from 'lucide-react'
 import { BrandMark } from './Mascot'
 import { TabSwitch } from './TabSwitch'
+import { getPrefs, setPrefs, usePrefs } from '../lib/prefs'
 
 const api = window.deskmates
 
-/** Windows draws these itself via `titleBarOverlay`; everywhere else the app supplies them. */
-const NEEDS_WINDOW_CONTROLS = api.platform !== 'win32'
+/** Windows draws these itself via `titleBarOverlay`; everywhere else the app supplies them. A phone
+ *  browser viewing the app has no window to control, and its stand-in API has no `window` at all. */
+const NEEDS_WINDOW_CONTROLS = api.platform !== 'win32' && api.window !== undefined
 
 /**
  * Minimize / maximize / close, drawn in the header on the OSes whose frame can't. `-webkit-app-region:
@@ -48,21 +50,45 @@ function WindowControls(): ReactNode {
   )
 }
 
-export function TitleBar() {
+const MOD = api.platform === 'darwin' ? '⌘' : 'Ctrl+'
+
+export function TitleBar({ onSearch }: { onSearch: () => void }) {
   const style = { WebkitAppRegion: 'drag' } as CSSProperties
+  const { sidebarCollapsed } = usePrefs()
   return (
     <header className="drag-region flex h-10 shrink-0 items-center gap-3 px-3" style={style}>
+      <button
+        type="button"
+        className="btn-icon no-drag -ml-1"
+        aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+        aria-expanded={!sidebarCollapsed}
+        title={`${sidebarCollapsed ? 'Show' : 'Hide'} sidebar (${MOD}B)`}
+        onClick={() => setPrefs({ sidebarCollapsed: !getPrefs().sidebarCollapsed })}
+      >
+        <PanelLeft size={16} strokeWidth={1.75} aria-hidden="true" />
+      </button>
       <BrandMark size={16} />
       <span className="text-[13px] font-semibold tracking-tight text-ink">Deskmates</span>
       <TabSwitch />
+      <button
+        type="button"
+        className="titlebar-search no-drag"
+        aria-label="Search and commands"
+        title={`Search and commands (${MOD}K)`}
+        onClick={onSearch}
+      >
+        <Search size={13} aria-hidden="true" />
+        <span className="hidden md:inline">Search</span>
+        <kbd className="kbd hidden md:inline">{MOD}K</kbd>
+      </button>
       {/* Room for Windows' own overlay buttons, which sit on top of this header. */}
       {NEEDS_WINDOW_CONTROLS ? (
         <div className="ml-auto flex h-full items-center">
           <WindowControls />
         </div>
-      ) : (
+      ) : api.platform === 'win32' ? (
         <div className="no-drag ml-auto h-full w-[140px] shrink-0" />
-      )}
+      ) : null}
     </header>
   )
 }

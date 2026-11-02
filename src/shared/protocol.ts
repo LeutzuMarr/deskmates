@@ -237,6 +237,8 @@ export interface ToolItem {
 export type TimelineItem =
   | { kind: 'user'; id: string; at: number; text: string }
   | { kind: 'assistant'; id: string; at: number; text: string }
+  /** The model's reasoning before it answers or acts, for models that share it (Gemini 2.5+, DeepSeek R1 and the like). */
+  | { kind: 'thinking'; id: string; at: number; text: string }
   | ToolItem
 
 export interface Memory {

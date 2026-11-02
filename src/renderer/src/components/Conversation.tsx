@@ -5,6 +5,9 @@ import { ActivityGroup } from './ActivityGroup'
 import { ApprovalCard } from './ApprovalCard'
 import { AgentCard, CARD_TOOLS } from './AgentCards'
 import { BrandMark } from './Mascot'
+import { CopyButton } from './CopyButton'
+import { Thinking } from './Thinking'
+import { ArrowDown } from 'lucide-react'
 import { formatElapsed, awaitingFirstOutput } from '../lib/format'
 import { WorkingLine, WorkingPill } from './Working'
 import type { StartingNotice } from '../lib/format'
@@ -32,7 +35,7 @@ interface ConversationProps {
 /** The user item that started the turn an assistant item belongs to. */
 function turnStart(timeline: TimelineItem[], i: number): Extract<TimelineItem, { kind: 'user' }> | undefined {
   let k = i - 1
-  while (k >= 0 && timeline[k].kind === 'tool') k--
+  while (k >= 0 && (timeline[k].kind === 'tool' || timeline[k].kind === 'thinking')) k--
   return k >= 0 && timeline[k].kind === 'user' ? (timeline[k] as Extract<TimelineItem, { kind: 'user' }>) : undefined
 }
 
@@ -42,10 +45,30 @@ function ReplyTime({ startAt, doneAt }: { startAt: number; doneAt: number }) {
   return <span className="mb-1 block text-[12px] text-ink-faint">{formatElapsed(Math.max(0, doneAt - startAt))}</span>
 }
 
+/** Whether the assistant item at `i` closes its turn: only tool activity, if anything, follows before the next prompt. */
+function closesTurn(timeline: TimelineItem[], i: number): boolean {
+  for (let k = i + 1; k < timeline.length; k++) {
+    if (timeline[k].kind === 'user') return true
+    if (timeline[k].kind === 'assistant') return false
+  }
+  return true
+}
+
+/** Every assistant text of the turn that ends at `i`, in order, for copying the whole reply. */
+function turnText(timeline: TimelineItem[], i: number): string {
+  const parts: string[] = []
+  for (let k = i; k >= 0 && timeline[k].kind !== 'user'; k--) {
+    const item = timeline[k]
+    if (item.kind === 'assistant') parts.unshift(item.text)
+  }
+  return parts.join('\n\n')
+}
+
 /** Renders a task's (or bot run's) timeline: user bubbles, assistant replies, collapsed tool activity and approval cards. */
 export function Conversation({ taskId, mode = 'task', timeline, running, emptyHint, contentClassName, pill = true, starting = null }: ConversationProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const nearBottomRef = useRef(true)
+  const [showJump, setShowJump] = useState(false)
   // For a run that started without a prompt in this timeline (e.g. a scheduled bot run).
   const [runningSince, setRunningSince] = useState<number | null>(null)
 
@@ -73,7 +96,8 @@ export function Conversation({ taskId, mode = 'task', timeline, running, emptyHi
     const item = timeline[i]
     if (item.kind === 'user') {
       nodes.push(
-        <div key={item.id} className="flex justify-end">
+        <div key={item.id} className="msg-row flex items-start justify-end gap-1">
+          <CopyButton text={item.text} label="Copy message" className="msg-action mt-2.5" />
           <div className="user-bubble max-w-[75%] whitespace-pre-wrap">{item.text}</div>
         </div>
       )
@@ -81,7 +105,10 @@ export function Conversation({ taskId, mode = 'task', timeline, running, emptyHi
       continue
     }
     if (item.kind === 'assistant') {
-      const previous = i > 0 ? timeline[i - 1] : undefined
+      // Thinking that came just before the reply doesn't count: the reply still opens the turn.
+      let p = i - 1
+      while (p >= 0 && timeline[p].kind === 'thinking') p--
+      const previous = p >= 0 ? timeline[p] : undefined
       const firstOfTurn = !previous || previous.kind === 'user'
       const started = turnStart(timeline, i)
       let doneAt: number | null = null
@@ -95,8 +122,12 @@ export function Conversation({ taskId, mode = 'task', timeline, running, emptyHi
         }
       }
       const replyTime = started && doneAt !== null ? <ReplyTime startAt={started.at} doneAt={doneAt} /> : null
+      const finished = closesTurn(timeline, i) && !(running && (!started || started === timeline[lastUserIdx]))
+      // The latest finished reply keeps its actions in view; earlier ones show them on hover.
+      const isLast = finished && !timeline.slice(i + 1).some((later) => later.kind === 'user')
+      const at = i
       nodes.push(
-        <div key={item.id} className="flex gap-3">
+        <div key={item.id} className="msg-row flex gap-3">
           {firstOfTurn && (
             <div className="mt-1 shrink-0">
               <BrandMark size={20} working={running} />
@@ -105,8 +136,27 @@ export function Conversation({ taskId, mode = 'task', timeline, running, emptyHi
           <div className="min-w-0 flex-1">
             {firstOfTurn && replyTime}
             <AssistantText text={item.text} />
+            {finished && (
+              <div className={`mt-1.5 flex items-center gap-1 ${isLast ? '' : 'msg-action'}`}>
+                <CopyButton text={() => turnText(timeline, at)} label="Copy reply" showLabel />
+              </div>
+            )}
           </div>
         </div>
+      )
+      i++
+      continue
+    }
+    if (item.kind === 'thinking') {
+      const next = timeline[i + 1]
+      nodes.push(
+        <Thinking
+          key={item.id}
+          text={item.text}
+          startedAt={item.at}
+          endedAt={next ? next.at : null}
+          live={running && i === timeline.length - 1}
+        />
       )
       i++
       continue
@@ -147,7 +197,10 @@ export function Conversation({ taskId, mode = 'task', timeline, running, emptyHi
         className="scroll-area min-h-0 min-w-0 flex-1 overflow-y-auto"
         onScroll={() => {
           const el = scrollRef.current
-          if (el) nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 160
+          if (!el) return
+          const distance = el.scrollHeight - el.scrollTop - el.clientHeight
+          nearBottomRef.current = distance < 160
+          setShowJump(distance > 480)
         }}
       >
         <div
@@ -169,6 +222,20 @@ export function Conversation({ taskId, mode = 'task', timeline, running, emptyHi
           )}
         </div>
       </div>
+      {showJump && (
+        <button
+          type="button"
+          className="jump-latest"
+          aria-label="Jump to latest"
+          title="Jump to latest"
+          onClick={() => {
+            const el = scrollRef.current
+            if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+          }}
+        >
+          <ArrowDown size={15} aria-hidden="true" />
+        </button>
+      )}
     </div>
   )
 }

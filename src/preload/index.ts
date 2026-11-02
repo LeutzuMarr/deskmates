@@ -1,5 +1,5 @@
-import { contextBridge, ipcRenderer } from 'electron'
-import type { DesktopApi, DesignExportFormat, HostPlatform, VideoExportOptions } from '../shared/desktop-api'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import type { DesktopApi, DesignExportFormat, HostPlatform, ThemeChoice, VideoExportOptions } from '../shared/desktop-api'
 import type { ProviderId } from '../shared/protocol'
 
 function hostPlatform(): HostPlatform {
@@ -37,6 +37,13 @@ const deskmates: DesktopApi = {
   },
 
   pickFolder: () => ipcRenderer.invoke('dialog:pickFolder'),
+  pathForFile: (file: File) => {
+    try {
+      return webUtils.getPathForFile(file)
+    } catch {
+      return ''
+    }
+  },
 
   openPath: (path: string) => ipcRenderer.invoke('shell:openPath', path),
 
@@ -49,7 +56,8 @@ const deskmates: DesktopApi = {
     pickImage: () => ipcRenderer.invoke('appearance:pickImage'),
     pickFont: () => ipcRenderer.invoke('appearance:pickFont'),
     pickAnimation: () => ipcRenderer.invoke('appearance:pickAnimation'),
-    setWindowIcon: (dataUrl: string | null) => ipcRenderer.invoke('appearance:setWindowIcon', dataUrl)
+    setWindowIcon: (dataUrl: string | null) => ipcRenderer.invoke('appearance:setWindowIcon', dataUrl),
+    setTheme: (theme: ThemeChoice) => ipcRenderer.invoke('appearance:setTheme', theme)
   },
 
   design: {

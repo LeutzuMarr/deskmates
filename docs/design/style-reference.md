@@ -154,3 +154,13 @@ The user asked for Apple's corner concentricity in both tabs (Work and Design). 
 - The user message bubble: 24px radius on `--oat`.
 - Nowhere: shadows, gradients or glows. The "working" text pulses in opacity instead of shimmering.
 - Focus ring: a 2px `--ink` outline at 2px offset (no blue).
+
+### Warmer and livelier (added 2026-11-02)
+
+The user found the flat version too plain and asked for it to feel more fun, taking cues from 21st.dev and from the Claude, ChatGPT, Gemini and Grok apps. Where this conflicts with an older rule in this file, this section wins.
+
+- **Fonts:** the interface is **Instrument Sans** (`@fontsource-variable/instrument-sans`, family `Instrument Sans Variable`) and replies and headings are **Newsreader** (`@fontsource-variable/newsreader`, family `Newsreader Variable`, optical sizes). They are the closest open matches to Anthropic's own sans and serif, which are licensed and not bundled. Users who own those fonts can load them in Settings → Appearance.
+- **Soft depth is allowed:** `--shadow-soft` on the composer and hovered cards, and `--shadow-pop` on menus, the command palette and toasts. Still no glows, gradients or colour washes on surfaces.
+- **Motion:** `--ease-out` for most transitions, `--ease-spring` for small playful moments (the send button, the sliding tab pill, toasts). Messages rise in, menus pop in, presses scale to 0.96, cards lift 2px on hover, and the Home greeting staggers in while the mascot waves once. Everything respects `prefers-reduced-motion`.
+- **Focus on the composer:** a warm clay-tinted ring (12% clay), the one place clay is used as a soft accent rather than a fill.
+- **Thinking and steps:** model reasoning streams as a live "Thinking" tail and folds to "Thought for Ns"; tool steps sit on a thin rail, open while they run and fold when done.

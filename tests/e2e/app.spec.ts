@@ -206,6 +206,32 @@ test('works on a folder end to end', async () => {
     })
     await expect.poll(() => existsSync(helloPath), { timeout: 10000 }).toBe(false)
     await page.screenshot({ path: 'test-results/screens/e2e-03-work-undone.png' })
+
+    await test.step('search and commands open from the keyboard', async () => {
+      await page.keyboard.press('Control+K')
+      const palette = page.getByRole('dialog', { name: 'Search and commands' })
+      await expect(palette).toBeVisible()
+      await palette.getByLabel('Search').fill('hello')
+      await expect(palette.getByRole('option', { name: /Create hello\.txt/ })).toBeVisible()
+      await page.screenshot({ path: 'test-results/screens/e2e-03b-palette.png' })
+      await page.keyboard.press('Escape')
+      await expect(palette).toBeHidden()
+    })
+
+    await test.step('home shows the composer and starting points', async () => {
+      // From a task, the project row opens the project; clicking it again goes back Home.
+      const projectRow = page.locator('aside').getByRole('button', { name: /^project( \d+)?$/ })
+      await clickRobust(projectRow)
+      await expect(page.getByRole('button', { name: 'Project settings', exact: true })).toBeVisible()
+      await clickRobust(projectRow)
+      await expect(page.getByRole('tab', { name: 'Video' })).toBeVisible()
+      await clickRobust(page.getByRole('tab', { name: 'Video' }))
+      await clickRobust(page.getByRole('button', { name: 'Rough cut a recording', exact: true }))
+      await expect(page.getByLabel('Message')).toHaveValue(/DaVinci Resolve/)
+      // Let the greeting's entrance animation finish so the screenshot shows the settled page.
+      await page.waitForTimeout(800)
+      await page.screenshot({ path: 'test-results/screens/e2e-03c-home.png' })
+    })
   } finally {
     await app?.close().catch(() => undefined)
     await fake.close().catch(() => undefined)

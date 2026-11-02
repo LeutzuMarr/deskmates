@@ -179,7 +179,7 @@ function TaskRow({ task, projectId }: { task: Task; projectId: string }) {
     <li>
       <button
         type="button"
-        className="w-full rounded-3xl border border-rule bg-card px-5 py-4 text-left hover:bg-oat"
+        className="task-card w-full rounded-3xl border border-rule bg-card px-5 py-4 text-left"
         onClick={() => navigate({ name: 'task', projectId, taskId: task.id })}
       >
         <div className="flex items-baseline justify-between gap-4">

@@ -14,8 +14,8 @@
   --color-clay-deep: var(--clay-deep);
   --color-brick: var(--brick);
   --color-olive: var(--olive);
-  --font-sans: 'Inter Variable', system-ui, -apple-system, sans-serif;
-  --font-serif: 'Source Serif 4 Variable', Georgia, 'Times New Roman', serif;
+  --font-sans: 'Instrument Sans Variable', system-ui, -apple-system, sans-serif;
+  --font-serif: 'Newsreader Variable', Georgia, 'Times New Roman', serif;
   --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
 }
 
@@ -390,6 +390,92 @@ select {
   outline: none;
 }
 
+/* ---- Collapsible sidebar ---- */
+.sidebar-shell {
+  display: flex;
+  flex-shrink: 0;
+  width: 264px;
+  overflow: hidden;
+  transition: width 200ms cubic-bezier(0.2, 0, 0, 1);
+}
+.sidebar-shell-collapsed {
+  width: 0;
+}
+
+/* ---- Keyboard hints ---- */
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 1px 5px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--ink-faint);
+  background: transparent;
+  white-space: nowrap;
+}
+
+/* ---- Title bar search ---- */
+.titlebar-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 6px 0 10px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+.titlebar-search:hover {
+  background: var(--oat);
+  color: var(--ink);
+}
+.titlebar-search:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* ---- Command palette ---- */
+.palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 12vh;
+  background: color-mix(in srgb, var(--ink) 18%, transparent);
+  animation: dm-fade-in 120ms ease-out;
+}
+.palette {
+  width: min(640px, calc(100vw - 32px));
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-card);
+  overflow: hidden;
+  animation: dm-pop-in 160ms cubic-bezier(0.2, 0, 0, 1);
+}
+.palette .menu-item {
+  border-radius: max(var(--r-min), calc(var(--r-card) - 6px));
+}
+@keyframes dm-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 /* ---- Caption ---- */
 .caption {
   font-size: 12px;
@@ -468,6 +554,154 @@ select {
   border: none;
   cursor: pointer;
   text-align: left;
+}
+
+/* ---- Message actions (copy) ---- */
+.copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: none;
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: 12px;
+  padding: 5px 7px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+.copy-btn:hover {
+  background: var(--oat);
+  color: var(--ink);
+}
+.copy-btn:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+.msg-action {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.msg-row:hover .msg-action,
+.msg-action:focus-within,
+.msg-action:focus-visible {
+  opacity: 1;
+}
+.jump-latest {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 1px solid var(--rule);
+  background: var(--card);
+  color: var(--ink-muted);
+  cursor: pointer;
+  animation: dm-fade-in 150ms ease-out;
+}
+.jump-latest:hover {
+  color: var(--ink);
+  background: var(--oat);
+}
+
+/* ---- Code blocks ---- */
+.code-block {
+  margin: 0 0 12px;
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  background: var(--card);
+  overflow: hidden;
+}
+.code-block-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 4px 2px 12px;
+  border-bottom: 1px solid var(--rule);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+.markdown .code-block pre {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+}
+
+/* ---- Composer ---- */
+.composer-box {
+  transition: border-color 120ms ease;
+}
+.composer-box:focus-within {
+  border-color: var(--ink-faint);
+}
+
+/* ---- Home starters and recent tasks ---- */
+.starter-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--rule);
+  background: transparent;
+  color: var(--ink-muted);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 6px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+.starter-tab:hover {
+  color: var(--ink);
+  background: var(--oat);
+}
+.starter-tab-active {
+  color: var(--ink);
+  background: var(--card);
+  border-color: var(--ink-faint);
+}
+.starter-card {
+  text-align: left;
+  border: 1px solid var(--rule);
+  background: transparent;
+  color: var(--ink);
+  font-size: 13px;
+  padding: 10px 14px;
+  border-radius: 16px;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.starter-card:hover {
+  background: var(--card);
+  border-color: var(--ink-faint);
+}
+.starter-tab:focus-visible,
+.starter-card:focus-visible,
+.recent-row:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+.recent-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font-size: 14px;
+  text-align: left;
+  padding: 9px 10px;
+  border-radius: 12px;
+  cursor: pointer;
+}
+.recent-row:hover {
+  background: var(--oat);
 }
 
 /* ---- Assistant markdown ---- */
@@ -788,4 +1022,240 @@ select {
 /* Tailwind's reset zeroes every margin, which pins modal dialogs to the top-left corner. */
 dialog:modal {
   margin: auto;
+}
+
+/* ==== Motion and depth (2026-11-02: warmer, livelier feel; see style-reference.md) ==== */
+:root {
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --shadow-soft: 0 1px 2px rgb(20 20 19 / 0.04), 0 10px 28px -14px rgb(20 20 19 / 0.18);
+  --shadow-pop: 0 2px 6px rgb(20 20 19 / 0.06), 0 16px 40px -12px rgb(20 20 19 / 0.22);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --shadow-soft: 0 1px 2px rgb(0 0 0 / 0.3), 0 10px 28px -14px rgb(0 0 0 / 0.6);
+    --shadow-pop: 0 2px 6px rgb(0 0 0 / 0.35), 0 16px 40px -12px rgb(0 0 0 / 0.7);
+  }
+}
+
+@keyframes dm-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes dm-slide-left {
+  from {
+    opacity: 0;
+    transform: translateX(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes dm-wave {
+  0%, 60%, 100% {
+    transform: rotate(0deg);
+  }
+  15% {
+    transform: rotate(-10deg);
+  }
+  30% {
+    transform: rotate(8deg);
+  }
+  45% {
+    transform: rotate(-4deg);
+  }
+}
+@keyframes dm-sparkle {
+  0%, 100% {
+    transform: scale(1) rotate(0deg);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(0.82) rotate(20deg);
+    opacity: 0.7;
+  }
+}
+
+/* Presses feel physical. */
+.btn,
+.btn-icon,
+.segmented-item,
+.starter-tab,
+.starter-card,
+.copy-btn,
+.titlebar-search,
+.sidebar-row,
+.recent-row,
+.menu-item {
+  transition:
+    background-color 140ms var(--ease-out),
+    color 140ms var(--ease-out),
+    border-color 140ms var(--ease-out),
+    box-shadow 200ms var(--ease-out),
+    transform 160ms var(--ease-out),
+    opacity 140ms var(--ease-out);
+}
+.btn:active:not(:disabled),
+.btn-icon:active:not(:disabled),
+.starter-tab:active,
+.copy-btn:active,
+.titlebar-search:active {
+  transform: scale(0.96);
+}
+.btn-clay:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+/* Floating layers pop in and sit above the page. */
+.menu {
+  box-shadow: var(--shadow-pop);
+  transform-origin: top left;
+  animation: dm-pop-in 160ms var(--ease-out);
+}
+.palette {
+  box-shadow: var(--shadow-pop);
+}
+.toast {
+  box-shadow: var(--shadow-pop);
+  animation: dm-rise 220ms var(--ease-spring);
+}
+
+/* Cards lift on hover. */
+.starter-card:hover,
+.task-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-soft);
+}
+.starter-card:active {
+  transform: translateY(0) scale(0.99);
+}
+
+/* Messages arrive instead of appearing. */
+.msg-in {
+  animation: dm-rise 220ms var(--ease-out);
+}
+.user-bubble {
+  animation: dm-slide-left 240ms var(--ease-out);
+}
+
+/* The message box: a soft float, and a warm ring when it has the keyboard. */
+.composer-box {
+  box-shadow: var(--shadow-soft);
+  transition: border-color 160ms var(--ease-out), box-shadow 220ms var(--ease-out);
+}
+.composer-box:focus-within {
+  border-color: color-mix(in srgb, var(--clay) 45%, var(--rule));
+  box-shadow: var(--shadow-soft), 0 0 0 4px color-mix(in srgb, var(--clay) 12%, transparent);
+}
+.send-btn {
+  transition: transform 220ms var(--ease-spring), background-color 140ms var(--ease-out), opacity 140ms var(--ease-out);
+}
+.send-btn:not(:disabled) {
+  transform: scale(1);
+}
+.send-btn:disabled {
+  transform: scale(0.9);
+}
+.send-btn:not(:disabled):hover {
+  transform: scale(1.06);
+}
+.send-btn:not(:disabled):active {
+  transform: scale(0.94);
+}
+
+/* Home greeting: the mark waves, then the words and the box rise in turn. */
+.greet-mark {
+  transform-origin: 50% 90%;
+  animation: dm-wave 1.6s var(--ease-out) 200ms 1;
+}
+.greet-in {
+  animation: dm-rise 520ms var(--ease-out) both;
+}
+.greet-in-1 {
+  animation-delay: 60ms;
+}
+.greet-in-2 {
+  animation-delay: 140ms;
+}
+.greet-in-3 {
+  animation-delay: 220ms;
+}
+
+/* Sliding selection behind the section tabs. */
+.segmented {
+  position: relative;
+}
+.segmented-indicator {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 0;
+  border-radius: 999px;
+  background: var(--card);
+  box-shadow: 0 1px 2px rgb(20 20 19 / 0.08);
+  transition: transform 280ms var(--ease-spring), width 280ms var(--ease-spring);
+  pointer-events: none;
+}
+.segmented-sliding .segmented-item {
+  position: relative;
+  z-index: 1;
+}
+.segmented-sliding .segmented-item[aria-selected='true'] {
+  background: transparent;
+}
+
+/* Thinking: a live tail while it streams, the full text on request. */
+.thinking {
+  margin: 2px 0;
+}
+.thinking-spark {
+  color: var(--clay);
+  animation: dm-sparkle 1.4s ease-in-out infinite;
+}
+.thinking-tail {
+  margin: 6px 0 2px 6px;
+  padding-left: 14px;
+  border-left: 1px solid var(--rule);
+  max-height: 5.6em;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--ink-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 45%);
+  mask-image: linear-gradient(to bottom, transparent, #000 45%);
+}
+.thinking-full {
+  margin: 2px 0 8px 6px;
+  padding-left: 14px;
+  border-left: 1px solid var(--rule);
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--ink-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  animation: dm-rise 200ms var(--ease-out);
+}
+
+/* Tool steps on a rail, like a run log. */
+.steps {
+  margin-left: 6px;
+  padding-left: 8px;
+  border-left: 1px solid var(--rule);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .starter-card:hover,
+  .task-card:hover,
+  .btn-clay:hover:not(:disabled) {
+    transform: none;
+  }
 }

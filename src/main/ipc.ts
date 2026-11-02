@@ -1,4 +1,4 @@
-import { app, dialog, ipcMain, shell, nativeImage } from 'electron'
+import { app, dialog, ipcMain, shell, nativeImage, nativeTheme } from 'electron'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
@@ -380,6 +380,13 @@ export function registerIpc({ core, secrets, getWindow, dataDir }: RegisterIpcDe
     } else {
       throw new Error('setWindowIcon expects null or a data:image data URL')
     }
+  })
+
+  ipcMain.handle('appearance:setTheme', (event, theme: unknown) => {
+    assertTrustedSender(event)
+    if (theme !== 'system' && theme !== 'light' && theme !== 'dark') throw new Error('The theme must be system, light or dark.')
+    // The page's prefers-color-scheme and the window frame (main's nativeTheme 'updated' handler) both follow this.
+    nativeTheme.themeSource = theme
   })
 
   ipcMain.handle('design:export', async (event, projectId: string, format: DesignExportFormat, width?: number, file?: string) => {

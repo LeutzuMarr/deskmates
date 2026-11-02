@@ -5,8 +5,8 @@ const REPLY_FAMILY = 'Deskmates Reply Custom'
 const FONT_STYLE_ID = 'custom-fonts'
 
 const fallbackStacks = {
-  ui: `'Inter Variable', system-ui, -apple-system, sans-serif`,
-  reply: `'Source Serif 4 Variable', Georgia, 'Times New Roman', serif`
+  ui: `'Instrument Sans Variable', system-ui, -apple-system, sans-serif`,
+  reply: `'Newsreader Variable', Georgia, 'Times New Roman', serif`
 } as const
 
 function fontFaceRule(family: string, choice: FontChoice): string {

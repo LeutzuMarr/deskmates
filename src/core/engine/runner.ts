@@ -374,6 +374,9 @@ export class TaskRunner {
         }),
         instructions,
         tools,
+        // Gemini 2.5 and later think before answering; this asks it to share a summary of that
+        // thinking so the transcript can show it. Older Gemini models reject the setting.
+        providerOptions: sharesThoughts(provider, modelId) ? { google: { thinkingConfig: { includeThoughts: true } } } : undefined,
         toolApproval: ({ toolCall }: { toolCall: { toolName: string } }) =>
           approvalFor(toolCall.toolName, repos.tasks.require(taskId).autoApprove),
         // A question to the user ends the turn: the answers come back as the next message.
@@ -542,4 +545,11 @@ export class TaskRunner {
       bus.emit({ type: 'design.updated', projectId: task.projectId, updatedAt: Date.now(), source: 'editor' })
     }
   }
+}
+
+/** Whether this model streams a summary of its reasoning when asked (see the providerOptions above). */
+export function sharesThoughts(provider: string, modelId: string): boolean {
+  if (provider !== 'google') return false
+  // Image, speech and embedding variants share the family name but don't think.
+  return /gemini-(2\.5|[3-9])/i.test(modelId) && !/image|tts|embedding|live|audio/i.test(modelId)
 }

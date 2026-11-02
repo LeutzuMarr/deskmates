@@ -35,6 +35,9 @@ export type InstallWslResult =
  */
 export type HostPlatform = 'win32' | 'darwin' | 'linux' | 'other'
 
+/** The app's colour theme: follow the OS, or force one. */
+export type ThemeChoice = 'system' | 'light' | 'dark'
+
 /** API that the preload script exposes to the renderer as `window.deskmates`. */
 export interface DesktopApi {
   /** The host OS. A plain value, known before any call — the renderer never reads `process` itself. */
@@ -57,6 +60,8 @@ export interface DesktopApi {
     set(provider: ProviderId, key: string | null): Promise<ProviderId[]>
   }
   pickFolder(): Promise<string | null>
+  /** The full path of a file dropped or pasted into the window; '' when it has none (e.g. a pasted image). */
+  pathForFile(file: File): string
   openPath(path: string): Promise<void>
   autoStart: {
     get(): Promise<boolean>
@@ -67,6 +72,8 @@ export interface DesktopApi {
     pickFont(): Promise<FontChoice | null>
     pickAnimation(): Promise<AnimationChoice | null>
     setWindowIcon(dataUrl: string | null): Promise<void>
+    /** Forces light or dark, or follows the OS. Recolours the window frame along with the page. */
+    setTheme(theme: ThemeChoice): Promise<void>
   }
   design: {
     /**

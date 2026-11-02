@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useStore } from './lib/store'
 import { applyAppearance } from './lib/appearance'
 import { TitleBar } from './components/TitleBar'
@@ -8,6 +8,9 @@ import { BotsSidebar } from './components/BotsSidebar'
 import { AgentsSidebar } from './components/AgentsSidebar'
 import { ExtrasSidebar } from './components/ExtrasSidebar'
 import { Toast } from './components/Toast'
+import { CommandPalette } from './components/CommandPalette'
+import { usePrefs } from './lib/prefs'
+import { useGlobalShortcuts } from './lib/shortcuts'
 import { HomeView } from './views/HomeView'
 import { ProjectView } from './views/ProjectView'
 import { TaskView } from './views/TaskView'
@@ -27,6 +30,10 @@ export function App() {
   const view = useStore((s) => s.view)
   const tab = useStore((s) => s.tab)
   const settings = useStore((s) => s.settings)
+  const { sidebarCollapsed } = usePrefs()
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const openPalette = useCallback(() => setPaletteOpen(true), [])
+  useGlobalShortcuts(openPalette)
 
   useEffect(() => {
     init()
@@ -38,8 +45,9 @@ export function App() {
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-canvas">
-      <TitleBar />
+      <TitleBar onSearch={openPalette} />
       <div className="flex min-h-0 min-w-0 flex-1">
+        <div className={`sidebar-shell ${sidebarCollapsed ? 'sidebar-shell-collapsed' : ''}`} inert={sidebarCollapsed}>
         {tab === 'design' ? (
           <DesignSidebar />
         ) : tab === 'bots' ? (
@@ -51,6 +59,7 @@ export function App() {
         ) : (
           <Sidebar />
         )}
+        </div>
         <main className="min-w-0 flex-1">
           {view.name === 'home' && <HomeView />}
           {view.name === 'project' && <ProjectView projectId={view.projectId} />}
@@ -68,6 +77,7 @@ export function App() {
         </main>
       </div>
       <Toast />
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
     </div>
   )
 }
