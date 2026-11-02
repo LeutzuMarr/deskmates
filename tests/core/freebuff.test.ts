@@ -1,0 +1,141 @@
+import { describe, expect, it } from 'vitest'
+import {
+  countEchoes,
+  currentActivity,
+  extractReply,
+  hasRetry,
+  hasSurvey,
+  highlightedModel,
+  inputDraft,
+  isBusy,
+  isIdle,
+  readStatus,
+  withoutCursor
+} from '../../src/core/terminals/freebuff-host'
+import { FREEBUFF_CURRENT_MODEL, FREEBUFF_MODEL_IDS, freebuffModelLabel } from '../../src/shared/freebuff'
+
+// Real Freebuff 0.2.35 screens, captured from a hidden console.
+const DONE = `   [06:29 PM]
+   Now reply with exactly: SECOND OK ⎘
+  SECOND OK
+                                                                                                ⎘ • 2s • △▽
+ 41m left · 22.8K (5%)                                                                         ✕ End session
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                            │
+│  ▍Enter a coding task or / for commands                                                                    │
+│                                                                                                            │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ Solar Pro 4 · ~\\AppData\\Local\\Temp\\hidden-test · /model to change · Chat: Reply with exactly: HIDDEN OK`
+
+const WORKING = `   [06:11 PM]
+   Look at the screen, then point at the Start
+   button. ⎘
+  • Read AGENTS.md
+  $ dir
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ quick question 1/11  □□□□□□□□□□□                                                                                   │
+│ 1 Me   2 My employer   3 Both   4 Nobody, I stick to free tools   0 Doesn't apply                                  │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ thinking...                                                                                                54s  ■ Esc
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│  ▍Add to the current task (/ for commands)                                                                           │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯`
+
+const BANNER = ` ┌──────────────────────────────────────────────────────────────────┐
+ │ May use data for AI training                                     │
+ │ Session active                                                   │
+ │ 12/12 hours remaining                                            │
+ └──────────────────────────────────────────────────────────────────┘
+ 34m left · 35K (7%)                                                                           ✕ End session`
+
+const PICKER = ` ↑↓ choose model · Tab reasoning · Enter select · Esc cancel
+ ┌──────────────────────────────────────────────────────────────────────────────┐
+ │   MiMo v2.6 Flash Slow · Slow · cheapest · Images                            │
+ │                                      1x                                      │
+ └──────────────────────────────────────────────────────────────────────────────┘
+ ┌──────────────────────────────────────────────────────────────────────────────┐
+ │ › Solar Pro 4 · Upstage flagship · Promotional                               │
+ │                         May use data for AI training                         │
+ └──────────────────────────────────────────────────────────────────────────────┘`
+
+describe('Freebuff screen reading', () => {
+  it('reads a finished reply between the prompt echo and its footer', () => {
+    expect(extractReply(DONE, 'Now reply with exactly: SECOND OK')).toEqual({ text: 'SECOND OK', done: true })
+    expect(isIdle(DONE)).toBe(true)
+    expect(isBusy(DONE)).toBe(false)
+    expect(inputDraft(DONE)).toBe('')
+  })
+
+  it('follows a wrapped prompt echo and reports work in progress', () => {
+    const prompt = 'Look at the screen, then point at the Start button.'
+    expect(extractReply(WORKING, prompt)).toEqual({ text: '• Read AGENTS.md\n$ dir', done: false })
+    expect(isBusy(WORKING)).toBe(true)
+    expect(isIdle(WORKING)).toBe(false)
+    expect(hasSurvey(WORKING)).toBe(true)
+    expect(currentActivity(WORKING, prompt)).toBe('$ dir')
+  })
+
+  it('ignores the chat title in the status bar, and earlier copies of the same request', () => {
+    const screen = `   [07:24 PM]
+   What is two plus two? ⎘
+  Two plus two is four.
+                                                                                                ⎘ • 2s • △▽
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│  ▍Enter a coding task or / for commands                                                                    │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ Solar Pro 4 · ~\\AppData\\Roaming\\project · /model to change · Chat: What is two plus two?`
+    expect(extractReply(screen, 'What is two plus two?')).toEqual({ text: 'Two plus two is four.', done: true })
+    expect(countEchoes(screen, 'What is two plus two?')).toBe(1)
+    expect(extractReply(screen, 'What is two plus two?', 1)).toBeNull()
+  })
+
+  it('treats a cursor blink as no change and spots the server timeout card', () => {
+    expect(withoutCursor('│  ▍Enter a coding task │')).toBe(withoutCursor('│   Enter a coding task │'))
+    expect(hasRetry('│ Enter: retry  Esc: back to draft │')).toBe(true)
+  })
+
+  it('finds text left in the input box, and reads a help-mode placeholder as empty', () => {
+    const leftover = `╭──────╮
+│  hello there                    │
+╰──────╯`
+    expect(inputDraft(leftover)).toBe('hello there')
+    const help = `╭──────╮
+│  enter a coding task or / for commands   │
+╰──────╯`
+    expect(inputDraft(help)).toBe('')
+  })
+
+  it('reads the session status: model, minutes left, hours today, context', () => {
+    expect(readStatus(`${BANNER}\n${DONE}`)).toEqual({
+      model: 'Solar Pro 4',
+      sessionMinutesLeft: 34,
+      hoursLeftToday: 12,
+      hoursPerDay: 12,
+      context: '35K (7%)'
+    })
+    expect(readStatus('1h 5m left · 2K (1%)').sessionMinutesLeft).toBe(65)
+    expect(readStatus(' 1h left · 2K (1%)').sessionMinutesLeft).toBe(60)
+    expect(readStatus('nothing here')).toEqual({ model: null, sessionMinutesLeft: null, hoursLeftToday: null, hoursPerDay: null, context: null })
+  })
+
+  it("reads the /model picker's highlighted row", () => {
+    expect(highlightedModel(PICKER)).toBe('Solar Pro 4')
+    expect(highlightedModel(' │ › Muse Spark 1.3 • high · Falls back when busy │')).toBe('Muse Spark 1.3')
+    expect(highlightedModel(DONE)).toBeNull()
+  })
+})
+
+describe('Freebuff model list', () => {
+  it("offers Freebuff's current model first, then the picker's models", () => {
+    expect(FREEBUFF_MODEL_IDS[0]).toBe(FREEBUFF_CURRENT_MODEL)
+    expect(FREEBUFF_MODEL_IDS).toContain('Solar Pro 4')
+  })
+
+  it('labels each model with its Freebucks cost, or as unlimited', () => {
+    expect(freebuffModelLabel('MiMo v2.6 Flash Slow')).toBe('MiMo v2.6 Flash Slow · 1x Freebucks · slow, cheapest')
+    expect(freebuffModelLabel('Solar Pro 4')).toBe('Solar Pro 4 · unlimited · promotional')
+    expect(freebuffModelLabel('GPT-6.1 Sol')).toBe('GPT-6.1 Sol · paid plan · 1 session a day')
+    expect(freebuffModelLabel(FREEBUFF_CURRENT_MODEL)).toBe("Freebuff's current model")
+    expect(freebuffModelLabel('Some New Model')).toBe('Some New Model')
+  })
+})

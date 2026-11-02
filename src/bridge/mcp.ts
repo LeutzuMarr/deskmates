@@ -69,6 +69,63 @@ export function createDeskmatesServer(options: { call: Call; dataDir: string; ap
     const created = await designCreate(call, args.name, args.prompt)
     return `Created "${created.project.name}" (${created.project.id}) in ${created.project.folder}.`
   }))
+  // The screen guide: see the user's screen, point at things on it and talk, like a person sitting
+  // next to them. Nothing here moves the mouse or types.
+  server.registerTool('screen_look', {
+    description:
+      'Takes a screenshot of the user’s main screen so you can see what they see. Call it before screen_point: mark coordinates are pixels of the most recent screenshot (top-left is 0,0).',
+    inputSchema: {}
+  }, async () => {
+    try {
+      const shot = await call('screen.look', {})
+      return {
+        content: [
+          { type: 'image', data: shot.data, mimeType: 'image/jpeg' },
+          { type: 'text', text: `Screenshot is ${shot.width}x${shot.height} pixels. Use these pixels for screen_point.` }
+        ]
+      }
+    } catch (error) {
+      return { content: [{ type: 'text', text: error instanceof Error ? error.message : String(error) }], isError: true }
+    }
+  })
+
+  const markSchema = z.object({
+    kind: z.enum(['arrow', 'circle', 'box', 'label']).describe('arrow points at (x, y); circle and box surround the region at (x, y) with width and height; label writes text at (x, y).'),
+    x: z.number().describe('Left or tip x, in screenshot pixels.'),
+    y: z.number().describe('Top or tip y, in screenshot pixels.'),
+    width: z.number().optional().describe('Region width, for circle and box.'),
+    height: z.number().optional().describe('Region height, for circle and box.'),
+    text: z.string().optional().describe('A short caption shown next to the mark (required for label).')
+  })
+
+  server.registerTool('screen_point', {
+    description:
+      'Draws arrows, circles, boxes or labels over the user’s screen to show them where something is. The marks are click-through and fade after a few seconds. Take a fresh screen_look first.',
+    inputSchema: {
+      marks: z.array(markSchema).min(1).max(12).describe('What to draw.'),
+      seconds: z.number().optional().describe('How long the marks stay, 1–60 seconds (default 8).')
+    }
+  }, (args) => asToolResult(async () => {
+    await call('screen.point', args.seconds === undefined ? { marks: args.marks } : { marks: args.marks, seconds: args.seconds })
+    return `Showing ${args.marks.length} mark${args.marks.length === 1 ? '' : 's'} on the screen.`
+  }))
+
+  server.registerTool('screen_say', {
+    description: 'Says a short message aloud to the user with the system voice. Keep it to a sentence or two; finishes before returning.',
+    inputSchema: { text: z.string().describe('What to say.') }
+  }, (args) => asToolResult(async () => {
+    await call('screen.say', { text: args.text })
+    return 'Said it.'
+  }))
+
+  server.registerTool('screen_clear', {
+    description: 'Removes every mark screen_point drew.',
+    inputSchema: {}
+  }, () => asToolResult(async () => {
+    await call('screen.clear', {})
+    return 'Cleared the screen.'
+  }))
+
   // The pc tools stay stubs until stage 2; the guide's PC section says so too.
   const pcNotReady = (): Promise<CallToolResult> =>
     asToolResult(async () => {

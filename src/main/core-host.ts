@@ -1,7 +1,7 @@
 import { utilityProcess, type UtilityProcess } from 'electron'
 import corePath from '../core/main?modulePath'
 import type { CoreConnection } from '../shared/desktop-api'
-import type { CoreToHost, HostToCore, ProviderId } from '../shared/protocol'
+import type { CoreToHost, HostToCore, ProviderId, ScreenMark } from '../shared/protocol'
 import type { RenderRequest, RenderResult, VideoRequest, VideoResult } from '../core/render/types'
 
 export interface CoreHostOptions {
@@ -14,6 +14,8 @@ export interface CoreHostOptions {
   onNotify: (title: string, body: string) => void
   /** A computer-use session started or ended (also called with false if the core process exits). */
   onComputerUse?: (active: boolean) => void
+  /** The screen guide wants marks drawn over the screen (physical pixels); an empty list clears them. */
+  onOverlay?: (marks: ScreenMark[], seconds: number) => void
   /** Renders a design page offscreen for the core's design tools. Without it, every render request fails. */
   onRenderRequest?: (request: RenderRequest) => Promise<RenderResult>
   /** Records a design page to a video file for the core's export_video tool. */
@@ -66,6 +68,8 @@ export class CoreHost {
         this.opts.onNotify(message.title, message.body)
       } else if (message.type === 'computer-use') {
         this.opts.onComputerUse?.(message.active)
+      } else if (message.type === 'overlay') {
+        this.opts.onOverlay?.(message.marks, message.seconds)
       } else if (message.type === 'render-request') {
         this.render(child, message.id, message.request)
       } else if (message.type === 'video-request') {
@@ -75,6 +79,7 @@ export class CoreHost {
 
     child.on('exit', () => {
       this.opts.onComputerUse?.(false)
+      this.opts.onOverlay?.([], 0)
       this.child = null
       this.connection = null
       if (this.stopping) return

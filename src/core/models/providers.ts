@@ -4,6 +4,7 @@ import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { APICallError, generateText } from 'ai'
 import type { LanguageModel } from 'ai'
 import { DEFAULT_SETTINGS, PROVIDER_LABELS, type ModelCheck, type ModelRef, type ProviderId, type Settings } from '../../shared/protocol'
+import { FREEBUFF_MODEL_IDS } from '../../shared/freebuff'
 import { OPENCODE_DEFAULT_MODEL } from '../terminals/managed'
 import type { KeyStore } from './keys'
 import { hasNoQuota, NO_QUOTA_MESSAGE } from './quota'
@@ -203,6 +204,7 @@ export class ModelService implements ModelResolver {
     switch (provider) {
       case 'opencode':
       case 'agy':
+      case 'freebuff':
         // CLI-backed: nothing to construct here — the runner routes the run through a terminal
         // session. The stub exists only to satisfy the `LanguageModel` field and throws if misused.
         return { model: cliStubModel(provider, modelId), provider, modelId, cli: true }
@@ -276,6 +278,7 @@ export class ModelService implements ModelResolver {
   async listModels(provider: ProviderId): Promise<string[]> {
     if (provider === 'opencode') return [OPENCODE_DEFAULT_MODEL]
     if (provider === 'agy') return ['default']
+    if (provider === 'freebuff') return [...FREEBUFF_MODEL_IDS]
 
     if (provider === 'google') {
       const apiKey = this.keys.get('google')

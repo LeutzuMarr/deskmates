@@ -3,12 +3,12 @@ import { mkdirSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { CoreToHost, HostToCore, Settings } from '../shared/protocol'
-import { agentKitDir, writeAgentGuide } from './agents/guide'
+import { agentCommandFileName, agentKitDir, writeAgentGuide } from './agents/guide'
 import { ExecCommandRunner } from './bots/command-runner'
 import { EngineManager } from './bots/engine'
 import { BotRunner } from './bots/runner'
 import { HandoffService } from './bots/handoffs'
-import { LocalWslHost } from './bots/local-wsl-host'
+import { LocalDockerHost } from './bots/local-docker-host'
 import { reconcilePcs, resolveBotHost, UnavailableHost, wrapEngineService } from './bots/wiring'
 import { Scheduler } from './scheduler'
 import { DesignWatcher } from './designs/watcher'
@@ -29,9 +29,12 @@ import { McpConnectorManager, createMcpTransport } from './connectors'
 import { createSubagentRunner } from './engine/subagents'
 import { ChildProcessSpawner } from './terminals/process'
 import { PsAttachHelperSpawner } from './terminals/attach'
+import { LinuxAttachHelperSpawner } from './terminals/attach-linux'
 import { TerminalsManager } from './terminals/service'
 import { ComputerUseService } from './computer/service'
 import { WindowsDesktop } from './computer/desktop'
+import { LinuxDesktop } from './computer/linux-desktop'
+import { ScreenGuideService } from './screen/guide'
 import { ParentPortRenderClient } from './render/client'
 
 // Electron's utilityProcess.parentPort, typed locally so this imports nothing from 'electron'.
@@ -126,7 +129,7 @@ async function main(): Promise<void> {
   const scheduler = new Scheduler({ repos, bus, runner: commandRunner, dataDir, run: botRunner })
   const handoffs = new HandoffService({ repos, bus, dataDir, run: botRunner })
 
-  // LocalWslHost/CloudHost checkIdle() does the actual idle check but owns no timer of its own;
+  // LocalDockerHost/CloudHost checkIdle() does the actual idle check but owns no timer of its own;
   // this is that timer. Only meaningful once a host exists, so it's skipped when there's none.
   // Unref'd so it can never by itself keep the process alive, and cleared in shutdown().
   let idleCheckTimer: NodeJS.Timeout | undefined
@@ -149,7 +152,7 @@ async function main(): Promise<void> {
     isBusy: (projectId) => repos.tasks.list(projectId).some((task) => runner.isRunning(task.id))
   })
 
-  const commandPath = join(kitDir, 'deskmates.cmd')
+  const commandPath = join(kitDir, agentCommandFileName())
   // The mounted prompt directories (DESKMATES_PROMPTS_DIR set by the host; falls back to a local
   // ./prompts for standalone runs). The guide and the primer point agents at the claude-code
   // operating prompt — only when the file is actually there.
@@ -166,7 +169,7 @@ async function main(): Promise<void> {
   const terminals = new TerminalsManager({
     runner: commandRunner,
     spawner: new ChildProcessSpawner(),
-    attachSpawner: new PsAttachHelperSpawner(),
+    attachSpawner: process.platform === 'win32' ? new PsAttachHelperSpawner() : new LinuxAttachHelperSpawner(commandRunner),
     bus,
     guidePath: guide.path,
     guideVersion: guide.version,
@@ -177,8 +180,28 @@ async function main(): Promise<void> {
   const computer = new ComputerUseService({
     bus,
     models,
-    createDesktop: () => new WindowsDesktop(),
+    createDesktop: () =>
+      process.platform === 'win32'
+        ? new WindowsDesktop()
+        : new LinuxDesktop({
+            runner: commandRunner,
+            readFile: (path) => readFileSync(path),
+            removeFile: (path) => rmSync(path, { force: true })
+          }),
     onActiveChange: (active) => parentPort?.postMessage({ type: 'computer-use', active } satisfies CoreToHost)
+  })
+
+  const screenGuide = new ScreenGuideService({
+    runner: commandRunner,
+    createDesktop: () =>
+      process.platform === 'win32'
+        ? new WindowsDesktop()
+        : new LinuxDesktop({
+            runner: commandRunner,
+            readFile: (path) => readFileSync(path),
+            removeFile: (path) => rmSync(path, { force: true })
+          }),
+    showOverlay: (marks, seconds) => parentPort?.postMessage({ type: 'overlay', marks, seconds } satisfies CoreToHost)
   })
 
   const agentToken = randomBytes(24).toString('hex')
@@ -214,7 +237,8 @@ async function main(): Promise<void> {
     plugins,
     connectors,
     phone: { info: () => phone.info() },
-    computer
+    computer,
+    screen: screenGuide
   })
 
   // Follows the settings toggle and code changes: on/off, and restarting when the code changes.
@@ -237,7 +261,7 @@ async function main(): Promise<void> {
     port: Number(process.env.DESKMATES_PORT ?? 0),
     agent: {
       token: agentToken,
-      methods: ['app.info', 'projects.list', 'designs.read', 'designs.save', 'designs.create'],
+      methods: ['app.info', 'projects.list', 'designs.read', 'designs.save', 'designs.create', 'screen.look', 'screen.point', 'screen.say', 'screen.clear'],
       events: ['design.updated', 'project.updated']
     }
   })
@@ -264,13 +288,17 @@ async function main(): Promise<void> {
     void (async () => {
       try {
         computer.stop()
+        screenGuide.dispose()
         watcher.stop()
         scheduler.stop()
         handoffs.stop()
         if (idleCheckTimer) clearInterval(idleCheckTimer)
         await runner.stopAll()
         await botRunner.stopAll()
-        if (host instanceof LocalWslHost) host.dispose()
+        // After the runners, so no turn is mid-flight on a server that is being shut down underneath
+        // it; these outlive the app otherwise, holding their port and their 175KB session.
+        terminals.dispose()
+        if (host instanceof LocalDockerHost) host.dispose()
         await connectors.closeAll()
         await phone.stop()
         await server.close()

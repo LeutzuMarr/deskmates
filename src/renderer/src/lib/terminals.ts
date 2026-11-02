@@ -7,7 +7,8 @@ import type {
 
 export const TOOL_LABELS: Record<TerminalTool, string> = {
   opencode: 'OpenCode',
-  agy: 'Antigravity'
+  agy: 'Antigravity',
+  freebuff: 'Freebuff'
 }
 
 export function sessionStateLabel(state: TerminalSessionState): string {

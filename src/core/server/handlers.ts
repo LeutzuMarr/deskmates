@@ -21,8 +21,12 @@ import type {
   PhoneInfo,
   ProviderId,
   RpcMethod,
-  Settings
+  ScreenMark,
+  Settings,
+  TerminalTool
 } from '../../shared/protocol'
+import { MANAGED_TERMINAL_TOOLS } from '../../shared/protocol'
+import type { ScreenGuideService } from '../screen/guide'
 import { generatePairingCode, isValidPairingCode } from '../phone/server'
 import type { PluginsService } from '../extensions/plugins'
 import type { SkillsService } from '../extensions/skills'
@@ -41,6 +45,8 @@ const SKILLS_NOT_SET_UP = "Skills and plugins aren't set up on this computer yet
 const CONNECTORS_NOT_SET_UP = "Connectors aren't set up on this computer yet."
 /** Shown when phone access (spec 5.12) isn't wired up yet. */
 const PHONE_NOT_SET_UP = "Phone access isn't set up on this computer yet."
+/** Shown when a screen.* call needs the screen guide and it isn't wired up. */
+const SCREEN_NOT_SET_UP = "The screen guide isn't available on this computer."
 /** CPU cap given to a bot's PC when creating it; not user-configurable (BotPc has no cpuLimit field). */
 const DEFAULT_PC_CPU_LIMIT = 2
 
@@ -76,6 +82,8 @@ export interface HandlerServices {
   phone?: { info(): PhoneInfo }
   /** Computer use (Agents tab): a model driving the user's own mouse and keyboard. */
   computer?: ComputerUseService
+  /** The screen guide a connected agent uses to see the screen, point at things and talk. */
+  screen?: ScreenGuideService
 }
 
 /** Implements every method of RpcMethods. Handlers emit bus events the UI listens to. */
@@ -629,13 +637,34 @@ export function createHandlers(services: HandlerServices): Handlers {
       return services.terminals.detect()
     },
 
+    'terminals.warm': (params: { folder: string }) => {
+      if (!services.terminals) throw new Error(TERMINALS_NOT_SET_UP)
+      return { warm: services.terminals.warm(params.folder) }
+    },
+
+    // Both of these are keyed by folder in a map the pool owns, so the folder is canonicalised the
+    // same way `sessions.start` canonicalises it — a non-canonical path would miss the server that is
+    // already running and read as "no conversation here".
+    'terminals.usage': async (params: { folder: string }) => {
+      if (!services.terminals) throw new Error(TERMINALS_NOT_SET_UP)
+      return (await services.terminals.usage(realpathSync.native(params.folder))) ?? null
+    },
+
+    'terminals.compact': async (params: { folder: string }) => {
+      if (!services.terminals) throw new Error(TERMINALS_NOT_SET_UP)
+      return (await services.terminals.compact(realpathSync.native(params.folder))) ?? null
+    },
+
     'terminals.sessions.list': () => {
       if (!services.terminals) throw new Error(TERMINALS_NOT_SET_UP)
       return services.terminals.list()
     },
 
-    'terminals.sessions.start': (params: { tool: 'opencode' | 'agy'; folder: string; model?: string }) => {
+    'terminals.sessions.start': (params: { tool: TerminalTool; folder: string; model?: string }) => {
       if (!services.terminals) throw new Error(TERMINALS_NOT_SET_UP)
+      if (!MANAGED_TERMINAL_TOOLS.includes(params.tool)) {
+        throw new Error("That agent has no non-interactive mode, so it can't run as a managed session. Start it in a terminal and attach instead.")
+      }
       if (!existsSync(params.folder) || !statSync(params.folder).isDirectory()) {
         throw new Error("That folder doesn't exist.")
       }
@@ -661,7 +690,7 @@ export function createHandlers(services: HandlerServices): Handlers {
       return services.terminals.items(params.id)
     },
 
-    'terminals.attach': (params: { pid: number; tool: 'opencode' | 'agy' }) => {
+    'terminals.attach': (params: { pid: number; tool: TerminalTool }) => {
       if (!services.terminals) throw new Error(TERMINALS_NOT_SET_UP)
       if (!Number.isInteger(params.pid) || params.pid <= 0) throw new Error('That terminal id is invalid.')
       return services.terminals.attach(params.pid, params.tool)
@@ -696,6 +725,49 @@ export function createHandlers(services: HandlerServices): Handlers {
     'terminals.attach.stop': (params: { id: string }) => {
       if (!services.terminals) throw new Error(TERMINALS_NOT_SET_UP)
       services.terminals.attachStop(params.id)
+      return null
+    },
+
+    'terminals.launch': (params: { tool: TerminalTool; folder: string }) => {
+      if (!services.terminals) throw new Error(TERMINALS_NOT_SET_UP)
+      if (!existsSync(params.folder) || !statSync(params.folder).isDirectory()) {
+        throw new Error("That folder doesn't exist.")
+      }
+      services.terminals.launch(params.tool, realpathSync.native(params.folder))
+      return null
+    },
+
+    'freebuff.status': (params: { folder?: string }) => {
+      if (!services.terminals) throw new Error(TERMINALS_NOT_SET_UP)
+      const folder = params?.folder && existsSync(params.folder) ? realpathSync.native(params.folder) : undefined
+      return services.terminals.freebuffStatus(folder)
+    },
+
+    // ---- Screen guide ----
+
+    'screen.look': async () => {
+      if (!services.screen) throw new Error(SCREEN_NOT_SET_UP)
+      return services.screen.look()
+    },
+
+    'screen.point': (params: { marks: ScreenMark[]; seconds?: number }) => {
+      if (!services.screen) throw new Error(SCREEN_NOT_SET_UP)
+      if (!Array.isArray(params.marks) || params.marks.length === 0) throw new Error('Give at least one mark to draw.')
+      services.screen.point(params.marks, params.seconds)
+      return null
+    },
+
+    'screen.say': async (params: { text: string }) => {
+      if (!services.screen) throw new Error(SCREEN_NOT_SET_UP)
+      const text = typeof params.text === 'string' ? params.text.trim() : ''
+      if (!text) throw new Error('Give some text to say.')
+      await services.screen.say(text)
+      return null
+    },
+
+    'screen.clear': () => {
+      if (!services.screen) throw new Error(SCREEN_NOT_SET_UP)
+      services.screen.clear()
       return null
     },
 

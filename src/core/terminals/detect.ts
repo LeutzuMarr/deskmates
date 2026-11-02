@@ -5,9 +5,14 @@ import type { DetectedTerminalAgent, TerminalTool } from '../../shared/protocol'
  *  shim that spawns a child process with the same name (verified on the development PC: a
  *  `serve` run showed a shim at `...\chocolatey\bin\opencode.exe` with a child at
  *  `...\chocolatey\lib\opencode\tools\opencode.exe`), so filtering by name alone catches both. */
-const EXE_NAMES: Record<TerminalTool, string> = { opencode: 'opencode.exe', agy: 'agy.exe' }
+const EXE_NAMES: Record<TerminalTool, string> = { opencode: 'opencode.exe', agy: 'agy.exe', freebuff: 'freebuff.exe' }
+
+/** The bare command name on Linux/macOS, which is what `ps` shows. */
+const POSIX_NAMES: Record<TerminalTool, string> = { opencode: 'opencode', agy: 'agy', freebuff: 'freebuff' }
 
 const POWERSHELL_EXE = 'powershell.exe'
+
+const PS_BIN = 'ps'
 
 /** One row of `Get-CimInstance Win32_Process`, as `ConvertTo-Json` renders it on this PowerShell
  *  version: `CreationDate` comes back as a legacy WMI `/Date(millis)/` string, not ISO text. */
@@ -45,12 +50,28 @@ function toolForExeName(name: string): TerminalTool | null {
   return null
 }
 
+/**
+ * Which tool a `ps` row is, if any. `comm` is the executable name, but an npm/bun install runs the
+ * tool as an interpreter (`node /usr/lib/node_modules/opencode/bin/opencode.js`), so `comm` says
+ * `node` and only the command line says what it really is. Both the interpreter and the script
+ * argument are checked, and a `.js` suffix on the script is ignored.
+ */
+function toolForPosixName(comm: string, commandLine: string): TerminalTool | null {
+  const bare = (value: string): string => value.split('/').pop()?.toLowerCase() ?? ''
+  const names = new Map(Object.entries(POSIX_NAMES).map(([tool, name]) => [name, tool as TerminalTool]))
+  const named = (value: string): TerminalTool | null => {
+    const base = bare(value).replace(/\.(js|mjs|cjs)$/, '')
+    return names.get(base) ?? null
+  }
+  return named(comm) ?? named(commandLine.split(/\s+/)[0] ?? '') ?? named(commandLine.split(/\s+/)[1] ?? '')
+}
+
 /** Best-effort working folder read straight off the command line (a `--dir <path>` or `--dir=<path>`
- *  flag), never a filesystem or process-handle lookup — the app has no cheap way to read another
+ *  flag, or Freebuff's `--cwd`), never a filesystem or process-handle lookup — the app has no cheap way to read another
  *  process's real current directory on Windows, so a session started without `--dir` (attach mode's
  *  territory, or an interactively-launched `opencode`/`agy`) just reports `null`. */
 export function folderFromCommandLine(commandLine: string): string | null {
-  const match = /--dir[= ]"([^"]+)"|--dir[= ]([^\s"]+)/.exec(commandLine)
+  const match = /--(?:dir|cwd)[= ]"([^"]+)"|--(?:dir|cwd)[= ]([^\s"]+)/.exec(commandLine)
   if (!match) return null
   return match[1] ?? match[2] ?? null
 }
@@ -88,13 +109,71 @@ export function parseProcessListing(json: string): DetectedTerminalAgent[] {
   return results
 }
 
+/** One line of `ps -eo pid=,ppid=,etimes=,comm=,args=` output, space separated. `etimes` is seconds
+ *  of elapsed time, which `ps` gives on Linux and macOS alike. */
+interface PsRow {
+  pid: number
+  ppid: number
+  elapsedSeconds: number
+  comm: string
+  commandLine: string
+}
+
+/** Splits `ps` output into rows, skipping anything that doesn't start with a pid. */
+export function parsePsListing(output: string): PsRow[] {
+  const rows: PsRow[] = []
+  for (const line of output.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    const match = /^(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s*(.*)$/.exec(trimmed)
+    if (!match) continue
+    rows.push({
+      pid: Number(match[1]),
+      ppid: Number(match[2]),
+      elapsedSeconds: Number(match[3]),
+      comm: match[4],
+      commandLine: match[5].trim()
+    })
+  }
+  return rows
+}
+
+/** Parses `ps` output into detected agents, collapsing an interpreter wrapper into the tool it
+ *  launched (the same reasoning as the Windows shim collapse), and turning `etimes` into the epoch
+ *  milliseconds the protocol asks for. */
+export function parsePosixProcessListing(output: string, now: number): DetectedTerminalAgent[] {
+  const rows = parsePsListing(output)
+  const results: DetectedTerminalAgent[] = []
+  for (const row of rows) {
+    const tool = toolForPosixName(row.comm, row.commandLine)
+    if (!tool) continue
+    const hasChildOfSameTool = rows.some((other) => other.ppid === row.pid && toolForPosixName(other.comm, other.commandLine) === tool)
+    if (hasChildOfSameTool) continue // a wrapper; its child below is the real, longer-lived process
+    results.push({
+      tool,
+      pid: row.pid,
+      startedAt: row.elapsedSeconds > 0 ? now - row.elapsedSeconds * 1000 : null,
+      commandLine: row.commandLine,
+      folder: folderFromCommandLine(row.commandLine)
+    })
+  }
+  return results
+}
+
 /** Lists running OpenCode and agy processes through the command runner (never a direct child-process
- *  call), so tests can swap in a fake. Returns an empty list rather than throwing when PowerShell
- *  itself fails or prints nothing — a machine with neither tool running is the common case. */
-export async function detectTerminalAgents(runner: CommandRunner): Promise<DetectedTerminalAgent[]> {
-  const result = await runner.run(POWERSHELL_EXE, ['-NoProfile', '-NonInteractive', '-Command', psScript()], {
-    timeoutMs: 15_000
-  })
+ *  call), so tests can swap in a fake. Returns an empty list rather than throwing when the listing
+ *  tool itself fails or prints nothing — a machine with neither tool running is the common case. */
+export async function detectTerminalAgents(runner: CommandRunner, platform: NodeJS.Platform = process.platform): Promise<DetectedTerminalAgent[]> {
+  if (platform === 'win32') {
+    const result = await runner.run(POWERSHELL_EXE, ['-NoProfile', '-NonInteractive', '-Command', psScript()], {
+      timeoutMs: 15_000
+    })
+    if (result.code !== 0) return []
+    return parseProcessListing(result.stdout)
+  }
+  // `comm` for the executable name, `etimes` for a start time, `args` for the working folder: three
+  // fields the Windows listing has no equivalent for.
+  const result = await runner.run(PS_BIN, ['-eo', 'pid=,ppid=,etimes=,comm=,args='], { timeoutMs: 15_000 })
   if (result.code !== 0) return []
-  return parseProcessListing(result.stdout)
+  return parsePosixProcessListing(result.stdout, Date.now())
 }

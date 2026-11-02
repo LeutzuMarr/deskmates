@@ -1,4 +1,5 @@
 import type { RenderRequest, RenderResult, VideoRequest, VideoResult } from '../core/render/types'
+import type { FreebuffStatus } from './freebuff'
 
 export type ProviderId =
   | 'google'
@@ -15,6 +16,7 @@ export type ProviderId =
   | 'lmstudio'
   | 'opencode'
   | 'agy'
+  | 'freebuff'
 export const PROVIDERS: readonly ProviderId[] = [
   'google',
   'openai',
@@ -29,7 +31,8 @@ export const PROVIDERS: readonly ProviderId[] = [
   'ollama',
   'lmstudio',
   'opencode',
-  'agy'
+  'agy',
+  'freebuff'
 ]
 
 export const PROVIDER_LABELS: Record<ProviderId, string> = {
@@ -46,7 +49,8 @@ export const PROVIDER_LABELS: Record<ProviderId, string> = {
   ollama: 'Ollama',
   lmstudio: 'LM Studio',
   opencode: 'OpenCode',
-  agy: 'Agy'
+  agy: 'Agy',
+  freebuff: 'Freebuff'
 }
 
 /** Providers served by a model server running on this PC: no API key, and the base URL is editable. */
@@ -57,8 +61,9 @@ export function isLocalProvider(provider: ProviderId): boolean {
 }
 
 /** Providers with no API key: the prompt is sent to a connected local CLI session instead (openCode
- *  `run` / agy `-p`), so they work everywhere a model can be picked once the CLI is installed. */
-export const CLI_PROVIDERS: readonly ProviderId[] = ['opencode', 'agy']
+ *  `run` / agy `-p` / a hidden Freebuff), so they work everywhere a model can be picked once the CLI
+ *  is installed. */
+export const CLI_PROVIDERS: readonly ProviderId[] = ['opencode', 'agy', 'freebuff']
 
 export function isCliProvider(provider: ProviderId): boolean {
   return CLI_PROVIDERS.includes(provider)
@@ -436,8 +441,30 @@ export interface EngineStatus {
 
 /** The coding-agent CLIs Deskmates can find and drive. Two ways: managed mode (the app runs the
  *  official non-interactive command itself, spec 5.13) and attach mode (the app types into a
- *  terminal window the user already has open and mirrors its screen back, spec 5.14~5.16). */
-export type TerminalTool = 'opencode' | 'agy'
+ *  terminal window the user already has open and mirrors its screen back, spec 5.14~5.16).
+ *  Freebuff is attach-only: its CLI has no non-interactive mode for managed sessions to run. */
+export type TerminalTool = 'opencode' | 'agy' | 'freebuff'
+
+/** The tools managed mode can run (each needs an official non-interactive command). */
+export const MANAGED_TERMINAL_TOOLS: readonly TerminalTool[] = ['opencode', 'agy']
+
+/** A screenshot taken for the screen guide. `data` is base64 JPEG. */
+export interface ScreenLook {
+  data: string
+  width: number
+  height: number
+}
+
+/** One mark the screen guide draws: an arrow pointing at (x, y), a circle or box around a region,
+ *  or a text label at (x, y). Coordinates are pixels of the last `screen.look` image. */
+export interface ScreenMark {
+  kind: 'arrow' | 'circle' | 'box' | 'label'
+  x: number
+  y: number
+  width?: number
+  height?: number
+  text?: string
+}
 
 /** One running OpenCode or agy process found on the machine, independent of whether Deskmates
  *  started it. `folder` is read cheaply off the command line (a `--dir` flag); it's `null` when the
@@ -460,6 +487,15 @@ export type TerminalOnboardingState = 'unknown' | 'primed' | 'confirmed' | 'fail
 export type TerminalSessionState = 'starting' | 'busy' | 'idle' | 'error'
 
 /** A managed-mode conversation the app started and can keep sending prompts to. */
+/** How much of a conversation's context window is in use, as the OpenCode server reports it. `limit`
+ *  is null when the model won't say — the meter is hidden then rather than drawn against a made-up
+ *  ceiling. `summarized` is true when the newest turn is already a compaction summary. */
+export interface SessionContextUsage {
+  used: number
+  limit: number | null
+  summarized: boolean
+}
+
 export interface TerminalSession {
   id: string
   tool: TerminalTool
@@ -652,6 +688,15 @@ export interface RpcMethods {
 
   /** Lists OpenCode/agy processes currently running on this machine (attach-mode-style detection). */
   'terminals.detect': { params: NoParams; result: DetectedTerminalAgent[] }
+  /** Whether a warm OpenCode server (and its conversation) already exists for `folder`. Lets the UI
+   *  drop the "Starting OpenCode…" notice on a follow-up turn instead of flashing it every time. */
+  'terminals.warm': { params: { folder: string }; result: { warm: boolean } }
+  /** How much of the model's context window `folder`'s conversation is using, for the Work tab's
+   *  meter. Null when there is no conversation yet or the server reports nothing. */
+  'terminals.usage': { params: { folder: string }; result: SessionContextUsage | null }
+  /** Folds `folder`'s conversation into a summary of itself, on the same session and in the same
+   *  model, and returns the usage afterwards. Throws when there's nothing to compact. */
+  'terminals.compact': { params: { folder: string }; result: SessionContextUsage | null }
   /** Lists managed sessions the app has started (any state, including ones that have finished). */
   'terminals.sessions.list': { params: NoParams; result: TerminalSession[] }
   /** Starts a managed session in `folder`: the app runs the tool's own non-interactive command,
@@ -682,6 +727,22 @@ export interface RpcMethods {
   /** Detaches: tells the helper to stop typing/polling and closes it. The user's terminal itself
    *  keeps running untouched. */
   'terminals.attach.stop': { params: { id: string }; result: null }
+  /** Opens a new terminal window running an attach-only tool (Freebuff) in `folder`. It then shows up
+   *  in `terminals.detect` like any terminal the user opened themselves, ready to attach. */
+  'terminals.launch': { params: { tool: TerminalTool; folder: string }; result: null }
+  /** What the hidden Freebuff behind the Work tab shows about its session (model, minutes left,
+   *  hours left today, context use) for `folder`, or for any running one. Null when none runs yet. */
+  'freebuff.status': { params: { folder?: string }; result: FreebuffStatus | null }
+
+  // ---- Screen guide: lets a connected agent see the screen, point at things and talk ----
+  /** A screenshot of the primary screen. Marks sent to `screen.point` use this image's pixels. */
+  'screen.look': { params: NoParams; result: ScreenLook }
+  /** Draws marks over the user's screen (click-through, hidden from screenshots) for `seconds`. */
+  'screen.point': { params: { marks: ScreenMark[]; seconds?: number }; result: null }
+  /** Says `text` aloud with the system voice. Resolves once it has finished speaking. */
+  'screen.say': { params: { text: string }; result: null }
+  /** Removes every mark from the screen. */
+  'screen.clear': { params: NoParams; result: null }
 
   // ---- Skills and plugins (spec 5.5) ----
   'skills.list': { params: NoParams; result: Skill[] }
@@ -798,3 +859,6 @@ export type CoreToHost =
   | { type: 'render-request'; id: number; request: RenderRequest }
   /** Asks the host to record a design page to a video file; answered by `video-result`. */
   | { type: 'video-request'; id: number; request: VideoRequest & { out: string } }
+  /** Draws the screen guide's marks over the primary screen for `seconds`; coordinates are physical
+   *  screen pixels. An empty list clears the overlay. */
+  | { type: 'overlay'; marks: ScreenMark[]; seconds: number }

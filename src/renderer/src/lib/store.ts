@@ -11,6 +11,7 @@ import type {
   CoreEvent,
   DetectedTerminalAgent,
   EngineStatus,
+  EngineStepState,
   FileChange,
   Handoff,
   Memory,
@@ -20,6 +21,7 @@ import type {
   ProviderId,
   Schedule,
   Settings,
+  SessionContextUsage,
   Skill,
   Task,
   TerminalSession,
@@ -28,6 +30,8 @@ import type {
   UsageRow
 } from '../../../shared/protocol'
 import type { InstallWslResult } from '../../../shared/desktop-api'
+import type { FreebuffStatus } from '../../../shared/freebuff'
+import { USES_WSL_ENGINE } from './bots'
 
 export type View =
   | { name: 'home' }
@@ -152,11 +156,21 @@ interface StoreState {
   setupEngine: () => Promise<void>
   installWsl: () => Promise<void>
   refreshDetectedAgents: () => Promise<void>
+  /** Reads the project conversation's context usage for the Work tab's meter. Puts null in state
+   *  when there's nothing to measure, which hides the meter rather than showing a made-up 0%. */
+  loadSessionUsage: (folder: string) => Promise<SessionContextUsage | null>
+  /** What the hidden Freebuff for `folder` shows about its session; null when none runs yet. */
+  loadFreebuffStatus: (folder: string) => Promise<FreebuffStatus | null>
+  /** Folds the project conversation into a summary of itself. Resolves with the usage afterwards, or
+   *  null when the compaction failed and the reason has already been toasted. */
+  compactSession: (folder: string) => Promise<SessionContextUsage | null>
   startTerminalSession: (tool: TerminalTool, folder: string, model?: string) => Promise<TerminalSession | null>
   sendTerminalPrompt: (id: string, text: string) => Promise<void>
   stopTerminalSession: (id: string) => Promise<void>
   openTerminalSession: (id: string) => Promise<void>
   attachTerminal: (tool: TerminalTool, pid: number) => Promise<void>
+  /** Opens a terminal window running an attach-only agent (Freebuff) in `folder`. */
+  launchTerminal: (tool: TerminalTool, folder: string) => Promise<boolean>
   sendAttachedPrompt: (id: string, text: string) => Promise<void>
   retryAttachedPrimer: (id: string) => Promise<void>
   answerAttachedPermission: (id: string, key: string, option: string) => Promise<void>
@@ -212,15 +226,19 @@ function upsertById<T extends { id: string }>(items: T[], item: T): T[] {
  *  always has something plain-language to show instead of silently rendering nothing forever.
  *  Never claims virtualization is off; that's a specific diagnosis we have no evidence for here. */
 function engineUnreachableStatus(message: string): EngineStatus {
+  // The error lands on the first step this platform actually shows, so a native install never
+  // reports the failure against WSL — a step its wizard doesn't even draw. Built per platform
+  // rather than by spreading keys over a partial record: the same step name would otherwise be
+  // written twice, and the later value would silently win.
+  const notNeeded: { state: EngineStepState; detail: string } = { state: 'ok', detail: 'Not needed — Docker runs natively on this system.' }
+  const waiting = (what: string): { state: EngineStepState; detail: string } => ({ state: 'missing', detail: `Waiting for ${what} first.` })
+  const failed: { state: EngineStepState; detail: string } = { state: 'error', detail: message }
   return {
     ready: false,
     virtualization: true,
-    steps: {
-      wsl: { state: 'error', detail: message },
-      distro: { state: 'missing', detail: 'Waiting for WSL to be ready first.' },
-      docker: { state: 'missing', detail: 'Waiting for the deskmates-engine distro first.' },
-      image: { state: 'missing', detail: 'Waiting for Docker to be ready first.' }
-    }
+    steps: USES_WSL_ENGINE
+      ? { wsl: failed, distro: waiting('WSL'), docker: waiting('the deskmates-engine distro'), image: waiting('Docker') }
+      : { wsl: notNeeded, distro: notNeeded, docker: failed, image: waiting('Docker') }
   }
 }
 
@@ -781,6 +799,35 @@ export const useStore = create<StoreState>()((set, get) => {
       }
     },
 
+    loadSessionUsage: async (folder) => {
+      try {
+        return await core.call('terminals.usage', { folder })
+      } catch (error) {
+        // A meter that can't be read is not worth a toast — it is a background read behind the UI,
+        // and the caller treats null as "don't draw it".
+        console.error('[renderer] terminals.usage failed', error)
+        return null
+      }
+    },
+
+    loadFreebuffStatus: async (folder) => {
+      try {
+        return await core.call('freebuff.status', { folder })
+      } catch (error) {
+        console.error('[renderer] freebuff.status failed', error)
+        return null
+      }
+    },
+
+    compactSession: async (folder) => {
+      try {
+        return await core.call('terminals.compact', { folder })
+      } catch (error) {
+        get().showToast(`Couldn't compact the conversation: ${error instanceof Error ? error.message : String(error)}`)
+        return null
+      }
+    },
+
     startTerminalSession: async (tool, folder, model) => {
       try {
         const session = await core.call('terminals.sessions.start', model ? { tool, folder, model } : { tool, folder })
@@ -825,6 +872,16 @@ export const useStore = create<StoreState>()((set, get) => {
         get().navigate({ name: 'agents-attach', sessionId: session.id })
       } catch (error) {
         get().showToast(`Couldn't attach to the terminal: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    },
+
+    launchTerminal: async (tool, folder) => {
+      try {
+        await core.call('terminals.launch', { tool, folder })
+        return true
+      } catch (error) {
+        get().showToast(`Couldn't start it: ${error instanceof Error ? error.message : String(error)}`)
+        return false
       }
     },
 

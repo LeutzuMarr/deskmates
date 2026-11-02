@@ -6,6 +6,7 @@ import { useStore } from '../lib/store'
 import { formatClock, formatDay, statusLabel, startingNotice } from '../lib/format'
 import { Composer } from '../components/Composer'
 import { Conversation } from '../components/Conversation'
+import { FreebuffStatusLine } from '../components/FreebuffStatusLine'
 import type { FileChange, PlanItem, Task } from '../../../shared/protocol'
 
 export function TaskView({ projectId, taskId }: { projectId: string; taskId: string }) {
@@ -14,6 +15,7 @@ export function TaskView({ projectId, taskId }: { projectId: string; taskId: str
   const timelines = useStore((s) => s.timelines)
   const changes = useStore((s) => s.changes)
   const showToast = useStore((s) => s.showToast)
+  const defaultModel = useStore((s) => s.settings?.defaultModel ?? null)
   const [panelOpen, setPanelOpen] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [draft, setDraft] = useState('')
@@ -22,10 +24,33 @@ export function TaskView({ projectId, taskId }: { projectId: string; taskId: str
   const task = (tasks ?? []).find((t) => t.id === taskId)
   const timeline = timelines[taskId] ?? []
   const taskChanges = changes[taskId] ?? []
+  const model = project?.model ?? defaultModel
 
   // A CLI-backed provider boots a whole agent process before it says anything, and on a cold start
-  // that is tens of seconds of silence. Naming it stops the wait reading as a hang.
-  const starting = startingNotice(project?.model)
+  // that is tens of seconds of silence. Naming it stops the wait reading as a hang — but OpenCode
+  // keeps a server per folder alive between turns, so once one is up the next prompt is answered in
+  // about a second and a half and the notice is both wrong and alarming. Asked at the moment a run
+  // starts, and reset afterwards, since the server can also time itself out while idle.
+  const [warm, setWarm] = useState(false)
+  const running = task?.status === 'running'
+  useEffect(() => {
+    if (!running || !project) {
+      if (!running) setWarm(false)
+      return
+    }
+    let live = true
+    void core
+      .call('terminals.warm', { folder: project.folder })
+      .then((result) => {
+        if (live) setWarm(result.warm)
+      })
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [running, project?.folder])
+
+  const starting = startingNotice(project?.model, warm)
 
   useEffect(() => {
     if (task && task.plan.length > 0) setPanelOpen(true)
@@ -87,6 +112,7 @@ export function TaskView({ projectId, taskId }: { projectId: string; taskId: str
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          {project && model?.provider === 'freebuff' && <FreebuffStatusLine folder={project.folder} modelId={model.modelId} />}
           <button
             type="button"
             aria-expanded={panelOpen}

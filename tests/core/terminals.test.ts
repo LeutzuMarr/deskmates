@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { CommandResult, CommandRunner, RunOptions } from '../../src/core/bots/command-runner'
-import { detectTerminalAgents, folderFromCommandLine, parseProcessListing, parseWmiDate } from '../../src/core/terminals/detect'
+import {
+  detectTerminalAgents,
+  folderFromCommandLine,
+  parsePosixProcessListing,
+  parseProcessListing,
+  parsePsListing,
+  parseWmiDate
+} from '../../src/core/terminals/detect'
 import {
   ManagedTerminalRunner,
   buildAgyArgs,
@@ -18,6 +25,8 @@ import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ProcessSpawner, SpawnedProcess, SpawnOptions } from '../../src/core/terminals/process'
+import { fakeOpenCode } from './helpers/opencode-server'
+import type { FakeOpenCode } from './helpers/opencode-server'
 import type { TimelineItem, TerminalSession } from '../../src/shared/protocol'
 
 // ---- fakes ----
@@ -66,10 +75,10 @@ class FakeSpawnedProcess implements SpawnedProcess {
  *  to the streaming spawner managed mode needs (see process.ts's own doc comment for why it's a
  *  separate interface from CommandRunner). */
 class FakeSpawner implements ProcessSpawner {
-  readonly calls: { file: string; args: string[]; cwd?: string }[] = []
+  readonly calls: { file: string; args: string[]; cwd?: string; env?: Record<string, string> }[] = []
   readonly processes: FakeSpawnedProcess[] = []
   spawn(file: string, args: string[], options: SpawnOptions = {}): SpawnedProcess {
-    this.calls.push({ file, args, cwd: options.cwd })
+    this.calls.push({ file, args, cwd: options.cwd, env: options.env })
     const proc = new FakeSpawnedProcess()
     this.processes.push(proc)
     return proc
@@ -147,6 +156,13 @@ describe('detect.ts', () => {
     expect(parseProcessListing('{"ProcessId":1,"ParentProcessId":0,"Name":"node.exe","CommandLine":"node x.js","CreationDate":null}')).toEqual([])
   })
 
+  it('finds Freebuff and reads its --cwd folder', () => {
+    const row = '{"ProcessId":42,"ParentProcessId":7,"Name":"freebuff.exe","CommandLine":"C:\\\\Users\\\\u\\\\.config\\\\manicode\\\\freebuff.exe --cwd \\"D:\\\\My App\\"","CreationDate":null}'
+    expect(parseProcessListing(row)).toEqual([
+      { tool: 'freebuff', pid: 42, startedAt: null, commandLine: 'C:\\Users\\u\\.config\\manicode\\freebuff.exe --cwd "D:\\My App"', folder: 'D:\\My App' }
+    ])
+  })
+
   it('reads the working folder off a --dir flag, quoted or not', () => {
     expect(folderFromCommandLine('opencode.exe run --dir "D:\\My Project" "hi"')).toBe('D:\\My Project')
     expect(folderFromCommandLine('opencode.exe run --dir=D:\\Proj "hi"')).toBe('D:\\Proj')
@@ -172,6 +188,69 @@ describe('detect.ts', () => {
 
     const failing = makeFakeCommandRunner({ code: 1, stdout: '', stderr: 'boom' })
     expect(await detectTerminalAgents(failing)).toEqual([])
+  })
+})
+
+// ---- detection: real `ps -eo pid=,ppid=,etimes=,comm=,args=` output, captured on Ubuntu 24.04 from
+// an npm install of OpenCode, which runs as `node …/opencode/bin/opencode.js serve --port 4999` ----
+
+const REAL_POSIX_PS = `  1234     1   90210 systemd
+  24980  24979    3600 opencode
+  31704  24980    3598 opencode serve --port 4999
+  29428  24980    3540 node /usr/lib/node_modules/opencode/bin/opencode.js serve --port 4998
+  29429  29428    3539 node
+  31000     1     120 agy
+  31500  31000     100 agy run --dir /home/dana/work
+  32000     1       50 bash`
+
+describe('detect.ts on Linux', () => {
+  it('splits ps output into rows', () => {
+    const rows = parsePsListing(REAL_POSIX_PS)
+    expect(rows).toHaveLength(8)
+    expect(rows[0]).toEqual({ pid: 1234, ppid: 1, elapsedSeconds: 90210, comm: 'systemd', commandLine: '' })
+    expect(rows[3].comm).toBe('node')
+  })
+
+  it('finds a tool run through an interpreter, whose comm is only node', () => {
+    const now = 1_790_002_811_916
+    const result = parsePosixProcessListing(REAL_POSIX_PS, now)
+    const viaNode = result.find((agent) => agent.pid === 29428)
+    expect(viaNode?.tool).toBe('opencode')
+    expect(viaNode?.startedAt).toBe(now - 3540 * 1000)
+    expect(viaNode?.commandLine).toContain('/usr/lib/node_modules/opencode/bin/opencode.js')
+  })
+
+  it('collapses a wrapper parent into the child that really runs the tool', () => {
+    const result = parsePosixProcessListing(REAL_POSIX_PS, 0)
+    // 24980 spawned both a real opencode (31704) and the node-runner (29428); the wrapper goes.
+    expect(result.map((agent) => agent.pid)).toEqual([31704, 29428, 31500])
+  })
+
+  it('reads the working folder off a --dir flag', () => {
+    const result = parsePosixProcessListing(REAL_POSIX_PS, 0)
+    expect(result.find((agent) => agent.pid === 31500)?.folder).toBe('/home/dana/work')
+  })
+
+  it('ignores unrelated processes and unparseable lines', () => {
+    expect(parsePosixProcessListing('garbage\n\n   1 0 5 kthreadd', 0)).toEqual([])
+  })
+
+  it('reports no start time when etimes is zero rather than pretending to know it', () => {
+    const result = parsePosixProcessListing('  42  1  0 opencode', 1000)
+    expect(result[0].startedAt).toBeNull()
+  })
+
+  it('detectTerminalAgents uses ps on Linux and returns [] when ps fails', async () => {
+    const seen: { file: string; args: string[] }[] = []
+    const ok = makeFakeCommandRunner((file, args) => {
+      seen.push({ file, args })
+      return { code: 0, stdout: REAL_POSIX_PS, stderr: '' }
+    })
+    const results = await detectTerminalAgents(ok, 'linux')
+    expect(results).toHaveLength(3)
+    expect(seen[0].file).toBe('ps')
+    expect(seen[0].args).toContain('-eo')
+    expect(await detectTerminalAgents(makeFakeCommandRunner({ code: 1, stdout: '', stderr: 'boom' }), 'linux')).toEqual([])
   })
 })
 
@@ -444,19 +523,18 @@ function sessionsAreIdle(runner: ManagedTerminalRunner, id: string): boolean {
 // ---- execute(): the "OpenCode as a model provider" path the Work tab uses ----
 
 describe('ManagedTerminalRunner.execute: stoppable, streaming, and bounded', () => {
-  const textLine = (text: string): string =>
+  // The one-shot spawn path is agy's alone now: OpenCode runs against a server that outlives the turn
+  // (see opencode-server.test.ts). These tests therefore exercise the watchdogs on agy, which is the
+  // path that still has to kill a process to stop it.
+  const agyText = (text: string): string =>
     JSON.stringify({
-      type: 'text',
-      timestamp: 1790002482444,
-      sessionID: 'ses_1',
-      part: { id: 'prt_1', messageID: 'msg_1', sessionID: 'ses_1', type: 'text', text }
+      event: 'step_update',
+      step_update: { step_type: 'assistant', state: 'DONE', text, conversation_id: 'cnv_1', step_index: 1 }
     })
 
-  const toolLine = JSON.stringify({
-    type: 'tool',
-    timestamp: 1790002482500,
-    sessionID: 'ses_1',
-    part: { id: 'prt_2', type: 'tool', tool: 'read', state: { status: 'completed' } }
+  const agyTool = JSON.stringify({
+    event: 'step_update',
+    step_update: { step_type: 'read_file', state: 'RUNNING', conversation_id: 'cnv_1', step_index: 2 }
   })
 
   it('streams the CLI\'s items to onItem as they arrive, so the caller is not silent until exit', () => {
@@ -464,13 +542,13 @@ describe('ManagedTerminalRunner.execute: stoppable, streaming, and bounded', () 
     const { runner } = makeRunner(spawner)
     const seen: TimelineItem[] = []
 
-    const done = runner.execute('opencode', 'D:\\proj', 'what model are you?', undefined, {
+    const done = runner.execute('agy', 'D:\\proj', 'what model are you?', undefined, {
       onItem: (item) => seen.push(item)
     })
 
     // Still running — and the caller already knows the CLI is doing something.
-    spawner.processes[0].emitStdout(toolLine)
-    spawner.processes[0].emitStdout(textLine('big-pickle'))
+    spawner.processes[0].emitStdout(agyTool)
+    spawner.processes[0].emitStdout(agyText('big-pickle'))
     expect(seen).toHaveLength(2)
     expect(seen[1]).toMatchObject({ kind: 'assistant', text: 'big-pickle' })
 
@@ -486,10 +564,10 @@ describe('ManagedTerminalRunner.execute: stoppable, streaming, and bounded', () 
     const { runner } = makeRunner(spawner)
     const controller = new AbortController()
 
-    const done = runner.execute('opencode', 'D:\\proj', 'what model are you?', undefined, {
+    const done = runner.execute('agy', 'D:\\proj', 'what model are you?', undefined, {
       signal: controller.signal
     })
-    spawner.processes[0].emitStdout(textLine('big-pickle'))
+    spawner.processes[0].emitStdout(agyText('big-pickle'))
     controller.abort()
 
     // Resolves without waiting for the process to close — that wait is what made Stop feel dead.
@@ -506,7 +584,7 @@ describe('ManagedTerminalRunner.execute: stoppable, streaming, and bounded', () 
     const controller = new AbortController()
     controller.abort()
 
-    const result = await runner.execute('opencode', 'D:\\proj', 'anything', undefined, {
+    const result = await runner.execute('agy', 'D:\\proj', 'anything', undefined, {
       signal: controller.signal
     })
 
@@ -514,14 +592,14 @@ describe('ManagedTerminalRunner.execute: stoppable, streaming, and bounded', () 
     expect(result).toEqual({ text: '', stopped: true })
   })
 
-  it('stops a run that goes quiet forever — the OpenCode deadlock prints a reply, then never exits', async () => {
+  it('stops a run that goes quiet forever — a CLI that prints a reply, then never exits', async () => {
     vi.useFakeTimers()
     try {
       const spawner = new FakeSpawner()
       const { runner } = makeRunner(spawner)
 
-      const done = runner.execute('opencode', 'D:\\proj', 'what model are you?')
-      spawner.processes[0].emitStdout(textLine('big-pickle'))
+      const done = runner.execute('agy', 'D:\\proj', 'what model are you?')
+      spawner.processes[0].emitStdout(agyText('big-pickle'))
       // ...and then nothing. No exit, ever.
       await vi.advanceTimersByTimeAsync(CLI_RUN_STALL_MS + 1)
 
@@ -539,10 +617,10 @@ describe('ManagedTerminalRunner.execute: stoppable, streaming, and bounded', () 
       const spawner = new FakeSpawner()
       const { runner } = makeRunner(spawner)
 
-      const done = runner.execute('opencode', 'D:\\proj', 'go')
+      const done = runner.execute('agy', 'D:\\proj', 'go')
       // Busy but silent enough to keep the stall watchdog happy, for longer than the cap.
       for (let i = 0; i < 20; i++) {
-        spawner.processes[0].emitStdout(toolLine)
+        spawner.processes[0].emitStdout(agyTool)
         await vi.advanceTimersByTimeAsync(CLI_RUN_STALL_MS - 1000)
       }
       await vi.advanceTimersByTimeAsync(CLI_RUN_TIMEOUT_MS)
@@ -555,88 +633,13 @@ describe('ManagedTerminalRunner.execute: stoppable, streaming, and bounded', () 
     }
   })
 
-  it('runs a second OpenCode call only after the first finishes, instead of deadlocking both', async () => {
+  it('prepends the caller\'s standing instructions to an agy prompt, since it has no session to keep them in', async () => {
     const spawner = new FakeSpawner()
     const { runner } = makeRunner(spawner)
 
-    const first = runner.execute('opencode', 'D:\\proj', 'one')
-    const second = runner.execute('opencode', 'D:\\proj', 'two')
-    expect(spawner.calls).toHaveLength(1)
-
-    spawner.processes[0].emitStdout(textLine('first done'))
-    spawner.processes[0].emitExit(0)
-    await first
-    await vi.waitFor(() => expect(spawner.calls).toHaveLength(2))
-
-    spawner.processes[1].emitStdout(textLine('second done'))
-    spawner.processes[1].emitExit(0)
-    expect((await second).text).toBe('second done')
-  })
-
-  it('resolves a stopped run straight away, but keeps the OpenCode slot until the dead process is gone', async () => {
-    const spawner = new FakeSpawner()
-    const { runner } = makeRunner(spawner)
-    const controller = new AbortController()
-
-    const first = runner.execute('opencode', 'D:\\proj', 'one', undefined, { signal: controller.signal })
-    const second = runner.execute('opencode', 'D:\\proj', 'two')
-    expect(spawner.calls).toHaveLength(1)
-
-    controller.abort()
-    // Stop resolves without waiting for the kill to land, so the task leaves `running` at once.
-    expect(await first).toEqual({ text: '', stopped: true })
-    // But the slot is still held: releasing it here let the next run start on top of the dying
-    // process, and OpenCode deadlocks on exactly that overlap.
-    expect(spawner.calls).toHaveLength(1)
-
-    spawner.processes[0].emitExit(1)
-    await vi.waitFor(() => expect(spawner.calls).toHaveLength(2))
-
-    spawner.processes[1].emitStdout(textLine('second done'))
-    spawner.processes[1].emitExit(0)
-    expect((await second).text).toBe('second done')
-  })
-
-  it('frees the OpenCode slot even when a stopped process never exits', async () => {
-    vi.useFakeTimers()
-    try {
-      const spawner = new FakeSpawner()
-      const { runner } = makeRunner(spawner)
-      const controller = new AbortController()
-
-      const first = runner.execute('opencode', 'D:\\proj', 'one', undefined, { signal: controller.signal })
-      const second = runner.execute('opencode', 'D:\\proj', 'two')
-      expect(spawner.calls).toHaveLength(1)
-
-      controller.abort()
-      await first
-      // The process is killed but never closes, so the grace timer has to take the slot back or
-      // OpenCode would be blocked for the rest of the session.
-      await vi.advanceTimersByTimeAsync(PROCESS_EXIT_GRACE_MS)
-      expect(spawner.calls).toHaveLength(2)
-
-      spawner.processes[1].emitStdout(textLine('second done'))
-      spawner.processes[1].emitExit(0)
-      expect((await second).text).toBe('second done')
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('drops a queued run that is aborted while it waits, without spawning it', async () => {
-    const spawner = new FakeSpawner()
-    const { runner } = makeRunner(spawner)
-    const controller = new AbortController()
-
-    const first = runner.execute('opencode', 'D:\\proj', 'one')
-    const second = runner.execute('opencode', 'D:\\proj', 'two', undefined, { signal: controller.signal })
-
-    controller.abort()
-    spawner.processes[0].emitExit(0)
-    await first
-
-    expect(await second).toEqual({ text: '', stopped: true })
-    expect(spawner.calls).toHaveLength(1)
+    void runner.execute('agy', 'D:\\proj', 'what model are you?', undefined, { system: 'BE BRIEF.' })
+    const args = spawner.calls[0].args as string[]
+    expect(args.join('\n')).toContain('BE BRIEF.\n\nwhat model are you?')
   })
 
   it('still runs agy concurrently — the one-slot rule is OpenCode\'s, not agy\'s', () => {
@@ -645,5 +648,205 @@ describe('ManagedTerminalRunner.execute: stoppable, streaming, and bounded', () 
     void runner.execute('agy', 'D:\\proj', 'one')
     void runner.execute('agy', 'D:\\proj', 'two')
     expect(spawner.calls).toHaveLength(2)
+  })
+})
+
+describe('ManagedTerminalRunner.execute: one OpenCode conversation per folder', () => {
+  // OpenCode turns share a server now, but the single-slot rule survives that: the Agents tab's managed
+  // sessions still run `opencode run`, and a `run` process overlapping a server-backed turn is the same
+  // overlap that deadlocks the CLI. Two Work-tab turns on one folder must not overlap either — they
+  // share one session, and interleaved prompts on a shared session is the other half of the problem.
+  // The server is spawned after a real free port has been reserved, so it is not up on the first
+  // line of the test — wait for the process, then give it the line it prints to announce its address.
+  const open = async (spawner: FakeSpawner, index = 0): Promise<void> => {
+    await vi.waitFor(() => expect(spawner.processes.length).toBeGreaterThan(index))
+    spawner.processes[index].emitStdout('opencode server listening on http://127.0.0.1:41234')
+  }
+  const sent = (server: FakeOpenCode): number => server.prompts.length
+
+  it('starts one server and reuses one conversation instead of spawning per prompt', async () => {
+    const server = fakeOpenCode()
+    try {
+      const spawner = new FakeSpawner()
+      const { runner } = makeRunner(spawner)
+
+      const first = runner.execute('opencode', 'D:\\proj', 'what model are you?', 'opencode/big-pickle')
+      await open(spawner)
+      await vi.waitFor(() => expect(sent(server)).toBe(1))
+      server.reply('ses_1', 'big-pickle')
+      expect((await first).text).toBe('big-pickle')
+
+      const second = runner.execute('opencode', 'D:\\proj', 'and now?', 'opencode/big-pickle')
+      await vi.waitFor(() => expect(sent(server)).toBe(2))
+      server.reply('ses_1', 'still big-pickle')
+
+      expect((await second).text).toBe('still big-pickle')
+      // The whole point: one process for the conversation, and one session created for it.
+      expect(spawner.calls).toHaveLength(1)
+      expect(server.sessions).toHaveLength(1)
+    } finally {
+      server.restore()
+    }
+  })
+
+  it('sends the standing instructions once, as the conversation\'s system block', async () => {
+    const server = fakeOpenCode()
+    try {
+      const spawner = new FakeSpawner()
+      const { runner } = makeRunner(spawner)
+      const brief = 'You are Deskmates. 175KB of standing instructions.'
+
+      const first = runner.execute('opencode', 'D:\\proj', 'one', 'opencode/big-pickle', { system: brief })
+      await open(spawner)
+      await vi.waitFor(() => expect(sent(server)).toBe(1))
+      server.reply('ses_1', 'ok')
+      await first
+
+      const second = runner.execute('opencode', 'D:\\proj', 'two', 'opencode/big-pickle', { system: brief })
+      await vi.waitFor(() => expect(sent(server)).toBe(2))
+      server.reply('ses_1', 'ok')
+      await second
+
+      // First turn carries the brief, and the prompt is only the question — the brief is not
+      // concatenated onto it, which is what used to spill 175KB to a temp file every single time.
+      expect(server.prompts[0].system).toBe(brief)
+      expect(server.prompts[0].parts[0].text).toBe('one')
+      // Second turn omits it: the session already has it.
+      expect(server.prompts[1].system).toBeUndefined()
+      expect(server.prompts[1].parts[0].text).toBe('two')
+    } finally {
+      server.restore()
+    }
+  })
+
+  it('queues a second turn rather than interleaving prompts on the shared conversation', async () => {
+    const server = fakeOpenCode()
+    try {
+      const spawner = new FakeSpawner()
+      const { runner } = makeRunner(spawner)
+
+      const first = runner.execute('opencode', 'D:\\proj', 'one', 'opencode/big-pickle')
+      await open(spawner)
+      await vi.waitFor(() => expect(sent(server)).toBe(1))
+
+      const second = runner.execute('opencode', 'D:\\proj', 'two', 'opencode/big-pickle')
+      // The second turn is waiting its turn: nothing new on the wire.
+      expect(sent(server)).toBe(1)
+
+      server.reply('ses_1', 'first done')
+      expect((await first).text).toBe('first done')
+
+      await vi.waitFor(() => expect(sent(server)).toBe(2))
+      server.reply('ses_1', 'second done')
+      expect((await second).text).toBe('second done')
+    } finally {
+      server.restore()
+    }
+  })
+
+  it('a signal that is already aborted never starts a server', async () => {
+    const spawner = new FakeSpawner()
+    const { runner } = makeRunner(spawner)
+    const controller = new AbortController()
+    controller.abort()
+
+    const result = await runner.execute('opencode', 'D:\\proj', 'anything', 'opencode/big-pickle', {
+      signal: controller.signal
+    })
+
+    expect(spawner.calls).toHaveLength(0)
+    expect(result).toEqual({ text: '', stopped: true })
+  })
+
+  it('stops a turn at once on abort, keeping the text that already arrived, and asks the server to halt', async () => {
+    const server = fakeOpenCode()
+    try {
+      const spawner = new FakeSpawner()
+      const { runner } = makeRunner(spawner)
+      const controller = new AbortController()
+      const seen: string[] = []
+
+      const done = runner.execute('opencode', 'D:\\proj', 'go', 'opencode/big-pickle', {
+        signal: controller.signal,
+        onItem: (item) => {
+          if (item.kind === 'assistant') seen.push(item.text)
+        }
+      })
+      await open(spawner)
+      await vi.waitFor(() => expect(sent(server)).toBe(1))
+      server.emit('message.part.updated', {
+        sessionID: 'ses_1',
+        part: { id: 'prt_1', type: 'text', text: 'partial answer' }
+      })
+      // Stop is pressed once the text is on screen, so the delta has to have landed first.
+      await vi.waitFor(() => expect(seen.join('')).toBe('partial answer'))
+
+      controller.abort()
+
+      const result = await done
+      expect(result.stopped).toBe(true)
+      expect(result.text).toBe('partial answer')
+      expect(result.error).toBeUndefined()
+      await vi.waitFor(() =>
+        expect(server.fetch.mock.calls.some(([url]: any) => String(url).includes('/abort'))).toBe(true)
+      )
+    } finally {
+      server.restore()
+    }
+  })
+
+  it('keeps the server across a stop, so the next prompt is still a warm follow-up', async () => {
+    const server = fakeOpenCode()
+    try {
+      const spawner = new FakeSpawner()
+      const { runner } = makeRunner(spawner)
+      const controller = new AbortController()
+
+      const first = runner.execute('opencode', 'D:\\proj', 'one', 'opencode/big-pickle', {
+        signal: controller.signal
+      })
+      await open(spawner)
+      await vi.waitFor(() => expect(sent(server)).toBe(1))
+      controller.abort()
+      await first
+
+      const second = runner.execute('opencode', 'D:\\proj', 'two', 'opencode/big-pickle')
+      await vi.waitFor(() => expect(sent(server)).toBe(2))
+      server.reply('ses_1', 'second done')
+      expect((await second).text).toBe('second done')
+
+      // Stopping a turn is not tearing the conversation down.
+      expect(spawner.calls).toHaveLength(1)
+      expect(spawner.processes[0].killed).toBe(false)
+    } finally {
+      server.restore()
+    }
+  })
+
+  it('replaces a server that died between turns instead of reporting a failure', async () => {
+    const server = fakeOpenCode()
+    try {
+      const spawner = new FakeSpawner()
+      const { runner } = makeRunner(spawner)
+
+      const first = runner.execute('opencode', 'D:\\proj', 'one', 'opencode/big-pickle')
+      await open(spawner)
+      await vi.waitFor(() => expect(sent(server)).toBe(1))
+      server.reply('ses_1', 'ok')
+      await first
+
+      // The server goes away while Deskmates is idle.
+      spawner.processes[0].emitExit(1)
+
+      const second = runner.execute('opencode', 'D:\\proj', 'two', 'opencode/big-pickle')
+      await open(spawner, 1)
+      await vi.waitFor(() => expect(sent(server)).toBe(2))
+      server.reply('ses_2', 'ok again')
+
+      expect((await second).text).toBe('ok again')
+      expect(spawner.calls).toHaveLength(2)
+    } finally {
+      server.restore()
+    }
   })
 })

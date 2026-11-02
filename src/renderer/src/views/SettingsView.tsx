@@ -6,6 +6,7 @@ import { core } from '../lib/rpc'
 import { concentricVars } from '../lib/design'
 import { isValidWhatsAppNumber } from '../lib/bots'
 import { DEFAULT_SETTINGS, PROVIDERS, PROVIDER_LABELS, isCliProvider, isLocalProvider } from '../../../shared/protocol'
+import { freebuffModelLabel } from '../../../shared/freebuff'
 import type { Appearance, PcCloudConnection, PcHostKind, PhoneInfo, ProviderId } from '../../../shared/protocol'
 
 type LocalUrlField = 'ollamaBaseUrl' | 'lmstudioBaseUrl'
@@ -406,7 +407,7 @@ export function SettingsView() {
                   {PROVIDERS.map((provider) => (
                     <option key={provider} value={provider}>
                       {PROVIDER_LABELS[provider]}
-                      {provider === 'opencode' || provider === 'agy' ? ' (CLI)' : ''}
+                      {isCliProvider(provider) ? ' (CLI)' : ''}
                       {isLocalProvider(provider) ? ' (local)' : ''}
                     </option>
                   ))}
@@ -425,7 +426,7 @@ export function SettingsView() {
                   <option value="">Choose a model</option>
                   {(models[modelProvider as ProviderId] ?? []).map((model) => (
                     <option key={model} value={model}>
-                      {model}
+                      {modelProvider === 'freebuff' ? freebuffModelLabel(model) : model}
                     </option>
                   ))}
                 </select>
@@ -834,7 +835,7 @@ function AppearanceRow({
   )
 }
 
-type AgentToolId = 'opencode' | 'cline' | 'antigravity'
+type AgentToolId = 'opencode' | 'cline' | 'antigravity' | 'freebuff'
 
 interface AgentToolConfig {
   label: string
@@ -874,7 +875,7 @@ function mcpServersSnippet(commandPath: string): string {
 }`
 }
 
-const AGENT_TOOL_ORDER: AgentToolId[] = ['opencode', 'cline', 'antigravity']
+const AGENT_TOOL_ORDER: AgentToolId[] = ['opencode', 'cline', 'antigravity', 'freebuff']
 
 const AGENT_TOOLS: Record<AgentToolId, AgentToolConfig> = {
   opencode: {
@@ -890,6 +891,11 @@ const AGENT_TOOLS: Record<AgentToolId, AgentToolConfig> = {
   antigravity: {
     label: 'Antigravity',
     location: '%USERPROFILE%\\.gemini\\antigravity\\mcp_config.json',
+    snippet: mcpServersSnippet
+  },
+  freebuff: {
+    label: 'Freebuff',
+    location: '.agents\\mcp.json in the project, or %USERPROFILE%\\.agents\\mcp.json for every project',
     snippet: mcpServersSnippet
   }
 }

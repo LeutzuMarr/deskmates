@@ -72,7 +72,7 @@ function resultText(result: unknown): string {
 }
 
 describe('createDeskmatesServer', () => {
-  it('lists all nine tools', async () => {
+  it('lists all thirteen tools', async () => {
     const { client } = await connect()
     const { tools } = await client.listTools()
     expect(tools.map((tool) => tool.name).sort()).toEqual([
@@ -84,8 +84,35 @@ describe('createDeskmatesServer', () => {
       'pc_exec',
       'pc_list',
       'pc_open',
-      'pc_screenshot'
+      'pc_screenshot',
+      'screen_clear',
+      'screen_look',
+      'screen_point',
+      'screen_say'
     ])
+  })
+
+  it('screen_look returns the screenshot as an image with its size', async () => {
+    const { client } = await connect({ 'screen.look': () => ({ data: 'QUJD', width: 1280, height: 720 }) })
+    const result = await client.callTool({ name: 'screen_look', arguments: {} })
+    expect(result.isError).toBeFalsy()
+    const content = result.content as Array<{ type: string; data?: string; mimeType?: string; text?: string }>
+    expect(content[0]).toEqual({ type: 'image', data: 'QUJD', mimeType: 'image/jpeg' })
+    expect(content[1].text).toContain('1280x720')
+  })
+
+  it('screen_point forwards the marks and duration', async () => {
+    const { client, calls } = await connect({ 'screen.point': () => null })
+    const marks = [{ kind: 'arrow', x: 10, y: 20, text: 'Click here' }]
+    const text = await callToolText(client, 'screen_point', { marks, seconds: 5 })
+    expect(text).toContain('1 mark')
+    expect(calls).toEqual([{ method: 'screen.point', params: { marks, seconds: 5 } }])
+  })
+
+  it('screen_say forwards the text', async () => {
+    const { client, calls } = await connect({ 'screen.say': () => null })
+    await callToolText(client, 'screen_say', { text: 'The button is top right.' })
+    expect(calls).toEqual([{ method: 'screen.say', params: { text: 'The button is top right.' } }])
   })
 
   it('gives every tool a description', async () => {

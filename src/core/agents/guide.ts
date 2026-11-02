@@ -1,11 +1,11 @@
 import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 
 export interface AgentGuideInput {
   /** The app's data folder, e.g. D:\DeskmatesData. */
   dataDir: string
-  /** Absolute path of deskmates.cmd, e.g. <dataDir>\agent-kit\deskmates.cmd. */
+  /** Absolute path of the deskmates command, e.g. <dataDir>\agent-kit\deskmates.cmd on Windows. */
   commandPath: string
   appVersion: string
   pcs: { installed: false } | { installed: true; mode: 'own' | 'shared'; sharedFolder: string }
@@ -23,6 +23,25 @@ export interface AgentGuide {
 /** The folder holding the guide, the deskmates command and bridge.json. */
 export function agentKitDir(dataDir: string): string {
   return join(dataDir, 'agent-kit')
+}
+
+/**
+ * The `deskmates` command connected coding agents run to reach the app from their own shell.
+ *
+ * Windows gets a `.cmd` batch file because that's what the shell will execute; Linux and macOS get an
+ * extensionless script with a shebang instead, since `.cmd` is meaningless there. Both the main
+ * process (which writes the file) and the core (which points agents at it in the guide) resolve it
+ * through this function, so they can't disagree about the name.
+ */
+export function agentCommandFileName(): string {
+  return process.platform === 'win32' ? 'deskmates.cmd' : 'deskmates'
+}
+
+/** How the guide names the host OS, so it never tells an agent the wrong platform. */
+function hostOs(): string {
+  if (process.platform === 'win32') return 'Windows'
+  if (process.platform === 'darwin') return 'macOS'
+  return 'Linux'
 }
 
 /** The 32 short words the check phrase draws from. */
@@ -64,7 +83,7 @@ deskmates command will tell you the same.
 }
 
 /** The PC section for the "installed" case, with the mode and the shared folder. */
-function botPcsInstalled(pcs: { mode: 'own' | 'shared'; sharedFolder: string }): string {
+function botPcsInstalled(pcs: { mode: 'own' | 'shared'; sharedFolder: string }, command: string): string {
   const mode =
     pcs.mode === 'own'
       ? `Each bot has its own PC with its own logins and files, so bots can run at the same time.`
@@ -74,12 +93,12 @@ function botPcsInstalled(pcs: { mode: 'own' | 'shared'; sharedFolder: string }):
 The user's bots run on small Linux computers ("bot PCs") that Deskmates manages.
 ${mode}
 
-- \`deskmates.cmd\` pc list — list the PCs and whether each one is busy.
-- \`deskmates.cmd\` pc exec <pc> -- <command> — run a shell command on a PC.
-- \`deskmates.cmd\` pc open <pc> <url> — open a page in the PC's browser.
-- \`deskmates.cmd\` pc screenshot <pc> <out.png> — save a screenshot of the PC.
+- \`${command}\` pc list — list the PCs and whether each one is busy.
+- \`${command}\` pc exec <pc> -- <command> — run a shell command on a PC.
+- \`${command}\` pc open <pc> <url> — open a page in the PC's browser.
+- \`${command}\` pc screenshot <pc> <out.png> — save a screenshot of the PC.
 
-The Windows folder ${pcs.sharedFolder} appears as \`/shared\` inside every PC;
+The folder ${pcs.sharedFolder} appears as \`/shared\` inside every PC;
 use it to pass files to and from bots.
 
 Never type passwords or one-time codes into a PC. When a site needs a login,
@@ -90,21 +109,21 @@ check \`pc list\` before using a PC and don't interrupt a busy one.
 }
 
 /** The Designs (Design tab) section. */
-function designsSection(dataDir: string): string {
+function designsSection(dataDir: string, command: string): string {
   return `## Designs (the Design tab)
 
 The Design tab holds web pages the user designs with AI and edits by hand in a
 live preview. Each design is a folder:
 
-${join(dataDir, 'designs', '<id>')}\\index.html
+${join(dataDir, 'designs', '<id>', 'index.html')}
 
-- \`deskmates.cmd\` design list — list the designs (id and name).
-- \`deskmates.cmd\` design path <id> — print the full path of a design's index.html.
+- \`${command}\` design list — list the designs (id and name).
+- \`${command}\` design path <id> — print the full path of a design's index.html.
 
 To change a design, edit its \`index.html\` directly with your own file tools, or
-use \`deskmates.cmd\` design write <id> <file> (use \`-\` as the file to read the
+use \`${command}\` design write <id> <file> (use \`-\` as the file to read the
 HTML from stdin). The preview in Deskmates reloads by itself. To make a new
-design: \`deskmates.cmd\` design create "<name>" [--prompt "<text>"].
+design: \`${command}\` design create "<name>" [--prompt "<text>"].
 
 Design rules:
 
@@ -160,14 +179,17 @@ guide then adds the Deskmates-specific rules below.
  * guide text doesn't change.
  */
 export function buildAgentGuide(input: AgentGuideInput): Omit<AgentGuide, 'path'> {
-  const pcSection = input.pcs.installed ? botPcsInstalled(input.pcs) : botPcsNotInstalled()
+  // The guide shows the command by name, so agents type `deskmates` on Linux/macOS and
+  // `deskmates.cmd` on Windows. Derived from the real path, so the two can't drift apart.
+  const command = basename(input.commandPath)
+  const pcSection = input.pcs.installed ? botPcsInstalled(input.pcs, command) : botPcsNotInstalled()
   // The phrase line starts as a placeholder; the version hash covers the text
   // with that whole line removed, so changing the phrase can never change it.
   const withoutPhrase = `# Deskmates guide for coding agents
 
 Deskmates app version: ${input.appVersion}
 
-Deskmates is a Windows desktop app the user runs. It has:
+Deskmates is a ${hostOs()} desktop app the user runs. It has:
 
 - the Work tab, where an assistant works in project folders;
 - the Design tab, web pages the user designs with AI and edits by hand in a
@@ -209,7 +231,21 @@ Add --json to any command for JSON output. The commands:
 
 If Deskmates isn't running, the command tells you so; start the app and retry.
 
-${designsSection(input.dataDir)}
+## Guiding the user on their screen
+
+Over MCP you also get screen tools, for when the user asks you to show them
+where something is or how to do something on their computer:
+
+- screen_look — a screenshot of their main screen.
+- screen_point — draw arrows, circles, boxes or labels over it, in the
+  pixels of your latest screen_look. Look again before pointing, since the
+  screen may have changed.
+- screen_say — say a sentence or two aloud.
+- screen_clear — remove your marks.
+
+These only show and tell: they never click or type for the user.
+
+${designsSection(input.dataDir, command)}
 ${pcSection}
 ${goodToKnowSection(input.dataDir)}
 `

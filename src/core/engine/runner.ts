@@ -485,7 +485,7 @@ export class TaskRunner {
     const { repos, bus } = this.deps
     const terminals = this.deps.getTerminals?.()
     if (!terminals) {
-      throw new Error("CLI providers (OpenCode/agy) need terminal sessions, which aren't available here.")
+      throw new Error("CLI providers (OpenCode/agy/Freebuff) need terminal sessions, which aren't available here.")
     }
 
     const stored = repos.tasks.messages(taskId)
@@ -494,15 +494,21 @@ export class TaskRunner {
       typeof content === 'string'
         ? content
         : content.map((part) => ('text' in part ? part.text : String(part))).join(' ')
-    const prompt = `${instructions.trimEnd()}\n\n${userText.trim()}`.trim()
+    // The Work tab's standing instructions are handed over separately rather than prepended to the
+    // question. For OpenCode that means they become the conversation's `system` block, sent once and
+    // then remembered by the session — the 175KB prompt is no longer re-sent, and no longer re-read,
+    // before every question. It is also what makes the second prompt in a session cheap: the model
+    // already has the brief and only has to read the new message.
+    const prompt = userText.trim()
 
     const live = new LiveTimeline(taskId, bus, () => Date.now())
     const result = await terminals.execute(
-      resolved.provider as 'opencode' | 'agy',
+      resolved.provider as 'opencode' | 'agy' | 'freebuff',
       project.folder,
       prompt,
       resolved.modelId,
       {
+        system: instructions,
         signal: controller.signal,
         onItem: (item) => {
           if (item.kind === 'assistant') {
