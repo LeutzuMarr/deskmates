@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { PendingStarts } from '../components/ScheduledList'
 import { ChevronDown, Clapperboard, Code2, Folder, FolderPlus, PenTool } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useStore } from '../lib/store'
@@ -153,6 +154,10 @@ export function HomeView() {
             <BrandMark size={40} />
           </span>
           <h1 className="font-serif text-[42px] leading-[1.1] tracking-[-0.01em]">{greeting(new Date())}</h1>
+        </div>
+
+        <div className="mt-8">
+          <PendingStarts />
         </div>
 
         <div className="greet-in greet-in-1 mt-10">

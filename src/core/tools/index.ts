@@ -11,6 +11,7 @@ import { designComponentTools } from './design-components'
 import { designVisualTools } from './design-visual'
 import { extensionTools } from './extensions'
 import { agentBrowserTools } from './browser'
+import { scheduleTools } from './schedules'
 import { join } from 'node:path'
 
 /** Merges every tool group into one ToolSet for a run. Built fresh per run via TaskRunner. */
@@ -32,7 +33,8 @@ export function buildTools(ctx: ToolContext): ToolSet {
           screenshotDir: join(ctx.root, '.deskmates', 'screenshots'),
           signal: ctx.signal
         })
-      : {})
+      : {}),
+    ...(ctx.schedules ? scheduleTools({ scheduler: ctx.schedules, projectId: ctx.projectId, waitsForStart: () => ctx.cliModel === true }) : {})
   }
   const listTools = (): ToolListing[] =>
     Object.entries(all).map(([name, t]) => ({ name, description: String((t as { description?: string }).description ?? '') }))

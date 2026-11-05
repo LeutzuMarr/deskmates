@@ -49,6 +49,10 @@ export interface RunnerDeps {
   render?: ToolContext['render']
   /** The agent browser; absent without the app. */
   browser?: ToolContext['browser']
+  /** Scheduled tasks; absent in tests. A getter, since the scheduler is built after the runner. */
+  getSchedules?: () => ToolContext['schedules']
+  /** The name a run acts under in browser questions (a scheduled task's name), when it isn't the tab's. */
+  agentNameFor?: (taskId: string) => string | undefined
   now?: () => Date
 }
 
@@ -307,6 +311,9 @@ export class TaskRunner {
         ...(deps.subagents ? { subagents: deps.subagents } : {}),
         ...(deps.render ? { render: deps.render } : {}),
         ...(deps.browser ? { browser: deps.browser } : {}),
+        ...(deps.getSchedules?.() ? { schedules: deps.getSchedules() } : {}),
+        ...(deps.agentNameFor?.(taskId) ? { agentName: deps.agentNameFor(taskId) } : {}),
+        cliModel: resolved.cli === true,
         signal: controller.signal,
         projectKind: project.kind === 'design' ? 'design' : 'work',
         renameProject: (title) => {

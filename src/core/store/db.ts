@@ -76,7 +76,15 @@ export const MIGRATIONS: string[] = [
      state TEXT NOT NULL DEFAULT 'pending',
      run_id TEXT, result TEXT,
      created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
-   CREATE INDEX handoffs_by_bot ON handoffs(to_bot_id, created_at);`
+   CREATE INDEX handoffs_by_bot ON handoffs(to_bot_id, created_at);`,
+  `CREATE TABLE task_schedules (
+     id TEXT PRIMARY KEY,
+     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+     name TEXT NOT NULL, instruction TEXT NOT NULL, when_json TEXT NOT NULL,
+     enabled INTEGER NOT NULL DEFAULT 1, missed TEXT NOT NULL DEFAULT 'run-late',
+     last_run_at INTEGER, next_run_at INTEGER, pending_since INTEGER, last_task_id TEXT,
+     created_at INTEGER NOT NULL);
+   CREATE INDEX task_schedules_by_project ON task_schedules(project_id);`
 ]
 
 export function openDatabase(file: string): DatabaseSync {

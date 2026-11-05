@@ -2,6 +2,8 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, wr
 import type { BrowserService } from '../browser/service'
 import { EMPTY_BROWSER_STATE, type SiteAnswer } from '../../shared/agent-browser'
 import { agentBrowserTools } from '../tools/browser'
+import type { TaskScheduler } from '../schedules/task-scheduler'
+import type { When } from '../../shared/protocol'
 import { randomInt, randomUUID } from 'node:crypto'
 import { basename, join, resolve, sep } from 'node:path'
 import { designFolder, listDesignFiles, readDesign, starterHtml, writeDesign } from '../designs/files'
@@ -89,6 +91,8 @@ export interface HandlerServices {
   screen?: ScreenGuideService
   /** The agent browser (the title bar's browser panel). */
   browser?: BrowserService
+  /** Scheduled tasks of Work and Design projects. */
+  taskSchedules?: TaskScheduler
   /** Duo's approved Outbox item that may be sent on this site now, if any (the browser's send rule). */
   duoSendPermit?: (domain: string) => { id: string; summary: string } | null
 }
@@ -96,6 +100,11 @@ export interface HandlerServices {
 /** Implements every method of RpcMethods. Handlers emit bus events the UI listens to. */
 export function createHandlers(services: HandlerServices): Handlers {
   const { repos, bus, runner, changes, models, keys, version, dataDir, agentKit, onDesignWritten } = services
+
+  const requireSchedules = (): TaskScheduler => {
+    if (!services.taskSchedules) throw new Error('Scheduled tasks are not available here.')
+    return services.taskSchedules
+  }
 
   const requireDesign = (projectId: string) => {
     const project = repos.projects.require(projectId)
@@ -743,6 +752,21 @@ export function createHandlers(services: HandlerServices): Handlers {
       services.terminals.launch(params.tool, realpathSync.native(params.folder))
       return null
     },
+
+    'taskSchedules.list': (params: { projectId?: string }) => requireSchedules().list(params.projectId),
+    'taskSchedules.create': (params: { projectId: string; name: string; instruction: string; when: When; missed?: 'run-late' | 'skip' }) =>
+      requireSchedules().create(params),
+    'taskSchedules.update': (params: { id: string; name?: string; instruction?: string; when?: When; enabled?: boolean; missed?: 'run-late' | 'skip' }) => {
+      const { id, ...patch } = params
+      return requireSchedules().update(id, patch)
+    },
+    'taskSchedules.delete': async (params: { id: string }) => {
+      await requireSchedules().delete(params.id)
+      return null
+    },
+    'taskSchedules.runNow': (params: { id: string }) => requireSchedules().runNow(params.id),
+    'taskSchedules.start': (params: { id: string }) => requireSchedules().startPending(params.id),
+    'taskSchedules.dismiss': (params: { id: string }) => requireSchedules().dismiss(params.id),
 
     'freebuff.status': (params: { folder?: string }) => {
       if (!services.terminals) throw new Error(TERMINALS_NOT_SET_UP)

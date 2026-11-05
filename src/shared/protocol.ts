@@ -1,5 +1,7 @@
 import type { RenderRequest, RenderResult, VideoRequest, VideoResult } from '../core/render/types'
 import type { FreebuffStatus } from './freebuff'
+import type { When } from './when'
+export type { When } from './when'
 import type { BrowserAction, BrowserResult, BrowserState, HostBrowserState, SiteAnswer } from './agent-browser'
 export type { BrowserAction, BrowserResult }
 
@@ -390,6 +392,28 @@ export interface Schedule {
   nextRunAt: number | null
 }
 
+/**
+ * A scheduled task: an instruction a Work or Design project runs on its own at set times ("every
+ * weekday at 07:30"). On a model that is a command-line tool (Freebuff, OpenCode, Antigravity) it
+ * never starts by itself: at its time it waits for the user's Start (`pendingSince`).
+ */
+export interface TaskSchedule {
+  id: string
+  projectId: string
+  name: string
+  instruction: string
+  when: When
+  enabled: boolean
+  missed: 'run-late' | 'skip'
+  lastRunAt: number | null
+  nextRunAt: number | null
+  /** When it became due and started waiting for the user's Start tap; null when not waiting. */
+  pendingSince: number | null
+  /** The task its last run created. */
+  lastTaskId: string | null
+  createdAt: number
+}
+
 /** Lifecycle of a handoff file a sending bot dropped in the shared folder (spec 5.9). */
 export type HandoffState = 'pending' | 'running' | 'done' | 'error'
 
@@ -747,6 +771,19 @@ export interface RpcMethods {
   'screen.say': { params: { text: string }; result: null }
   /** Removes every mark from the screen. */
   'screen.clear': { params: NoParams; result: null }
+  'taskSchedules.list': { params: { projectId?: string }; result: TaskSchedule[] }
+  'taskSchedules.create': { params: { projectId: string; name: string; instruction: string; when: When; missed?: 'run-late' | 'skip' }; result: TaskSchedule }
+  'taskSchedules.update': {
+    params: { id: string; name?: string; instruction?: string; when?: When; enabled?: boolean; missed?: 'run-late' | 'skip' }
+    result: TaskSchedule
+  }
+  'taskSchedules.delete': { params: { id: string }; result: null }
+  /** Runs it now (the user's own tap, so it works on every model). Returns the new task's id. */
+  'taskSchedules.runNow': { params: { id: string }; result: { taskId: string } }
+  /** Starts a run that is waiting for the user's Start tap. */
+  'taskSchedules.start': { params: { id: string }; result: { taskId: string } | null }
+  /** Drops a waiting Start card without running it. */
+  'taskSchedules.dismiss': { params: { id: string }; result: TaskSchedule }
   /** The agent browser as everyone sees it: tabs, who is driving, and questions waiting for the user. */
   'browser.state': { params: NoParams; result: BrowserState }
   'browser.asks.respond': { params: { id: string; answer: SiteAnswer }; result: BrowserState }
@@ -843,6 +880,8 @@ export type CoreEvent =
   | { type: 'connectors.updated'; connectors: Connector[] }
   | { type: 'computer.updated'; session: ComputerSession }
   | { type: 'browser.updated'; state: BrowserState }
+  | { type: 'taskSchedule.updated'; schedule: TaskSchedule }
+  | { type: 'taskSchedule.deleted'; scheduleId: string; projectId: string }
 
 export type ClientMessage = { type: 'req'; id: number; method: RpcMethod; params: unknown }
 

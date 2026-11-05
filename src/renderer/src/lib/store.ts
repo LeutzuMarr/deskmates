@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { BrowserState } from '../../../shared/agent-browser'
+import type { TaskSchedule } from '../../../shared/protocol'
 import { core } from './rpc'
 import type {
   ComputerSession,
@@ -137,6 +138,8 @@ interface StoreState {
   /** Whether the browser panel is open (desktop only). */
   browserOpen: boolean
   setBrowserOpen: (open: boolean) => void
+  /** Every project's scheduled tasks. */
+  taskSchedules: TaskSchedule[]
   /** The file each design's preview shows (relative to the design folder); unset means its default page. */
   designFiles: Record<string, string>
   init: () => void
@@ -392,6 +395,12 @@ export const useStore = create<StoreState>()((set, get) => {
       case 'browser.updated':
         set({ browser: event.state })
         break
+      case 'taskSchedule.updated':
+        set({ taskSchedules: upsertById(get().taskSchedules, event.schedule) })
+        break
+      case 'taskSchedule.deleted':
+        set({ taskSchedules: get().taskSchedules.filter((s) => s.id !== event.scheduleId) })
+        break
     }
   }
 
@@ -566,6 +575,7 @@ export const useStore = create<StoreState>()((set, get) => {
     browser: null,
     browserOpen: false,
     setBrowserOpen: (open) => set({ browserOpen: open }),
+    taskSchedules: [],
     designFiles: {},
 
     init: () => {
@@ -581,6 +591,7 @@ export const useStore = create<StoreState>()((set, get) => {
           void loadTerminals()
           void loadExtras()
           void core.call('browser.state', {}).then((browser) => set({ browser })).catch(() => undefined)
+          void core.call('taskSchedules.list', {}).then((taskSchedules) => set({ taskSchedules })).catch(() => undefined)
         }
       })
       void core.connect()

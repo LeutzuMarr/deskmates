@@ -37,6 +37,9 @@ import { LinuxDesktop } from './computer/linux-desktop'
 import { ScreenGuideService } from './screen/guide'
 import { ParentPortRenderClient } from './render/client'
 import { BrowserService } from './browser/service'
+import { TaskScheduler } from './schedules/task-scheduler'
+import { WakeTimerManager } from './scheduler/wake-timers'
+import { isCliProvider } from '../shared/protocol'
 
 // Electron's utilityProcess.parentPort, typed locally so this imports nothing from 'electron'.
 type ParentPort = {
@@ -117,7 +120,9 @@ async function main(): Promise<void> {
     createTools: buildTools,
     getTerminals: () => terminals,
     render,
-    browser
+    browser,
+    getSchedules: () => taskSchedules,
+    agentNameFor: (taskId) => repos.taskSchedules.list().find((s) => s.lastTaskId === taskId)?.name
   })
 
   const engineManager = new EngineManager({ runner: commandRunner, dataDir })
@@ -135,6 +140,20 @@ async function main(): Promise<void> {
   const botHost = host ?? new UnavailableHost()
   const botRunner = new BotRunner({ repos, bus, host: botHost, models, dataDir, skills, connectors })
   const scheduler = new Scheduler({ repos, bus, runner: commandRunner, dataDir, run: botRunner })
+  const taskWakeTimers = new WakeTimerManager({ runner: commandRunner, dataDir })
+  const taskSchedules = new TaskScheduler({
+    repos,
+    bus,
+    send: (taskId, text) => runner.send(taskId, text),
+    whenIdle: (taskId) => runner.whenIdle(taskId),
+    isRunning: (taskId) => runner.isRunning(taskId),
+    isCliProject: (project) => {
+      const model = project.model ?? repos.settings.get().defaultModel
+      return model !== null && isCliProvider(model.provider)
+    },
+    wake: process.platform === 'win32' ? { upsert: (id, nextMs) => taskWakeTimers.upsert(id, 'task', nextMs), remove: (id) => taskWakeTimers.remove(id) } : undefined,
+    notify: (title, body) => bus.emit({ type: 'notify', title, body })
+  })
   const handoffs = new HandoffService({ repos, bus, dataDir, run: botRunner })
 
   // LocalDockerHost/CloudHost checkIdle() does the actual idle check but owns no timer of its own;
@@ -247,7 +266,8 @@ async function main(): Promise<void> {
     phone: { info: () => phone.info() },
     computer,
     screen: screenGuide,
-    browser
+    browser,
+    taskSchedules
   })
 
   // Follows the settings toggle and code changes: on/off, and restarting when the code changes.
@@ -278,6 +298,7 @@ async function main(): Promise<void> {
   writeBridgeInfo(kitDir, { port: server.port, token: agentToken, pid: process.pid })
   watcher.start()
   scheduler.start()
+  taskSchedules.start()
   handoffs.start()
 
   // A bot PC left running (or gone, or unreachable) from a previous session must not block startup
@@ -300,6 +321,7 @@ async function main(): Promise<void> {
         screenGuide.dispose()
         watcher.stop()
         scheduler.stop()
+        taskSchedules.stop()
         handoffs.stop()
         if (idleCheckTimer) clearInterval(idleCheckTimer)
         await runner.stopAll()

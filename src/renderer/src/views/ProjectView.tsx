@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { ScheduledList } from '../components/ScheduledList'
 import { useStore } from '../lib/store'
 import { Composer } from '../components/Composer'
 import { TaskStatusMark } from '../components/TaskStatusMark'
@@ -165,6 +166,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
               <p className="mt-3 text-[13px] text-ink-faint">No tasks yet — ask for something above.</p>
             )}
           </div>
+          <ScheduledList projectId={projectId} />
         </div>
       </div>
     </div>

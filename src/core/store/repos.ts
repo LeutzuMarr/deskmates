@@ -27,7 +27,9 @@ import {
   type Skill,
   type Task,
   type TaskStatus,
-  type UsageRow
+  type UsageRow,
+  type TaskSchedule,
+  type When
 } from '../../shared/protocol'
 import type { HandoffRecord } from '../bots/tools/handoff'
 
@@ -486,6 +488,75 @@ export class BotPcsRepo {
   }
 }
 
+const toTaskSchedule = (r: Row): TaskSchedule => ({
+  id: r.id as string,
+  projectId: r.project_id as string,
+  name: r.name as string,
+  instruction: r.instruction as string,
+  when: JSON.parse(r.when_json as string) as When,
+  enabled: r.enabled === 1,
+  missed: r.missed === 'skip' ? 'skip' : 'run-late',
+  lastRunAt: (r.last_run_at as number | null) ?? null,
+  nextRunAt: (r.next_run_at as number | null) ?? null,
+  pendingSince: (r.pending_since as number | null) ?? null,
+  lastTaskId: (r.last_task_id as string | null) ?? null,
+  createdAt: r.created_at as number
+})
+
+export type TaskSchedulePatch = Partial<
+  Pick<TaskSchedule, 'name' | 'instruction' | 'when' | 'enabled' | 'missed' | 'lastRunAt' | 'nextRunAt' | 'pendingSince' | 'lastTaskId'>
+>
+
+/** Scheduled tasks of Work and Design projects (see `core/schedules/task-scheduler.ts`). */
+export class TaskSchedulesRepo {
+  constructor(private readonly db: DatabaseSync) {}
+
+  list(projectId?: string): TaskSchedule[] {
+    const rows = projectId
+      ? (this.db.prepare('SELECT * FROM task_schedules WHERE project_id = ? ORDER BY created_at').all(projectId) as Row[])
+      : (this.db.prepare('SELECT * FROM task_schedules ORDER BY created_at').all() as Row[])
+    return rows.map(toTaskSchedule)
+  }
+
+  get(id: string): TaskSchedule | undefined {
+    const row = this.db.prepare('SELECT * FROM task_schedules WHERE id = ?').get(id) as Row | undefined
+    return row ? toTaskSchedule(row) : undefined
+  }
+
+  require(id: string): TaskSchedule {
+    const schedule = this.get(id)
+    if (!schedule) throw new Error(`Scheduled task not found: ${id}`)
+    return schedule
+  }
+
+  create(input: { projectId: string; name: string; instruction: string; when: When; missed?: TaskSchedule['missed']; now?: number }): TaskSchedule {
+    const id = randomUUID()
+    const createdAt = input.now ?? Date.now()
+    this.db
+      .prepare('INSERT INTO task_schedules (id, project_id, name, instruction, when_json, enabled, missed, created_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)')
+      .run(id, input.projectId, input.name, input.instruction, JSON.stringify(input.when), input.missed ?? 'run-late', createdAt)
+    return this.require(id)
+  }
+
+  update(id: string, patch: TaskSchedulePatch): TaskSchedule {
+    const next: TaskSchedule = { ...this.require(id), ...definedOnly(patch) }
+    // null is a real value for these (cleared), so take them from the patch even when null.
+    for (const key of ['lastRunAt', 'nextRunAt', 'pendingSince', 'lastTaskId'] as const) {
+      if (key in patch) (next as unknown as Record<string, unknown>)[key] = patch[key] ?? null
+    }
+    this.db
+      .prepare(
+        'UPDATE task_schedules SET name = ?, instruction = ?, when_json = ?, enabled = ?, missed = ?, last_run_at = ?, next_run_at = ?, pending_since = ?, last_task_id = ? WHERE id = ?'
+      )
+      .run(next.name, next.instruction, JSON.stringify(next.when), next.enabled ? 1 : 0, next.missed, next.lastRunAt, next.nextRunAt, next.pendingSince, next.lastTaskId, id)
+    return next
+  }
+
+  delete(id: string): void {
+    this.db.prepare('DELETE FROM task_schedules WHERE id = ?').run(id)
+  }
+}
+
 const toSchedule = (r: Row): Schedule => ({
   id: r.id as string,
   botId: r.bot_id as string,
@@ -919,6 +990,7 @@ export interface Repos {
   bots: BotsRepo
   botPcs: BotPcsRepo
   schedules: SchedulesRepo
+  taskSchedules: TaskSchedulesRepo
   runs: RunsRepo
   handoffs: HandoffsRepo
   skills: SkillsRepo
@@ -937,6 +1009,7 @@ export function createRepos(db: DatabaseSync): Repos {
     bots: new BotsRepo(db),
     botPcs: new BotPcsRepo(db),
     schedules: new SchedulesRepo(db),
+    taskSchedules: new TaskSchedulesRepo(db),
     runs: new RunsRepo(db),
     handoffs: new HandoffsRepo(db),
     skills: new SkillsRepo(db),
