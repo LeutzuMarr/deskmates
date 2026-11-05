@@ -1,6 +1,7 @@
 import type { RenderRequest, RenderResult, VideoRequest, VideoResult } from '../core/render/types'
 import type { FreebuffStatus } from './freebuff'
 import type { When } from './when'
+import type { DuoProfile, DuoState } from './duo'
 export type { When } from './when'
 import type { BrowserAction, BrowserResult, BrowserState, HostBrowserState, SiteAnswer } from './agent-browser'
 export type { BrowserAction, BrowserResult }
@@ -784,6 +785,22 @@ export interface RpcMethods {
   'taskSchedules.start': { params: { id: string }; result: { taskId: string } | null }
   /** Drops a waiting Start card without running it. */
   'taskSchedules.dismiss': { params: { id: string }; result: TaskSchedule }
+  'duo.state': { params: NoParams; result: DuoState }
+  'duo.profile.update': { params: { patch: Partial<DuoProfile> }; result: DuoState }
+  'duo.outbox.decide': { params: { id: string; decision: 'approve' | 'skip' | 'edit'; subject?: string; body?: string; to?: string }; result: DuoState }
+  'duo.outbox.approveAll': { params: NoParams; result: DuoState }
+  /** The user's tap: Duo sends what they approved (starts a run). */
+  'duo.sendApproved': { params: NoParams; result: DuoState }
+  /** The user's tap on a Start card (starts a run; a second tap does nothing). */
+  'duo.start': { params: { cardId: string }; result: DuoState }
+  'duo.dismiss': { params: { cardId: string }; result: DuoState }
+  /** The user's own message to Duo (starts a run). */
+  'duo.ask': { params: { text: string }; result: DuoState }
+  'duo.cancel': { params: NoParams; result: DuoState }
+  'duo.todo.done': { params: { id: string; done: boolean }; result: DuoState }
+  'duo.todo.remove': { params: { id: string }; result: DuoState }
+  /** One Duo tool, for Duo's Freebuff through the MCP bridge. */
+  'duo.tool': { params: { name: string; input: Record<string, unknown> }; result: { text: string } }
   /** The agent browser as everyone sees it: tabs, who is driving, and questions waiting for the user. */
   'browser.state': { params: NoParams; result: BrowserState }
   'browser.asks.respond': { params: { id: string; answer: SiteAnswer }; result: BrowserState }
@@ -882,6 +899,7 @@ export type CoreEvent =
   | { type: 'browser.updated'; state: BrowserState }
   | { type: 'taskSchedule.updated'; schedule: TaskSchedule }
   | { type: 'taskSchedule.deleted'; scheduleId: string; projectId: string }
+  | { type: 'duo.updated'; state: DuoState }
 
 export type ClientMessage = { type: 'req'; id: number; method: RpcMethod; params: unknown }
 

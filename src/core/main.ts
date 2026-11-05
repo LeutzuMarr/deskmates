@@ -39,6 +39,16 @@ import { ParentPortRenderClient } from './render/client'
 import { BrowserService } from './browser/service'
 import { TaskScheduler } from './schedules/task-scheduler'
 import { ScreenControl } from './tools/screen-control'
+import { DuoStore } from './duo/store'
+import { DuoService } from './duo/service'
+import { prepareDuoWorkspace } from './duo/workspace'
+import { duoTools } from './tools/duo'
+import { agentBrowserTools } from './tools/browser'
+import { webFetchText, webSearchResults } from './tools/web'
+import { myPromptBrief, myPromptPath, promptSectionTool } from './engine/my-prompt'
+import { DEFAULT_DUO_PROFILE, type DuoProfile } from '../shared/duo'
+import { tool as aiTool } from 'ai'
+import { z } from 'zod'
 import { WakeTimerManager } from './scheduler/wake-timers'
 import { isCliProvider } from '../shared/protocol'
 
@@ -257,6 +267,47 @@ async function main(): Promise<void> {
     port: Number(process.env.DESKMATES_PHONE_PORT ?? '') || DEFAULT_PHONE_PORT
   })
 
+  // Duo: its workspace, store and service. Freebuff runs start only from the user's taps.
+  const duoFolder = DuoService.folder(dataDir)
+  const duoPlaybook = join(duoFolder, 'playbook.md')
+  const duo: DuoService = new DuoService({
+    store: new DuoStore(db),
+    bus,
+    getProfile: () => repos.settings.getExtra<DuoProfile>('duo', DEFAULT_DUO_PROFILE),
+    setProfile: (profile) => repos.settings.setExtra('duo', profile),
+    workspace: (profile) => {
+      prepareDuoWorkspace({ dir: duoFolder, agentCommand: commandPath, profile, myPromptPath: myPromptPath(promptRoot) })
+      return duoFolder
+    },
+    runCli: (provider, folder, prompt, modelId, signal) => {
+      if (provider !== 'freebuff' && provider !== 'opencode' && provider !== 'agy') return Promise.resolve({ text: '', error: 'Not a command-line model.' })
+      return terminals.execute(provider, folder, prompt, modelId, { signal, trustAgents: true })
+    },
+    resolveModel: (ref) => models.resolve(ref),
+    apiTools: () => ({
+      ...agentBrowserTools({ browser, agent: 'Duo', runKey: 'duo', sendPermit: (domain) => duo.sendPermit(domain), screenshotDir: join(duoFolder, 'screenshots') }),
+      ...duoTools(duo, duoPlaybook),
+      ...promptSectionTool(myPromptPath(promptRoot)),
+      web_search: aiTool({
+        description: 'Search the web (company research). Returns titles, links and snippets.',
+        inputSchema: z.object({ query: z.string().min(1) }),
+        execute: async ({ query }, { abortSignal }) => webSearchResults(query, abortSignal)
+      }),
+      web_fetch: aiTool({
+        description: "Read a public page as text (a company's site or contact page).",
+        inputSchema: z.object({ url: z.string().url() }),
+        execute: async ({ url }, { abortSignal }) => webFetchText(url, abortSignal)
+      })
+    }),
+    operatingPrompt: () => myPromptBrief('tool', myPromptPath(promptRoot)),
+    notify: (title, body) => bus.emit({ type: 'notify', title, body })
+  })
+  try {
+    prepareDuoWorkspace({ dir: duoFolder, agentCommand: commandPath, profile: duo.profile(), myPromptPath: myPromptPath(promptRoot) })
+  } catch (error) {
+    console.error('[duo] could not prepare its workspace', error)
+  }
+
   const handlers = createHandlers({
     repos,
     bus,
@@ -282,7 +333,10 @@ async function main(): Promise<void> {
     computer,
     screen: screenGuide,
     browser,
-    taskSchedules
+    taskSchedules,
+    duo,
+    duoTools: () => duoTools(duo, duoPlaybook),
+    duoSendPermit: (domain) => duo.sendPermit(domain)
   })
 
   // Follows the settings toggle and code changes: on/off, and restarting when the code changes.
@@ -305,7 +359,7 @@ async function main(): Promise<void> {
     port: Number(process.env.DESKMATES_PORT ?? 0),
     agent: {
       token: agentToken,
-      methods: ['app.info', 'projects.list', 'designs.read', 'designs.save', 'designs.create', 'screen.look', 'screen.point', 'screen.say', 'screen.clear', 'browser.state', 'browser.tool'],
+      methods: ['app.info', 'projects.list', 'designs.read', 'designs.save', 'designs.create', 'screen.look', 'screen.point', 'screen.say', 'screen.clear', 'browser.state', 'browser.tool', 'duo.tool'],
       events: ['design.updated', 'project.updated']
     }
   })
@@ -314,6 +368,7 @@ async function main(): Promise<void> {
   watcher.start()
   scheduler.start()
   taskSchedules.start()
+  duo.start()
   handoffs.start()
 
   // A bot PC left running (or gone, or unreachable) from a previous session must not block startup
@@ -338,6 +393,7 @@ async function main(): Promise<void> {
         watcher.stop()
         scheduler.stop()
         taskSchedules.stop()
+        duo.stop()
         handoffs.stop()
         if (idleCheckTimer) clearInterval(idleCheckTimer)
         await runner.stopAll()

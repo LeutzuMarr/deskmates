@@ -240,6 +240,9 @@ export interface CliRunOptions {
    *  sent once per session rather than before every question. For agy — a one-shot `-p` call with no
    *  session to persist into — it is prepended to the prompt instead, as it always was. */
   system?: string
+  /** Freebuff only: load the folder's .agents files (its MCP servers) without asking. Only for
+   *  folders Deskmates set up itself, like Duo's workspace; never for a user's project folder. */
+  trustAgents?: boolean
 }
 
 export interface CliRunResult {

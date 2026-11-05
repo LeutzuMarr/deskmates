@@ -3,6 +3,8 @@ import type { BrowserService } from '../browser/service'
 import { EMPTY_BROWSER_STATE, type SiteAnswer } from '../../shared/agent-browser'
 import { agentBrowserTools } from '../tools/browser'
 import type { TaskScheduler } from '../schedules/task-scheduler'
+import type { DuoService } from '../duo/service'
+import type { DuoProfile } from '../../shared/duo'
 import type { When } from '../../shared/protocol'
 import { randomInt, randomUUID } from 'node:crypto'
 import { basename, join, resolve, sep } from 'node:path'
@@ -91,6 +93,9 @@ export interface HandlerServices {
   screen?: ScreenGuideService
   /** The agent browser (the title bar's browser panel). */
   browser?: BrowserService
+  /** Duo, and its tools for the MCP bridge. */
+  duo?: DuoService
+  duoTools?: () => Record<string, unknown>
   /** Scheduled tasks of Work and Design projects. */
   taskSchedules?: TaskScheduler
   /** Duo's approved Outbox item that may be sent on this site now, if any (the browser's send rule). */
@@ -100,6 +105,11 @@ export interface HandlerServices {
 /** Implements every method of RpcMethods. Handlers emit bus events the UI listens to. */
 export function createHandlers(services: HandlerServices): Handlers {
   const { repos, bus, runner, changes, models, keys, version, dataDir, agentKit, onDesignWritten } = services
+
+  const requireDuo = (): DuoService => {
+    if (!services.duo) throw new Error('Duo is not available here.')
+    return services.duo
+  }
 
   const requireSchedules = (): TaskScheduler => {
     if (!services.taskSchedules) throw new Error('Scheduled tasks are not available here.')
@@ -751,6 +761,60 @@ export function createHandlers(services: HandlerServices): Handlers {
       }
       services.terminals.launch(params.tool, realpathSync.native(params.folder))
       return null
+    },
+
+    'duo.state': () => requireDuo().state(),
+    'duo.profile.update': (params: { patch: Partial<DuoProfile> }) => requireDuo().updateProfile(params.patch ?? {}),
+    'duo.outbox.decide': (params: { id: string; decision: 'approve' | 'skip' | 'edit'; subject?: string; body?: string; to?: string }) => {
+      const duo = requireDuo()
+      duo.decide(params.id, params.decision, { subject: params.subject, body: params.body, to: params.to })
+      return duo.state()
+    },
+    'duo.outbox.approveAll': () => {
+      const duo = requireDuo()
+      duo.approveAll()
+      return duo.state()
+    },
+    // Runs take minutes: started here, followed through duo.updated events.
+    'duo.sendApproved': () => {
+      const duo = requireDuo()
+      if (!duo.nextApproved()) throw new Error('Nothing approved is waiting to be sent.')
+      void duo.sendApproved().catch((error: unknown) => console.error('[duo] send run failed', error))
+      return duo.state()
+    },
+    'duo.start': (params: { cardId: string }) => {
+      const duo = requireDuo()
+      void duo.startCard(params.cardId).catch((error: unknown) => console.error('[duo] run failed', error))
+      return duo.state()
+    },
+    'duo.dismiss': (params: { cardId: string }) => requireDuo().dismissCard(params.cardId),
+    'duo.ask': (params: { text: string }) => {
+      const duo = requireDuo()
+      if (duo.state().working) throw new Error('Duo is still working. Wait for it, or press Stop.')
+      void duo.ask(params.text).catch((error: unknown) => console.error('[duo] run failed', error))
+      return duo.state()
+    },
+    'duo.cancel': () => {
+      const duo = requireDuo()
+      duo.cancel()
+      return duo.state()
+    },
+    'duo.todo.done': (params: { id: string; done: boolean }) => {
+      const duo = requireDuo()
+      duo.setTodoDone(params.id, params.done)
+      return duo.state()
+    },
+    'duo.todo.remove': (params: { id: string }) => {
+      const duo = requireDuo()
+      duo.removeTodo(params.id)
+      return duo.state()
+    },
+    'duo.tool': async (params: { name: string; input: Record<string, unknown> }) => {
+      const tools = (services.duoTools?.() ?? {}) as Record<string, { inputSchema?: { parse?: (i: unknown) => unknown }; execute?: (i: unknown, o: unknown) => Promise<unknown> }>
+      const chosen = tools[params.name]
+      if (!chosen?.execute) throw new Error(`Unknown Duo tool: ${params.name}`)
+      const input = chosen.inputSchema?.parse ? chosen.inputSchema.parse(params.input ?? {}) : (params.input ?? {})
+      return { text: String(await chosen.execute(input, { toolCallId: 'bridge', messages: [] })) }
     },
 
     'taskSchedules.list': (params: { projectId?: string }) => requireSchedules().list(params.projectId),

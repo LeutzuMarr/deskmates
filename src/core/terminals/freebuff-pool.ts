@@ -22,7 +22,7 @@ export class FreebuffPool {
 
   async execute(folder: string, prompt: string, model: string | undefined, runOptions: CliRunOptions = {}): Promise<CliRunResult> {
     if (runOptions.signal?.aborted) return { text: '', stopped: true }
-    const host = this.hostFor(folder)
+    const host = this.hostFor(folder, runOptions.trustAgents === true)
     this.lastFolder = folder
     const onAbort = (): void => host.cancel()
     runOptions.signal?.addEventListener('abort', onAbort, { once: true })
@@ -74,11 +74,12 @@ export class FreebuffPool {
     this.hosts.clear()
   }
 
-  private hostFor(folder: string): FreebuffHost {
+  private hostFor(folder: string, trustAgents = false): FreebuffHost {
     let host = this.hosts.get(folder)
     if (!host) {
       const created: FreebuffHost = new FreebuffHost({
         workspace: folder,
+        trustAgents,
         onState: (state) => {
           // A fresh Freebuff session hasn't seen the instructions yet.
           if (state === 'starting') this.instructed.delete(created)

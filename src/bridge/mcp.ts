@@ -3,6 +3,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
 import { registerBrowserTools } from './browser-tools'
+import { registerDuoTools } from './duo-tools'
 import { guide, designList, designRead, designWrite, designCreate, type Call } from './actions'
 
 export const SERVER_NAME = 'deskmates'
@@ -128,6 +129,7 @@ export function createDeskmatesServer(options: { call: Call; dataDir: string; ap
   }))
 
   registerBrowserTools(server, call, options.agent)
+  if (options.agent === 'Duo') registerDuoTools(server, call)
 
   // The pc tools stay stubs until stage 2; the guide's PC section says so too.
   const pcNotReady = (): Promise<CallToolResult> =>
