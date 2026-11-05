@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { BrowserState } from '../../../shared/agent-browser'
 import type { TaskSchedule } from '../../../shared/protocol'
+import type { DuoState } from '../../../shared/duo'
 import { core } from './rpc'
 import type {
   ComputerSession,
@@ -49,9 +50,10 @@ export type View =
   | { name: 'agents-session'; sessionId: string }
   | { name: 'agents-attach'; sessionId: string }
   | { name: 'extras-home' }
+  | { name: 'duo-home' }
 
 export type ConnectionStatus = 'connecting' | 'open' | 'closed'
-export type Tab = 'work' | 'design' | 'bots' | 'agents' | 'extras'
+export type Tab = 'duo' | 'work' | 'design' | 'bots' | 'agents' | 'extras'
 export interface ToastAction {
   label: string
   onClick: () => void
@@ -64,6 +66,7 @@ export interface ToastState {
 const TAB_STORAGE_KEY = 'deskmates:tab'
 
 const TAB_HOMES: Record<Tab, View> = {
+  duo: { name: 'duo-home' },
   work: { name: 'home' },
   design: { name: 'design-home' },
   bots: { name: 'bots-home' },
@@ -74,7 +77,7 @@ const TAB_HOMES: Record<Tab, View> = {
 function readStoredTab(): Tab {
   try {
     const raw = localStorage.getItem(TAB_STORAGE_KEY)
-    return raw === 'design' || raw === 'bots' || raw === 'agents' || raw === 'extras' ? raw : 'work'
+    return raw === 'duo' || raw === 'design' || raw === 'bots' || raw === 'agents' || raw === 'extras' ? raw : 'work'
   } catch {
     return 'work'
   }
@@ -108,6 +111,9 @@ interface StoreState {
   botsView: View
   agentsView: View
   extrasView: View
+  duoView: View
+  /** Duo: its thread, Outbox, to-dos and Start cards. */
+  duo: DuoState | null
   /** Where Settings was opened from: Settings is a detour, so leaving or reopening the tab goes back there. */
   settingsReturn: View | null
   toast: ToastState | null
@@ -398,6 +404,9 @@ export const useStore = create<StoreState>()((set, get) => {
       case 'taskSchedule.updated':
         set({ taskSchedules: upsertById(get().taskSchedules, event.schedule) })
         break
+      case 'duo.updated':
+        set({ duo: event.state })
+        break
       case 'taskSchedule.deleted':
         set({ taskSchedules: get().taskSchedules.filter((s) => s.id !== event.scheduleId) })
         break
@@ -522,7 +531,9 @@ export const useStore = create<StoreState>()((set, get) => {
 
   const initialTab = readStoredTab()
   const initialView: View =
-    initialTab === 'design'
+    initialTab === 'duo'
+      ? { name: 'duo-home' }
+      : initialTab === 'design'
       ? { name: 'design-home' }
       : initialTab === 'bots'
         ? { name: 'bots-home' }
@@ -551,6 +562,8 @@ export const useStore = create<StoreState>()((set, get) => {
     botsView: { name: 'bots-home' },
     agentsView: { name: 'agents-home' },
     extrasView: { name: 'extras-home' },
+    duoView: { name: 'duo-home' },
+    duo: null,
     settingsReturn: null,
     view: initialView,
     toast: null,
@@ -591,6 +604,7 @@ export const useStore = create<StoreState>()((set, get) => {
           void loadTerminals()
           void loadExtras()
           void core.call('browser.state', {}).then((browser) => set({ browser })).catch(() => undefined)
+          void core.call('duo.state', {}).then((duo) => set({ duo })).catch(() => undefined)
           void core.call('taskSchedules.list', {}).then((taskSchedules) => set({ taskSchedules })).catch(() => undefined)
         }
       })
@@ -624,7 +638,8 @@ export const useStore = create<StoreState>()((set, get) => {
         design: state.designView,
         bots: state.botsView,
         agents: state.agentsView,
-        extras: state.extrasView
+        extras: state.extrasView,
+        duo: state.duoView
       }
       saved[state.tab] = leaving
       const next = saved[tab].name === 'settings' ? TAB_HOMES[tab] : saved[tab]
@@ -636,7 +651,8 @@ export const useStore = create<StoreState>()((set, get) => {
         designView: saved.design,
         botsView: saved.bots,
         agentsView: saved.agents,
-        extrasView: saved.extras
+        extrasView: saved.extras,
+        duoView: saved.duo
       })
       storeTab(tab)
     },

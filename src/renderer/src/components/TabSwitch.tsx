@@ -4,6 +4,7 @@ import { useStore } from '../lib/store'
 import type { Tab } from '../lib/store'
 
 const TABS: { id: Tab; label: string }[] = [
+  { id: 'duo', label: 'Duo' },
   { id: 'work', label: 'Work' },
   { id: 'design', label: 'Design' },
   { id: 'bots', label: 'Bots' },

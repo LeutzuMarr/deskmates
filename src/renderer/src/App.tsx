@@ -25,6 +25,7 @@ import { AgentsHomeView } from './views/AgentsHomeView'
 import { AgentsSessionView } from './views/AgentsSessionView'
 import { AgentsAttachView } from './views/AgentsAttachView'
 import { ExtrasHomeView } from './views/ExtrasHomeView'
+import { DuoSidebar, DuoView } from './views/DuoView'
 
 export function App() {
   const init = useStore((s) => s.init)
@@ -49,7 +50,9 @@ export function App() {
       <TitleBar onSearch={openPalette} />
       <div className="flex min-h-0 min-w-0 flex-1">
         <div className={`sidebar-shell ${sidebarCollapsed ? 'sidebar-shell-collapsed' : ''}`} inert={sidebarCollapsed}>
-        {tab === 'design' ? (
+        {tab === 'duo' ? (
+          <DuoSidebar />
+        ) : tab === 'design' ? (
           <DesignSidebar />
         ) : tab === 'bots' ? (
           <BotsSidebar />
@@ -75,6 +78,7 @@ export function App() {
           {view.name === 'agents-session' && <AgentsSessionView key={view.sessionId} sessionId={view.sessionId} />}
           {view.name === 'agents-attach' && <AgentsAttachView key={view.sessionId} sessionId={view.sessionId} />}
           {view.name === 'extras-home' && <ExtrasHomeView />}
+          {view.name === 'duo-home' && <DuoView />}
         </main>
       </div>
       <BrowserPanel />

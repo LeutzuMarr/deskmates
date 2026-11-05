@@ -26,7 +26,7 @@ export function startNewTask(): void {
   focusComposer()
 }
 
-const TAB_KEYS: Record<string, Tab> = { '1': 'work', '2': 'design', '3': 'bots', '4': 'agents', '5': 'extras' }
+const TAB_KEYS: Record<string, Tab> = { '1': 'work', '2': 'design', '3': 'bots', '4': 'agents', '5': 'extras', '0': 'duo' }
 
 /** App-wide keyboard shortcuts. Ctrl on Windows and Linux, Cmd on macOS. */
 export function useGlobalShortcuts(openPalette: () => void): void {
