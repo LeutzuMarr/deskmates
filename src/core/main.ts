@@ -40,6 +40,7 @@ import { BrowserService } from './browser/service'
 import { TaskScheduler } from './schedules/task-scheduler'
 import { ScreenControl } from './tools/screen-control'
 import { DuoStore } from './duo/store'
+import { RemoteAccess, type RemoteConfig } from './phone/remote'
 import { DuoService } from './duo/service'
 import { prepareDuoWorkspace } from './duo/workspace'
 import { duoTools } from './tools/duo'
@@ -308,6 +309,16 @@ async function main(): Promise<void> {
     console.error('[duo] could not prepare its workspace', error)
   }
 
+  // Deskmates from anywhere: paired phones over the encrypted relay, joined to this RPC server.
+  const EMPTY_REMOTE: RemoteConfig = { relay: '', anon: '', appUrl: '', vapid: null, devices: [] }
+  let rpcAddress: { port: number; token: string } | null = null
+  const remote = new RemoteAccess({
+    bus,
+    getConfig: () => ({ ...EMPTY_REMOTE, ...repos.settings.getExtra<RemoteConfig>('remote', EMPTY_REMOTE) }),
+    setConfig: (config) => repos.settings.setExtra('remote', config),
+    core: () => rpcAddress
+  })
+
   const handlers = createHandlers({
     repos,
     bus,
@@ -336,7 +347,9 @@ async function main(): Promise<void> {
     taskSchedules,
     duo,
     duoTools: () => duoTools(duo, duoPlaybook),
-    duoSendPermit: (domain) => duo.sendPermit(domain)
+    duoSendPermit: (domain) => duo.sendPermit(domain),
+    remote,
+    setRemoteConfig: (patch) => repos.settings.setExtra('remote', { ...EMPTY_REMOTE, ...repos.settings.getExtra<RemoteConfig>('remote', EMPTY_REMOTE), ...patch })
   })
 
   // Follows the settings toggle and code changes: on/off, and restarting when the code changes.
@@ -365,6 +378,16 @@ async function main(): Promise<void> {
   })
 
   writeBridgeInfo(kitDir, { port: server.port, token: agentToken, pid: process.pid })
+  rpcAddress = { port: server.port, token: server.token }
+  try {
+    remote.start()
+  } catch (error) {
+    console.error('[remote] could not start', error)
+  }
+  // Every notification also reaches paired phones, as a short push.
+  bus.on((event) => {
+    if (event.type === 'notify') void remote.push(event.title, event.body).catch(() => undefined)
+  })
   watcher.start()
   scheduler.start()
   taskSchedules.start()
@@ -394,6 +417,7 @@ async function main(): Promise<void> {
         scheduler.stop()
         taskSchedules.stop()
         duo.stop()
+        remote.stop()
         handoffs.stop()
         if (idleCheckTimer) clearInterval(idleCheckTimer)
         await runner.stopAll()

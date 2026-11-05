@@ -232,7 +232,11 @@ export class DuoService {
       this.done.add(key)
       // A check-in missed by more than two hours is dropped (the next one covers it); the brief waits all day.
       if (slot.kind === 'check-in' && minutes - at > 120) continue
-      if (slot.kind === 'check-in' && this.inQuietHours(profile, minutes)) continue
+      // Nothing pings the user in quiet hours. A brief that was due before them waits until they end.
+      if (this.inQuietHours(profile, minutes)) {
+        if (slot.kind === 'brief') this.done.delete(key)
+        continue
+      }
       if (this.cards.some((c) => c.kind === slot.kind)) continue
       const slotTime = new Date(date.getFullYear(), date.getMonth(), date.getDate(), t.hour, t.minute).getTime()
       this.cards.push({ id: randomUUID().slice(0, 8), kind: slot.kind, at: slotTime })

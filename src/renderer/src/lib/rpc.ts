@@ -56,7 +56,8 @@ export class CoreClient {
       // Desktop loads from file:// (hostname is empty -> 127.0.0.1); the phone page loads from
       // http://<lan-ip>:<port> and must talk to that same address, not to loopback.
       const host = location.hostname || '127.0.0.1'
-      const ws = new WebSocket(`ws://${host}:${port}/?token=${token}`)
+      // The phone web app (Deskmates from anywhere) reaches the PC through an encrypted relay socket.
+      const ws = window.deskmates.openSocket ? window.deskmates.openSocket() : new WebSocket(`ws://${host}:${port}/?token=${token}`)
       this.socket = ws
       ws.onopen = () => {
         if (this.socket !== ws) return

@@ -146,6 +146,14 @@ export interface PcCloudConnection {
   registryPassword: string
 }
 
+/** Phone access from anywhere: whether it's set up, the web app's address and the paired phones. */
+export interface RemoteStatusInfo {
+  configured: boolean
+  appUrl: string
+  devices: Array<{ id: string; name: string; createdAt: number; lastSeenAt: number | null; notifications: boolean }>
+  pairing: { url: string; until: number } | null
+}
+
 /** Live state of phone (LAN) access: whether it's listening, on which port, and the URLs to open. */
 export interface PhoneInfo {
   enabled: boolean
@@ -801,6 +809,12 @@ export interface RpcMethods {
   'duo.todo.remove': { params: { id: string }; result: DuoState }
   /** One Duo tool, for Duo's Freebuff through the MCP bridge. */
   'duo.tool': { params: { name: string; input: Record<string, unknown> }; result: { text: string } }
+  /** Deskmates from anywhere: paired phones over the encrypted relay. */
+  'remote.status': { params: NoParams; result: RemoteStatusInfo }
+  'remote.pairStart': { params: NoParams; result: { url: string; until: number } }
+  'remote.remove': { params: { id: string }; result: RemoteStatusInfo }
+  /** The relay (Supabase project URL and publishable key) and the web app's address. */
+  'remote.configure': { params: { relay: string; anon: string; appUrl: string }; result: RemoteStatusInfo }
   /** The agent browser as everyone sees it: tabs, who is driving, and questions waiting for the user. */
   'browser.state': { params: NoParams; result: BrowserState }
   'browser.asks.respond': { params: { id: string; answer: SiteAnswer }; result: BrowserState }

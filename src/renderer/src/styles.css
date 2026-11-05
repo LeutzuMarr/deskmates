@@ -402,6 +402,42 @@ select {
   width: 0;
 }
 
+/* ---- Phone-sized screens (the phone app) ---- */
+@media (max-width: 699px) {
+  /* The sidebar is a drawer over the page instead of a column beside it. */
+  .sidebar-shell {
+    position: fixed;
+    top: 40px;
+    bottom: 0;
+    left: 0;
+    z-index: 30;
+    width: min(85vw, 300px);
+    background: var(--sidebar);
+    box-shadow: 0 0 32px rgba(0, 0, 0, 0.35);
+  }
+  .sidebar-shell-collapsed {
+    width: 0;
+    box-shadow: none;
+  }
+  /* The header keeps the menu button, the tabs (scrolling sideways) and the browser button. */
+  header.drag-region {
+    gap: 6px;
+    padding-left: 8px;
+    padding-right: 8px;
+    padding-top: env(safe-area-inset-top);
+    height: calc(40px + env(safe-area-inset-top));
+  }
+  header.drag-region > span,
+  header.drag-region > .titlebar-search {
+    display: none;
+  }
+  header.drag-region .segmented {
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+}
+
 /* ---- Keyboard hints ---- */
 .kbd {
   display: inline-flex;

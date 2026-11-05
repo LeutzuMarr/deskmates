@@ -123,3 +123,12 @@ describe('Duo workspace', () => {
     expect(readFileSync(join(dir, 'ws', 'profile.md'), 'utf8')).toContain('romgaz.ro')
   })
 })
+
+describe('Duo quiet hours', () => {
+  it('no brief card late at night, and no check-in either', () => {
+    const t = setup(new Date(2026, 10, 5, 23, 50).getTime())
+    t.duo.tick(new Date(2026, 10, 5, 23, 50).getTime())
+    expect(t.duo.state().cards).toHaveLength(0)
+    expect(t.notes).toHaveLength(0)
+  })
+})

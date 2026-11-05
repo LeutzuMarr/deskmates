@@ -17,3 +17,8 @@ docs/HANDOFF-OPENCODE.md
 # Base prompts are supplied by each user; only the folder's README is published
 prompts/*
 !prompts/README.md
+
+# The phone web app's build (deployed to Vercel)
+dist-remote/
+.vercel/
+.vercel-remote/

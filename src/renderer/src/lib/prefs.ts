@@ -11,7 +11,9 @@ export interface UiPrefs {
 }
 
 const KEY = 'deskmates:ui-prefs'
-const DEFAULTS: UiPrefs = { theme: 'system', sidebarCollapsed: false }
+// On a phone-sized screen the sidebar starts closed; it opens as a drawer over the page.
+const NARROW = typeof window !== 'undefined' && window.innerWidth < 700
+const DEFAULTS: UiPrefs = { theme: 'system', sidebarCollapsed: NARROW }
 
 function read(): UiPrefs {
   try {

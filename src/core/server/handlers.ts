@@ -4,6 +4,7 @@ import { EMPTY_BROWSER_STATE, type SiteAnswer } from '../../shared/agent-browser
 import { agentBrowserTools } from '../tools/browser'
 import type { TaskScheduler } from '../schedules/task-scheduler'
 import type { DuoService } from '../duo/service'
+import type { RemoteAccess } from '../phone/remote'
 import type { DuoProfile } from '../../shared/duo'
 import type { When } from '../../shared/protocol'
 import { randomInt, randomUUID } from 'node:crypto'
@@ -93,6 +94,9 @@ export interface HandlerServices {
   screen?: ScreenGuideService
   /** The agent browser (the title bar's browser panel). */
   browser?: BrowserService
+  /** Paired phones over the encrypted relay. */
+  remote?: RemoteAccess
+  setRemoteConfig?: (patch: { relay: string; anon: string; appUrl: string }) => void
   /** Duo, and its tools for the MCP bridge. */
   duo?: DuoService
   duoTools?: () => Record<string, unknown>
@@ -105,6 +109,11 @@ export interface HandlerServices {
 /** Implements every method of RpcMethods. Handlers emit bus events the UI listens to. */
 export function createHandlers(services: HandlerServices): Handlers {
   const { repos, bus, runner, changes, models, keys, version, dataDir, agentKit, onDesignWritten } = services
+
+  const requireRemote = (): RemoteAccess => {
+    if (!services.remote) throw new Error('Phone access from anywhere is not available here.')
+    return services.remote
+  }
 
   const requireDuo = (): DuoService => {
     if (!services.duo) throw new Error('Duo is not available here.')
@@ -763,6 +772,17 @@ export function createHandlers(services: HandlerServices): Handlers {
       return null
     },
 
+    'remote.status': () => requireRemote().status(),
+    'remote.pairStart': () => requireRemote().pairStart(),
+    'remote.remove': (params: { id: string }) => requireRemote().remove(params.id),
+    'remote.configure': (params: { relay: string; anon: string; appUrl: string }) => {
+      const remote = requireRemote()
+      if (!/^https:\/\//.test(params.relay) || !/^https:\/\//.test(params.appUrl) || !params.anon.trim()) throw new Error('Give https addresses and the publishable key.')
+      services.setRemoteConfig?.({ relay: params.relay.trim(), anon: params.anon.trim(), appUrl: params.appUrl.trim().replace(/\/+$/, '') })
+      remote.stop()
+      remote.start()
+      return remote.status()
+    },
     'duo.state': () => requireDuo().state(),
     'duo.profile.update': (params: { patch: Partial<DuoProfile> }) => requireDuo().updateProfile(params.patch ?? {}),
     'duo.outbox.decide': (params: { id: string; decision: 'approve' | 'skip' | 'edit'; subject?: string; body?: string; to?: string }) => {

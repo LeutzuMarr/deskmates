@@ -172,7 +172,10 @@ function Outbox({ duo }: { duo: DuoState }): ReactNode {
 function Thread({ duo }: { duo: DuoState }): ReactNode {
   const toast = useStore((s) => s.showToast)
   const end = useRef<HTMLDivElement>(null)
-  useEffect(() => end.current?.scrollIntoView({ block: 'end' }), [duo.messages.length, duo.working])
+  // Braces matter: Chromium's scrollIntoView now returns a promise, which React would take for a cleanup.
+  useEffect(() => {
+    void end.current?.scrollIntoView({ block: 'end' })
+  }, [duo.messages.length, duo.working])
   const last = duo.messages.at(-1)
   const replies = last?.role === 'duo' && !duo.working ? quickReplies(last.text) : null
   return (

@@ -91,6 +91,8 @@ export interface DesktopApi {
     /** Font family names installed on this PC, sorted and without duplicates. */
     systemFonts(): Promise<string[]>
   }
+  /** The phone web app only: a WebSocket-like connection to the PC through the encrypted relay. */
+  openSocket?: () => WebSocket
   /** The agent browser panel (desktop only: the phone has no `browser`). */
   browser?: {
     /** Where the page sits in the window (CSS pixels of the window), or null when the panel closes. */

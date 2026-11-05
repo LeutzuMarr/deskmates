@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
+import { RemotePhones } from '../components/RemotePhones'
 import { Check, Monitor, Moon, Sun } from 'lucide-react'
 import type { KeyboardEvent, ReactNode } from 'react'
 import { useStore } from '../lib/store'
@@ -552,6 +553,7 @@ export function SettingsView() {
                 )}
               </div>
             )}
+            <RemotePhones />
           </div>
         </section>
 
