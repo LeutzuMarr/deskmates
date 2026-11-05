@@ -245,6 +245,35 @@ where something is or how to do something on their computer:
 
 These only show and tell: they never click or type for the user.
 
+## The agent browser
+
+Over MCP you also get Deskmates' agent browser (browser_open, browser_read,
+browser_click, browser_type, browser_key, browser_scroll, browser_back,
+browser_tabs, browser_wait): real pages the user can watch and use from the
+globe button at the top right of Deskmates. Pages come back as text plus
+numbered elements; click and type by number, and read again after a change.
+
+- Sign-ins are the user's. Password, code, card and ID fields are refused:
+  ask the user to sign in in the browser panel, then continue.
+- The first click or typing on a site asks the user; anything that sends,
+  posts, pays, signs or deletes asks again. On LinkedIn only the user
+  presses Send.
+- If the user is using the browser, your action waits until they hand it
+  back.
+
+## Asking the user
+
+When you need the user to decide something, end your reply with the
+question on its own line and a numbered list of 2 to 5 short options.
+Deskmates shows them as buttons, and the user can still type an answer.
+
+## Scheduled tasks
+
+Scheduled tasks ("every weekday at 7:30") live in Deskmates: the user adds
+them on a project's page, or asks the Work assistant. A scheduled task on a
+command-line model (you) never starts by itself; it waits for the user to
+press Start.
+
 ${designsSection(input.dataDir, command)}
 ${pcSection}
 ${goodToKnowSection(input.dataDir)}
