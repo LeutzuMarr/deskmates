@@ -1,4 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import type { BrowserService } from '../browser/service'
+import { EMPTY_BROWSER_STATE, type SiteAnswer } from '../../shared/agent-browser'
+import { agentBrowserTools } from '../tools/browser'
 import { randomInt, randomUUID } from 'node:crypto'
 import { basename, join, resolve, sep } from 'node:path'
 import { designFolder, listDesignFiles, readDesign, starterHtml, writeDesign } from '../designs/files'
@@ -84,6 +87,10 @@ export interface HandlerServices {
   computer?: ComputerUseService
   /** The screen guide a connected agent uses to see the screen, point at things and talk. */
   screen?: ScreenGuideService
+  /** The agent browser (the title bar's browser panel). */
+  browser?: BrowserService
+  /** Duo's approved Outbox item that may be sent on this site now, if any (the browser's send rule). */
+  duoSendPermit?: (domain: string) => { id: string; summary: string } | null
 }
 
 /** Implements every method of RpcMethods. Handlers emit bus events the UI listens to. */
@@ -765,6 +772,34 @@ export function createHandlers(services: HandlerServices): Handlers {
       return null
     },
 
+    'browser.state': () => services.browser?.state() ?? { ...EMPTY_BROWSER_STATE },
+    'browser.asks.respond': (params: { id: string; answer: SiteAnswer }) => {
+      if (!services.browser) throw new Error('The agent browser is not available.')
+      if (!['allow-once', 'always', 'deny'].includes(params.answer)) throw new Error('Unknown answer.')
+      return services.browser.respond(params.id, params.answer)
+    },
+    'browser.sites.list': () => services.browser?.alwaysAllowed() ?? [],
+    'browser.sites.remove': (params: { domain: string }) => {
+      if (!services.browser) throw new Error('The agent browser is not available.')
+      return services.browser.removeSite(params.domain)
+    },
+    'browser.tool': async (params: { name: string; input: Record<string, unknown>; agent?: string }) => {
+      if (!services.browser) throw new Error('The agent browser is not available.')
+      const agent = params.agent === 'Duo' ? 'Duo' : 'Connected agent'
+      const tools = agentBrowserTools({
+        browser: services.browser,
+        agent,
+        runKey: `bridge:${agent}`,
+        sendPermit: agent === 'Duo' ? (domain) => services.duoSendPermit?.(domain) ?? null : undefined,
+        screenshotDir: join(dataDir, 'browser-screenshots')
+      })
+      const chosen = (tools as unknown as Record<string, { inputSchema?: { parse?: (input: unknown) => unknown }; execute?: (input: unknown, options: unknown) => Promise<unknown> }>)[params.name]
+      if (!chosen?.execute) throw new Error(`Unknown browser tool: ${params.name}`)
+      // The same checks and defaults the app's own agents get from the tool's schema.
+      const input = chosen.inputSchema?.parse ? chosen.inputSchema.parse(params.input ?? {}) : (params.input ?? {})
+      const text = await chosen.execute(input, { toolCallId: 'bridge', messages: [] })
+      return { text: String(text) }
+    },
     'screen.clear': () => {
       if (!services.screen) throw new Error(SCREEN_NOT_SET_UP)
       services.screen.clear()

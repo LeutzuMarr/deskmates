@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { BrowserState } from '../../../shared/agent-browser'
 import { core } from './rpc'
 import type {
   ComputerSession,
@@ -131,6 +132,11 @@ interface StoreState {
   terminalItemsBySession: Record<string, TimelineItem[]>
   attachedTerminalSessions: AttachedTerminalSession[]
   computerSession: ComputerSession | null
+  /** The agent browser: tabs, who is driving, and questions waiting for the user. */
+  browser: BrowserState | null
+  /** Whether the browser panel is open (desktop only). */
+  browserOpen: boolean
+  setBrowserOpen: (open: boolean) => void
   /** The file each design's preview shows (relative to the design folder); unset means its default page. */
   designFiles: Record<string, string>
   init: () => void
@@ -383,6 +389,9 @@ export const useStore = create<StoreState>()((set, get) => {
       case 'computer.updated':
         set({ computerSession: event.session })
         break
+      case 'browser.updated':
+        set({ browser: event.state })
+        break
     }
   }
 
@@ -554,6 +563,9 @@ export const useStore = create<StoreState>()((set, get) => {
     terminalItemsBySession: {},
     attachedTerminalSessions: [],
     computerSession: null,
+    browser: null,
+    browserOpen: false,
+    setBrowserOpen: (open) => set({ browserOpen: open }),
     designFiles: {},
 
     init: () => {
@@ -568,6 +580,7 @@ export const useStore = create<StoreState>()((set, get) => {
           void loadBots()
           void loadTerminals()
           void loadExtras()
+          void core.call('browser.state', {}).then((browser) => set({ browser })).catch(() => undefined)
         }
       })
       void core.connect()

@@ -6,6 +6,7 @@ import { isAbsolute, basename, extname, join } from 'node:path'
 import { readFile, stat, unlink } from 'node:fs/promises'
 import JSZip from 'jszip'
 import type { CoreHost } from './core-host'
+import type { AgentBrowser } from './agent-browser'
 import type { SecretStore } from './secrets'
 import type { DesignExportFormat, InstallWslResult, VideoExportOptions } from '../shared/desktop-api'
 import type { ProviderId } from '../shared/protocol'
@@ -21,6 +22,16 @@ export interface RegisterIpcDeps {
   secrets: SecretStore
   getWindow: () => BrowserWindow | null
   dataDir: string
+  agentBrowser?: AgentBrowser
+}
+
+/** A rectangle from the renderer, or null; anything malformed counts as null (panel closed). */
+function asRect(value: unknown): Electron.Rectangle | null {
+  if (!value || typeof value !== 'object') return null
+  const { x, y, width, height } = value as Record<string, unknown>
+  if (![x, y, width, height].every((n) => typeof n === 'number' && Number.isFinite(n))) return null
+  if ((width as number) < 10 || (height as number) < 10) return null
+  return { x: x as number, y: y as number, width: width as number, height: height as number }
 }
 
 const PREVIEW_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -163,7 +174,8 @@ async function doInstallWsl(): Promise<InstallWslResult> {
   }
 }
 
-export function registerIpc({ core, secrets, getWindow, dataDir }: RegisterIpcDeps): void {
+export function registerIpc(deps: RegisterIpcDeps): void {
+  const { core, secrets, getWindow, dataDir } = deps
   // ---- Window controls ----
   //
   // On Windows the frame supplies these through `titleBarOverlay`; everywhere else the app draws its
@@ -188,6 +200,33 @@ export function registerIpc({ core, secrets, getWindow, dataDir }: RegisterIpcDe
     // `index.ts` turns a close into a hide so the tray icon keeps the app alive; going through
     // `close()` preserves that, whereas `destroy()` would kill it outright.
     window?.close()
+  })
+
+  // The browser panel: where the page sits in the window, and the user's own toolbar actions.
+  ipcMain.handle('browser:setBounds', (event, bounds: unknown) => {
+    assertTrustedSender(event)
+    deps.agentBrowser?.setPanelBounds(asRect(bounds))
+  })
+  ipcMain.handle('browser:navigate', (event, op: unknown, url: unknown) => {
+    assertTrustedSender(event)
+    if (op !== 'back' && op !== 'forward' && op !== 'reload' && op !== 'go') return
+    return deps.agentBrowser?.userNavigate(op, typeof url === 'string' ? url : undefined)
+  })
+  ipcMain.handle('browser:selectTab', (event, tabId: unknown) => {
+    assertTrustedSender(event)
+    if (typeof tabId === 'string') deps.agentBrowser?.userSelectTab(tabId)
+  })
+  ipcMain.handle('browser:closeTab', (event, tabId: unknown) => {
+    assertTrustedSender(event)
+    if (typeof tabId === 'string') deps.agentBrowser?.userCloseTab(tabId)
+  })
+  ipcMain.handle('browser:handBack', (event) => {
+    assertTrustedSender(event)
+    deps.agentBrowser?.handBack()
+  })
+  ipcMain.handle('browser:state', (event) => {
+    assertTrustedSender(event)
+    return deps.agentBrowser?.state() ?? null
   })
 
   ipcMain.handle('core:connection', (event) => {

@@ -36,6 +36,7 @@ import { WindowsDesktop } from './computer/desktop'
 import { LinuxDesktop } from './computer/linux-desktop'
 import { ScreenGuideService } from './screen/guide'
 import { ParentPortRenderClient } from './render/client'
+import { BrowserService } from './browser/service'
 
 // Electron's utilityProcess.parentPort, typed locally so this imports nothing from 'electron'.
 type ParentPort = {
@@ -98,6 +99,12 @@ async function main(): Promise<void> {
   const plugins = new PluginsService({ repos, dataDir, runner: commandRunner, skills })
   const subagents = createSubagentRunner({ models })
   const render = parentPort ? new ParentPortRenderClient(parentPort) : undefined
+  const browser = new BrowserService({
+    bus,
+    port: parentPort,
+    sites: { get: () => repos.settings.getExtra<string[]>('browserSites', []), set: (sites) => repos.settings.setExtra('browserSites', sites) },
+    notify: (title, body) => bus.emit({ type: 'notify', title, body })
+  })
   const runner = new TaskRunner({
     repos,
     bus,
@@ -109,7 +116,8 @@ async function main(): Promise<void> {
     subagents,
     createTools: buildTools,
     getTerminals: () => terminals,
-    render
+    render,
+    browser
   })
 
   const engineManager = new EngineManager({ runner: commandRunner, dataDir })
@@ -238,7 +246,8 @@ async function main(): Promise<void> {
     connectors,
     phone: { info: () => phone.info() },
     computer,
-    screen: screenGuide
+    screen: screenGuide,
+    browser
   })
 
   // Follows the settings toggle and code changes: on/off, and restarting when the code changes.
@@ -261,7 +270,7 @@ async function main(): Promise<void> {
     port: Number(process.env.DESKMATES_PORT ?? 0),
     agent: {
       token: agentToken,
-      methods: ['app.info', 'projects.list', 'designs.read', 'designs.save', 'designs.create', 'screen.look', 'screen.point', 'screen.say', 'screen.clear'],
+      methods: ['app.info', 'projects.list', 'designs.read', 'designs.save', 'designs.create', 'screen.look', 'screen.point', 'screen.say', 'screen.clear', 'browser.state', 'browser.tool'],
       events: ['design.updated', 'project.updated']
     }
   })

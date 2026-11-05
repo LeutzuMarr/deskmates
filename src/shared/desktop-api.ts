@@ -91,6 +91,15 @@ export interface DesktopApi {
     /** Font family names installed on this PC, sorted and without duplicates. */
     systemFonts(): Promise<string[]>
   }
+  /** The agent browser panel (desktop only: the phone has no `browser`). */
+  browser?: {
+    /** Where the page sits in the window (CSS pixels of the window), or null when the panel closes. */
+    setBounds(bounds: { x: number; y: number; width: number; height: number } | null): Promise<void>
+    navigate(op: 'back' | 'forward' | 'reload' | 'go', url?: string): Promise<void>
+    selectTab(tabId: string): Promise<void>
+    closeTab(tabId: string): Promise<void>
+    handBack(): Promise<void>
+  }
   engine: {
     /**
      * Runs exactly `wsl.exe --install --no-distribution`, elevated through a Windows administrator

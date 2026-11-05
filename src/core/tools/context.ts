@@ -6,6 +6,7 @@ import type { PluginsService } from '../extensions/plugins'
 import type { SubagentRunner } from '../engine/subagents'
 import type { MemoriesRepo } from '../store/repos'
 import type { RenderClient } from '../render/types'
+import type { BrowserService } from '../browser/service'
 
 /** Everything a tool needs to act for one task. Built fresh for every run. */
 export interface ToolContext {
@@ -35,6 +36,12 @@ export interface ToolContext {
   scheduleWakeup?(delayMs: number, prompt: string): void
   /** Offscreen page rendering in the host: screenshots, scripts, PDFs. Absent when there is no host. */
   render?: RenderClient
+  /** The agent browser the user can watch from the title bar. Absent without the app. */
+  browser?: BrowserService
+  /** Who is acting, as the user reads it in browser questions: "Work", "Design", or a scheduled task's name. */
+  agentName?: string
+  /** Stops the run (so a browser wait doesn't outlive it). */
+  signal?: AbortSignal
   onPlan(items: PlanItem[]): void
   onNotify(title: string, body: string): void
   onChangesUpdated(): void

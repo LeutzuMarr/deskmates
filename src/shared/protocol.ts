@@ -1,5 +1,7 @@
 import type { RenderRequest, RenderResult, VideoRequest, VideoResult } from '../core/render/types'
 import type { FreebuffStatus } from './freebuff'
+import type { BrowserAction, BrowserResult, BrowserState, HostBrowserState, SiteAnswer } from './agent-browser'
+export type { BrowserAction, BrowserResult }
 
 export type ProviderId =
   | 'google'
@@ -745,6 +747,15 @@ export interface RpcMethods {
   'screen.say': { params: { text: string }; result: null }
   /** Removes every mark from the screen. */
   'screen.clear': { params: NoParams; result: null }
+  /** The agent browser as everyone sees it: tabs, who is driving, and questions waiting for the user. */
+  'browser.state': { params: NoParams; result: BrowserState }
+  'browser.asks.respond': { params: { id: string; answer: SiteAnswer }; result: BrowserState }
+  /** Sites every agent may act on without asking again ("Always allow"). */
+  'browser.sites.list': { params: NoParams; result: string[] }
+  'browser.sites.remove': { params: { domain: string }; result: string[] }
+  /** Runs one agent-browser tool (browser_open, browser_click…) for a connected agent, with the same
+   *  rules the app's own agents follow. `agent` is "Duo" for Duo's own runs. */
+  'browser.tool': { params: { name: string; input: Record<string, unknown>; agent?: string }; result: { text: string } }
 
   // ---- Skills and plugins (spec 5.5) ----
   'skills.list': { params: NoParams; result: Skill[] }
@@ -831,6 +842,7 @@ export type CoreEvent =
   | { type: 'plugins.updated'; plugins: Plugin[] }
   | { type: 'connectors.updated'; connectors: Connector[] }
   | { type: 'computer.updated'; session: ComputerSession }
+  | { type: 'browser.updated'; state: BrowserState }
 
 export type ClientMessage = { type: 'req'; id: number; method: RpcMethod; params: unknown }
 
@@ -850,6 +862,10 @@ export type HostToCore =
   | { type: 'render-result'; id: number; result: RenderResult }
   /** The answer to a `video-request` with the same id: the result, or why it failed. */
   | { type: 'video-result'; id: number; result?: VideoResult; error?: string }
+  /** The answer to a `browser-request` with the same id. */
+  | { type: 'browser-result'; id: number; result: BrowserResult }
+  /** The agent browser's tabs, control and panel changed (or the user's idle time moved on). */
+  | { type: 'browser-state'; state: HostBrowserState }
 
 /** Messages from the core to the Electron main process. */
 export type CoreToHost =
@@ -864,3 +880,5 @@ export type CoreToHost =
   /** Draws the screen guide's marks over the primary screen for `seconds`; coordinates are physical
    *  screen pixels. An empty list clears the overlay. */
   | { type: 'overlay'; marks: ScreenMark[]; seconds: number }
+  /** Asks the host to act in the agent browser; answered by `browser-result`. */
+  | { type: 'browser-request'; id: number; action: BrowserAction }

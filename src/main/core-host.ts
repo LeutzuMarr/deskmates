@@ -3,6 +3,7 @@ import corePath from '../core/main?modulePath'
 import type { CoreConnection } from '../shared/desktop-api'
 import type { CoreToHost, HostToCore, ProviderId, ScreenMark } from '../shared/protocol'
 import type { RenderRequest, RenderResult, VideoRequest, VideoResult } from '../core/render/types'
+import type { BrowserAction, BrowserResult, HostBrowserState } from '../shared/agent-browser'
 
 export interface CoreHostOptions {
   dataDir: string
@@ -20,6 +21,10 @@ export interface CoreHostOptions {
   onRenderRequest?: (request: RenderRequest) => Promise<RenderResult>
   /** Records a design page to a video file for the core's export_video tool. */
   onVideoRequest?: (request: VideoRequest & { out: string }) => Promise<VideoResult>
+  /** Acts in the agent browser for the core's browser tools. Without it, every browser request fails. */
+  onBrowserRequest?: (action: BrowserAction) => Promise<BrowserResult>
+  /** The core (re)started: a chance to send it the agent browser's current state. */
+  onReady?: () => void
   onRestart: () => void
 }
 
@@ -64,6 +69,7 @@ export class CoreHost {
         const waiters = this.waiters
         this.waiters = []
         for (const waiter of waiters) waiter.resolve(connection)
+        this.opts.onReady?.()
       } else if (message.type === 'notify') {
         this.opts.onNotify(message.title, message.body)
       } else if (message.type === 'computer-use') {
@@ -74,6 +80,8 @@ export class CoreHost {
         this.render(child, message.id, message.request)
       } else if (message.type === 'video-request') {
         this.video(child, message.id, message.request)
+      } else if (message.type === 'browser-request') {
+        this.browser(child, message.id, message.action)
       }
     })
 
@@ -123,6 +131,36 @@ export class CoreHost {
         this.child?.postMessage(message)
       })
       .catch((error: unknown) => console.error('[main] could not load the saved API keys', error))
+  }
+
+  /** Tells the core what the agent browser looks like now (tabs, who is driving, the panel). */
+  sendBrowserState(state: HostBrowserState): void {
+    const message: HostToCore = { type: 'browser-state', state }
+    try {
+      this.child?.postMessage(message)
+    } catch (error) {
+      console.error('[main] could not send the browser state to the core', error)
+    }
+  }
+
+  /** Answers a browser request, but only to the process that asked (not one restarted since). */
+  private browser(child: UtilityProcess, id: number, action: BrowserAction): void {
+    const reply = (result: BrowserResult): void => {
+      if (this.child !== child) return
+      const message: HostToCore = { type: 'browser-result', id, result }
+      try {
+        child.postMessage(message)
+      } catch (error) {
+        console.error('[main] could not send a browser result to the core', error)
+      }
+    }
+    if (!this.opts.onBrowserRequest) {
+      reply({ ok: false, error: 'The agent browser is not available.' })
+      return
+    }
+    this.opts.onBrowserRequest(action).then(reply, (error: unknown) =>
+      reply({ ok: false, error: error instanceof Error ? error.message : String(error) })
+    )
   }
 
   /** Answers a video request, but only to the process that asked (not one restarted since). */

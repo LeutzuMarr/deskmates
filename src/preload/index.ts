@@ -76,6 +76,14 @@ const deskmates: DesktopApi = {
     systemFonts: () => ipcRenderer.invoke('design:systemFonts')
   },
 
+  browser: {
+    setBounds: (bounds) => ipcRenderer.invoke('browser:setBounds', bounds),
+    navigate: (op, url) => ipcRenderer.invoke('browser:navigate', op, url),
+    selectTab: (tabId) => ipcRenderer.invoke('browser:selectTab', tabId),
+    closeTab: (tabId) => ipcRenderer.invoke('browser:closeTab', tabId),
+    handBack: () => ipcRenderer.invoke('browser:handBack')
+  },
+
   engine: {
     installWsl: () => ipcRenderer.invoke('engine:installWsl')
   }

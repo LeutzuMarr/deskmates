@@ -47,6 +47,8 @@ export interface RunnerDeps {
   getTerminals?: () => TerminalsService | undefined
   /** Offscreen page rendering in the host, for the design tools that screenshot or run pages. */
   render?: ToolContext['render']
+  /** The agent browser; absent without the app. */
+  browser?: ToolContext['browser']
   now?: () => Date
 }
 
@@ -304,6 +306,8 @@ export class TaskRunner {
         ...(deps.plugins ? { plugins: deps.plugins } : {}),
         ...(deps.subagents ? { subagents: deps.subagents } : {}),
         ...(deps.render ? { render: deps.render } : {}),
+        ...(deps.browser ? { browser: deps.browser } : {}),
+        signal: controller.signal,
         projectKind: project.kind === 'design' ? 'design' : 'work',
         renameProject: (title) => {
           const renamed = repos.projects.update(task.projectId, { name: title })
@@ -457,6 +461,7 @@ export class TaskRunner {
       }
     } finally {
       this.runs.delete(taskId)
+      deps.browser?.endRun(taskId)
       bus.emit({ type: 'task.updated', task: repos.tasks.require(taskId) })
       bus.emit({ type: 'task.timeline', taskId, timeline: this.timeline(taskId) })
       bus.emit({ type: 'usage.updated', usage: repos.usage.list() })

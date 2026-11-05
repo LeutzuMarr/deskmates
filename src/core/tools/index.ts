@@ -10,6 +10,8 @@ import { designTools } from './design'
 import { designComponentTools } from './design-components'
 import { designVisualTools } from './design-visual'
 import { extensionTools } from './extensions'
+import { agentBrowserTools } from './browser'
+import { join } from 'node:path'
 
 /** Merges every tool group into one ToolSet for a run. Built fresh per run via TaskRunner. */
 export function buildTools(ctx: ToolContext): ToolSet {
@@ -21,7 +23,16 @@ export function buildTools(ctx: ToolContext): ToolSet {
     ...(ctx.skills ? skillsTools(ctx.skills) : {}),
     ...(ctx.connectors ? ctx.connectors.tools() : {}),
     ...extensionTools(ctx),
-    ...(ctx.subagents ? subagentTools(ctx) : {})
+    ...(ctx.subagents ? subagentTools(ctx) : {}),
+    ...(ctx.browser
+      ? agentBrowserTools({
+          browser: ctx.browser,
+          agent: ctx.agentName ?? (ctx.projectKind === 'design' ? 'Design' : 'Work'),
+          runKey: ctx.taskId,
+          screenshotDir: join(ctx.root, '.deskmates', 'screenshots'),
+          signal: ctx.signal
+        })
+      : {})
   }
   const listTools = (): ToolListing[] =>
     Object.entries(all).map(([name, t]) => ({ name, description: String((t as { description?: string }).description ?? '') }))

@@ -74,6 +74,24 @@ export class SettingsRepo {
     return row ? (JSON.parse(row.value) as PcMode) : 'own'
   }
 
+  /** A value kept next to `Settings` under its own key (browser sites, Duo's profile, paired phones). */
+  getExtra<T>(key: string, fallback: T): T {
+    const row = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(`extra:${key}`) as { value: string } | undefined
+    if (!row) return fallback
+    try {
+      return JSON.parse(row.value) as T
+    } catch {
+      return fallback
+    }
+  }
+
+  setExtra<T>(key: string, value: T): T {
+    this.db
+      .prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+      .run(`extra:${key}`, JSON.stringify(value))
+    return value
+  }
+
   setPcMode(mode: PcMode): PcMode {
     this.db
       .prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')

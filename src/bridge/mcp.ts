@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
+import { registerBrowserTools } from './browser-tools'
 import { guide, designList, designRead, designWrite, designCreate, type Call } from './actions'
 
 export const SERVER_NAME = 'deskmates'
@@ -25,7 +26,7 @@ async function asToolResult(run: () => Promise<string>): Promise<CallToolResult>
  * Builds the Deskmates MCP server over a `call` function (the real WebSocket
  * client in production, a fake in tests). Connect it to a transport yourself.
  */
-export function createDeskmatesServer(options: { call: Call; dataDir: string; appVersion?: string }): McpServer {
+export function createDeskmatesServer(options: { call: Call; dataDir: string; appVersion?: string; agent?: string }): McpServer {
   const { call } = options
   const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION }, {
     instructions: SERVER_INSTRUCTIONS
@@ -126,6 +127,8 @@ export function createDeskmatesServer(options: { call: Call; dataDir: string; ap
     return 'Cleared the screen.'
   }))
 
+  registerBrowserTools(server, call, options.agent)
+
   // The pc tools stay stubs until stage 2; the guide's PC section says so too.
   const pcNotReady = (): Promise<CallToolResult> =>
     asToolResult(async () => {
@@ -162,7 +165,7 @@ export function createDeskmatesServer(options: { call: Call; dataDir: string; ap
 }
 
 /** Creates the server and connects it to stdio; resolves when it closes. */
-export async function runMcpServerOnStdio(options: { call: Call; dataDir: string; appVersion?: string }): Promise<void> {
+export async function runMcpServerOnStdio(options: { call: Call; dataDir: string; appVersion?: string; agent?: string }): Promise<void> {
   const server = createDeskmatesServer(options)
   await server.connect(new StdioServerTransport())
   await new Promise<void>((resolve) => {

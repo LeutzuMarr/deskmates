@@ -223,7 +223,9 @@ async function cmdMcp(deps: CliDeps, dataDir: string): Promise<number> {
   const client = await deps.connectCore({ dataDir })
   try {
     deps.error('Deskmates MCP server listening on stdio.')
-    await runMcpServerOnStdio({ call: (method, params) => client.call(method, params), dataDir })
+    // Duo's own Freebuff sets DESKMATES_AGENT=Duo in its mcp.json, so its sends follow Duo's Outbox rule.
+    const agent = process.env.DESKMATES_AGENT === 'Duo' ? 'Duo' : undefined
+    await runMcpServerOnStdio({ call: (method, params) => client.call(method, params), dataDir, agent })
     return EXIT_OK
   } finally {
     client.close()

@@ -72,10 +72,19 @@ function resultText(result: unknown): string {
 }
 
 describe('createDeskmatesServer', () => {
-  it('lists all thirteen tools', async () => {
+  it('lists every tool', async () => {
     const { client } = await connect()
     const { tools } = await client.listTools()
     expect(tools.map((tool) => tool.name).sort()).toEqual([
+      'browser_back',
+      'browser_click',
+      'browser_key',
+      'browser_open',
+      'browser_read',
+      'browser_scroll',
+      'browser_tabs',
+      'browser_type',
+      'browser_wait',
       'design_create',
       'design_list',
       'design_read',
@@ -90,6 +99,20 @@ describe('createDeskmatesServer', () => {
       'screen_point',
       'screen_say'
     ])
+  })
+
+  it('browser tools go through the app with the agent name', async () => {
+    const calls: unknown[] = []
+    const { client } = await connect({
+      'browser.tool': (params: unknown) => {
+        calls.push(params)
+        return { text: 'Page: Example' }
+      }
+    })
+    const result = await client.callTool({ name: 'browser_open', arguments: { url: 'https://example.com' } })
+    expect(result.isError).toBeFalsy()
+    expect((result.content as Array<{ text: string }>)[0]?.text).toBe('Page: Example')
+    expect(calls).toEqual([{ name: 'browser_open', input: { url: 'https://example.com' } }])
   })
 
   it('screen_look returns the screenshot as an image with its size', async () => {

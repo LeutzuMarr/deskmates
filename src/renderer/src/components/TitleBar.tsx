@@ -2,6 +2,7 @@ import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { Copy, Minus, PanelLeft, Search, Square, X } from 'lucide-react'
 import { BrandMark } from './Mascot'
 import { TabSwitch } from './TabSwitch'
+import { BrowserButton } from './BrowserPanel'
 import { getPrefs, setPrefs, usePrefs } from '../lib/prefs'
 
 const api = window.deskmates
@@ -81,13 +82,16 @@ export function TitleBar({ onSearch }: { onSearch: () => void }) {
         <span className="hidden md:inline">Search</span>
         <kbd className="kbd hidden md:inline">{MOD}K</kbd>
       </button>
+      <div className="ml-auto flex items-center">
+        <BrowserButton />
+      </div>
       {/* Room for Windows' own overlay buttons, which sit on top of this header. */}
       {NEEDS_WINDOW_CONTROLS ? (
-        <div className="ml-auto flex h-full items-center">
+        <div className="flex h-full items-center">
           <WindowControls />
         </div>
       ) : api.platform === 'win32' ? (
-        <div className="no-drag ml-auto h-full w-[140px] shrink-0" />
+        <div className="no-drag h-full w-[140px] shrink-0" />
       ) : null}
     </header>
   )

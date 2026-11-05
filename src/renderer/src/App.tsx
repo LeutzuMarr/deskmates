@@ -8,6 +8,7 @@ import { BotsSidebar } from './components/BotsSidebar'
 import { AgentsSidebar } from './components/AgentsSidebar'
 import { ExtrasSidebar } from './components/ExtrasSidebar'
 import { Toast } from './components/Toast'
+import { BrowserPanel } from './components/BrowserPanel'
 import { CommandPalette } from './components/CommandPalette'
 import { usePrefs } from './lib/prefs'
 import { useGlobalShortcuts } from './lib/shortcuts'
@@ -76,6 +77,7 @@ export function App() {
           {view.name === 'extras-home' && <ExtrasHomeView />}
         </main>
       </div>
+      <BrowserPanel />
       <Toast />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
     </div>

@@ -17,6 +17,7 @@ import { handlePreviewProtocol, registerPreviewScheme } from './preview-protocol
 import { RenderService } from './render-service'
 import { recordForCore } from './video-export'
 import { createTray } from './tray'
+import { AgentBrowser } from './agent-browser'
 
 // Portable mode (also used by tests): redirect Electron's userData folder before anything else runs.
 if (process.env.DESKMATES_USER_DATA) {
@@ -72,6 +73,13 @@ function main(): void {
   let isQuitting = false
 
   const renderService = new RenderService()
+  const agentBrowser = new AgentBrowser({
+    getWindow: () => win,
+    onState: (state) => {
+      core.sendBrowserState(state)
+      if (win && !win.isDestroyed()) win.webContents.send('agent-browser:state', state)
+    }
+  })
   const core = new CoreHost({
     dataDir,
     rendererDir: join(import.meta.dirname, '../renderer'),
@@ -93,7 +101,9 @@ function main(): void {
     onComputerUse: (active) => computerBar.setActive(active),
     onOverlay: (marks, seconds) => screenOverlay.show(marks, seconds),
     onRenderRequest: (request) => renderService.render(request),
-    onVideoRequest: (request) => recordForCore(dataDir, request)
+    onVideoRequest: (request) => recordForCore(dataDir, request),
+    onBrowserRequest: (action) => agentBrowser.act(action),
+    onReady: () => core.sendBrowserState(agentBrowser.state())
   })
   const screenOverlay = new ScreenOverlay()
   const computerBar = new ComputerBar(
@@ -113,6 +123,7 @@ function main(): void {
     core.stop()
     renderService.dispose()
     screenOverlay.dispose()
+    agentBrowser.dispose()
   })
 
   app.whenReady().then(() => {
@@ -129,7 +140,7 @@ function main(): void {
       },
       quit: () => app.quit()
     })
-    registerIpc({ core, secrets, getWindow: () => win, dataDir })
+    registerIpc({ core, secrets, getWindow: () => win, dataDir, agentBrowser })
     try {
       installAgentCommand({ dataDir, bridgeScript })
     } catch (error) {
