@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { myPromptBrief } from '../engine/my-prompt'
 import { APICallError, streamText, tool } from 'ai'
 import type { ModelMessage } from 'ai'
 import { z } from 'zod'
@@ -48,6 +49,12 @@ const NUDGE =
  *  overview on Super alone. On Linux, where the key is the same as Windows', this is what makes the
  *  `open` action work at all. */
 const LAUNCHER_KEY = process.platform === 'darwin' ? 'cmd' : 'win'
+
+/** The user's own operating prompt (its first section), ahead of the computer-use rules. */
+function withOperatingPrompt(rules: string): string {
+  const operating = myPromptBrief('none')
+  return operating ? `${operating}\n\n---\n\n${rules}` : rules
+}
 
 const INSTRUCTIONS = `You are operating the user's own computer through the \`computer\` tool. You see the screen as screenshots and act with the mouse and keyboard, exactly like a person sitting at the desk.
 
@@ -351,7 +358,7 @@ export class ComputerUseService {
     try {
       const result = streamText({
         model,
-        instructions: INSTRUCTIONS,
+        instructions: withOperatingPrompt(INSTRUCTIONS),
         messages,
         tools: { computer: computerTool },
         maxOutputTokens: capTokens ? MAX_OUTPUT_TOKENS : undefined,

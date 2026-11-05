@@ -18,3 +18,12 @@ describe('what agents are told about the app tools', () => {
     expect(cli).not.toContain('browser_open')
   })
 })
+
+describe('after a tab prompt', () => {
+  it('adds only the tool names the prompt does not know, not a second set of asking rules', () => {
+    const note = deskmatesToolsGuide('work', false, true)
+    expect(note).toContain('not create_trigger')
+    expect(note).toContain('not Claude in Chrome')
+    expect(note).not.toContain('Asking the user')
+  })
+})

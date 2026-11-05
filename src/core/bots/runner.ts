@@ -21,6 +21,7 @@
  * of colliding with whatever the human is doing on the same PC.
  */
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { myPromptBrief, promptSectionTool } from '../engine/my-prompt'
 import { join } from 'node:path'
 import { isStepCount, ToolLoopAgent, type ModelMessage, type TextStreamPart, type ToolSet } from 'ai'
 import type { Bot, BotRun, ProviderId, RunState, TimelineItem, ToolItem } from '../../shared/protocol'
@@ -103,6 +104,9 @@ function buildBotInstructions(
   skills?: SkillsService
 ): string {
   const parts: string[] = []
+  // The user's own operating prompt first (bots have no tab prompt), then this bot's job.
+  const operating = myPromptBrief('tool')
+  if (operating) parts.push(operating, '', '---', '')
   parts.push(
     `You are ${bot.name}, a Deskmates bot with your own Linux computer, working on the task below without anyone watching unless they choose to.`
   )
@@ -378,6 +382,7 @@ export class BotRunner implements RunService {
         connectors: this.deps.connectors,
         whatsappTo: this.deps.repos.settings.get().whatsappTo
       })
+      Object.assign(tools, promptSectionTool())
       // Shared, so parallel tool calls that all hit a stopped PC restart it once, not once each.
       let recovering: Promise<void> | null = null
       const recoverPc = (): Promise<void> =>

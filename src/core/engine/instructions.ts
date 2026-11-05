@@ -95,13 +95,28 @@ export interface BuildInstructionsInput {
   skills?: string[]
 }
 
+/** The few lines added after a tab prompt (Cowork, Design): this app's names for what it describes. */
+function baseToolsNote(kind: 'work' | 'design'): string {
+  return [
+    "This app's own tools for things the prompt above describes with other names:",
+    kind === 'work'
+      ? '- Scheduled tasks are schedule_create, schedule_list, schedule_update and schedule_delete (not create_trigger, send_later or cron), with a structured when such as {frequency: "weekdays", time: "07:30"}. Each run starts fresh in this project. On Freebuff, OpenCode or Antigravity a run waits for the user to press Start; say so.'
+      : '- Scheduled tasks are schedule_create, schedule_list, schedule_update and schedule_delete, with a structured when.',
+    "- The browser is Deskmates' agent browser (browser_open, browser_read, browser_click, browser_type, browser_key, browser_scroll, browser_back, browser_tabs, browser_screenshot, browser_wait), not Claude in Chrome. The user watches and can take it over from the globe button. Sign-ins are theirs: never type passwords or codes. The first click on a site and anything that sends ask the user; on LinkedIn only the user presses Send.",
+    "- screen_look and screen_act are the user's real screen, mouse and keyboard (the user approves screen_act once per task). Use them to open and check what you built before saying it works."
+  ].join('\n')
+}
+
 /**
  * What every Deskmates agent is told about the app's own tools: asking with cards, the agent browser,
  * screen control and scheduled tasks. Command-line agents (Freebuff, OpenCode, Antigravity) can't draw
  * cards or call these tools from a Work task, so they get the parts that apply to them.
  */
-export function deskmatesToolsGuide(kind: 'work' | 'design', cli: boolean): string {
+export function deskmatesToolsGuide(kind: 'work' | 'design', cli: boolean, basePrompt = false): string {
   const ask = kind === 'design' ? 'ask_user' : 'AskUserQuestion'
+  // With a tab prompt loaded, only what it doesn't already say: it covers asking questions and
+  // working style itself, but names another app's tools for schedules and the browser.
+  if (basePrompt && !cli) return baseToolsNote(kind)
   if (cli) {
     return [
       'Asking the user:',
@@ -161,6 +176,8 @@ export function buildInstructions(input: BuildInstructionsInput): string {
     parts.push(`- ${INSTALL_NOTE}`)
     const timeStr = now.toLocaleString('en-GB', { dateStyle: 'full', timeStyle: 'short' })
     parts.push(`- Now: ${timeStr} (${Intl.DateTimeFormat().resolvedOptions().timeZone})`)
+    parts.push('')
+    parts.push(deskmatesToolsGuide(isDesign ? 'design' : 'work', isCliProvider(model.provider), true))
     pushUserContext(parts, input)
     return parts.join('\n')
   }
