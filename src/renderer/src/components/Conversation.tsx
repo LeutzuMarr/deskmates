@@ -3,7 +3,8 @@ import type { ReactNode } from 'react'
 import { AssistantText } from './Markdown'
 import { ActivityGroup } from './ActivityGroup'
 import { ApprovalCard } from './ApprovalCard'
-import { AgentCard, CARD_TOOLS } from './AgentCards'
+import { AgentCard, CARD_TOOLS, QuickReplyCard } from './AgentCards'
+import { quickReplies } from '../../../shared/quick-replies'
 import { BrandMark } from './Mascot'
 import { CopyButton } from './CopyButton'
 import { Thinking } from './Thinking'
@@ -136,6 +137,10 @@ export function Conversation({ taskId, mode = 'task', timeline, running, emptyHi
           <div className="min-w-0 flex-1">
             {firstOfTurn && replyTime}
             <AssistantText text={item.text} />
+            {isLast && mode === 'task' && !running && i === timeline.length - 1 && (() => {
+              const replies = quickReplies(item.text)
+              return replies ? <QuickReplyCard key={item.id} taskId={taskId} replies={replies} running={running} /> : null
+            })()}
             {finished && (
               <div className={`mt-1.5 flex items-center gap-1 ${isLast ? '' : 'msg-action'}`}>
                 <CopyButton text={() => turnText(timeline, at)} label="Copy reply" showLabel />

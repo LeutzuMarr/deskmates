@@ -4,7 +4,7 @@
 import { readFileSync, existsSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Memory, Project, ProviderId, Settings } from '../../shared/protocol'
-import { PROVIDER_LABELS } from '../../shared/protocol'
+import { PROVIDER_LABELS, isCliProvider } from '../../shared/protocol'
 
 /** Returns the path to the project instructions file. */
 export function projectInstructionsPath(folder: string): string {
@@ -93,6 +93,42 @@ export interface BuildInstructionsInput {
   model: { provider: ProviderId; modelId: string }
   /** Installed skill names, so the assistant knows what it can load. */
   skills?: string[]
+}
+
+/**
+ * What every Deskmates agent is told about the app's own tools: asking with cards, the agent browser,
+ * screen control and scheduled tasks. Command-line agents (Freebuff, OpenCode, Antigravity) can't draw
+ * cards or call these tools from a Work task, so they get the parts that apply to them.
+ */
+export function deskmatesToolsGuide(kind: 'work' | 'design', cli: boolean): string {
+  const ask = kind === 'design' ? 'ask_user' : 'AskUserQuestion'
+  if (cli) {
+    return [
+      'Asking the user:',
+      '- Whenever you need the user to decide or answer something, end your reply with the question on its own line followed by a numbered list of 2 to 5 short options (one line each). Deskmates turns them into buttons, and the user can still type something else. Ask one question at a time.'
+    ].join('\n')
+  }
+  return [
+    'Asking the user:',
+    `- Whenever you need the user to decide or answer something, don't ask in plain text: call ${ask} with 2 to 4 short options, so they tap an answer instead of typing it (they can always type their own). Then end your turn and wait for the answer.`,
+    '',
+    'The agent browser (browser_open, browser_read, browser_click, browser_type, browser_key, browser_scroll, browser_back, browser_tabs, browser_screenshot, browser_wait):',
+    "- A real browser the user can watch and use from the globe button at the top right of Deskmates. Use it for sites that need clicking, the user's sign-ins or JavaScript; for plain reading, web_search and web_fetch are cheaper.",
+    '- Each page comes back as text plus numbered elements; click and type by number, and read again after the page changes.',
+    "- Sign-ins are the user's. Never type passwords, one-time codes, card or ID numbers (the browser refuses anyway): when a page needs a sign-in, ask the user to sign in in the browser panel, then continue.",
+    '- The first click or typing on a site asks the user for permission. Anything that sends, posts, pays, signs or deletes asks again; on LinkedIn only the user presses Send.',
+    "- If the user is using the browser, your action waits until they hand it back. Don't fight them for it.",
+    '',
+    "Screen control (screen_look, screen_act):",
+    "- screen_look shows the user's whole screen with a numbered list of what can be clicked. screen_act uses their mouse and keyboard; the user approves it the first time in a task, and can stop it at any moment.",
+    "- Use them to check your own work like a tester: open the app, page or document you made or changed, click through it, look at the result, and fix what is wrong before you say it is done. Run the project's tests too when it has them.",
+    "- Prefer element numbers to x/y. Never type passwords, never close or delete the user's things, and don't touch other apps' windows beyond what the task needs.",
+    '',
+    'Scheduled tasks (schedule_create, schedule_list, schedule_update, schedule_delete):',
+    '- When the user wants something done at set times ("every weekday at 7:30", "remind me tomorrow at 19:35 to…"), create a scheduled task with a structured when. Confirm the name, the instruction and the time with the user first (a question card is ideal).',
+    '- Write the instruction so it stands on its own: each run starts fresh, without this conversation, in this project.',
+    "- On a command-line model (Freebuff, OpenCode, Antigravity) a scheduled run doesn't start by itself: it waits for the user to press Start. Say so when you create one."
+  ].join('\n')
 }
 
 /** Builds the full system instructions for the assistant. */
@@ -184,6 +220,9 @@ export function buildInstructions(input: BuildInstructionsInput): string {
   parts.push('- Keep the final message short: what you did, what changed, and anything the user needs to decide.')
   parts.push('- If the request is ambiguous and a wrong guess would waste work, ask one clear question first.')
   parts.push('- Never invent file contents or results you haven\'t seen.')
+
+  parts.push('')
+  parts.push(deskmatesToolsGuide(isDesign ? 'design' : 'work', isCliProvider(model.provider)))
 
   // 7. Identity
   parts.push('')

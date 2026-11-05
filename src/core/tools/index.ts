@@ -12,6 +12,7 @@ import { designVisualTools } from './design-visual'
 import { extensionTools } from './extensions'
 import { agentBrowserTools } from './browser'
 import { scheduleTools } from './schedules'
+import { screenControlTools } from './screen-control'
 import { join } from 'node:path'
 
 /** Merges every tool group into one ToolSet for a run. Built fresh per run via TaskRunner. */
@@ -34,6 +35,7 @@ export function buildTools(ctx: ToolContext): ToolSet {
           signal: ctx.signal
         })
       : {}),
+    ...(ctx.screen ? screenControlTools({ control: ctx.screen, withImages: ['google', 'openai'].includes(ctx.modelRef.provider) }) : {}),
     ...(ctx.schedules ? scheduleTools({ scheduler: ctx.schedules, projectId: ctx.projectId, waitsForStart: () => ctx.cliModel === true }) : {})
   }
   const listTools = (): ToolListing[] =>

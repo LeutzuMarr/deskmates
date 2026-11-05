@@ -82,6 +82,8 @@ const computerInput = z.object({
 })
 
 type ComputerInput = z.infer<typeof computerInput>
+/** One mouse or keyboard action, as `perform` takes it (also used by the agents' screen_act tool). */
+export type ComputerActionInput = ComputerInput
 
 const computerTool = tool({
   description: "Look at and operate the user's computer: mouse, keyboard, and screenshots.",

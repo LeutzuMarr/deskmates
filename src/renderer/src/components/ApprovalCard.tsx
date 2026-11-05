@@ -39,7 +39,10 @@ export function ApprovalCard({ mode, id, item }: ApprovalCardProps) {
                   ? `Install skills from ${str(input.path)}`
                   : item.toolName === 'install_plugin'
                     ? `Install the plugin ${str(input.source)}`
-                    : toolLabel(item.toolName, item.input)
+                    : item.toolName === 'screen_act'
+                      ? `Use your mouse and keyboard: ${str(input.action).replace('_', ' ')}${input.target ? ` ${str(input.target)}` : ''}${input.text ? ` "${str(input.text).slice(0, 80)}"` : ''}${input.keys ? ` ${str(input.keys)}` : ''}${input.element ? ` element ${str(input.element)}` : ''}
+(Tick "Always allow" to let it check its work without asking each step. Stop it any time with the bar at the top of the screen.)`
+                      : toolLabel(item.toolName, item.input)
 
   const respond = async (approved: boolean): Promise<void> => {
     if (busy || !item.approvalId) return

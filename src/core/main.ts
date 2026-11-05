@@ -38,6 +38,7 @@ import { ScreenGuideService } from './screen/guide'
 import { ParentPortRenderClient } from './render/client'
 import { BrowserService } from './browser/service'
 import { TaskScheduler } from './schedules/task-scheduler'
+import { ScreenControl } from './tools/screen-control'
 import { WakeTimerManager } from './scheduler/wake-timers'
 import { isCliProvider } from '../shared/protocol'
 
@@ -108,6 +109,19 @@ async function main(): Promise<void> {
     sites: { get: () => repos.settings.getExtra<string[]>('browserSites', []), set: (sites) => repos.settings.setExtra('browserSites', sites) },
     notify: (title, body) => bus.emit({ type: 'notify', title, body })
   })
+  // The Work and Design agents' own mouse and keyboard (screen_look / screen_act), with the same
+  // "controlling this computer" bar and Stop as the Agents tab's computer use.
+  const screenControl = new ScreenControl({
+    createDesktop: () =>
+      process.platform === 'win32'
+        ? new WindowsDesktop()
+        : new LinuxDesktop({
+            runner: commandRunner,
+            readFile: (path) => readFileSync(path),
+            removeFile: (path) => rmSync(path, { force: true })
+          }),
+    onActiveChange: (active) => parentPort?.postMessage({ type: 'computer-use', active } satisfies CoreToHost)
+  })
   const runner = new TaskRunner({
     repos,
     bus,
@@ -121,6 +135,7 @@ async function main(): Promise<void> {
     getTerminals: () => terminals,
     render,
     browser,
+    screen: screenControl,
     getSchedules: () => taskSchedules,
     agentNameFor: (taskId) => repos.taskSchedules.list().find((s) => s.lastTaskId === taskId)?.name
   })
@@ -319,6 +334,7 @@ async function main(): Promise<void> {
       try {
         computer.stop()
         screenGuide.dispose()
+        screenControl.dispose()
         watcher.stop()
         scheduler.stop()
         taskSchedules.stop()
@@ -346,7 +362,10 @@ async function main(): Promise<void> {
       if (message?.type === 'keys') keys.set(message.keys)
       // Windows has no real signals, so the host asks for a clean exit instead of killing us.
       if (message?.type === 'shutdown') shutdown()
-      if (message?.type === 'computer-stop') computer.stop()
+      if (message?.type === 'computer-stop') {
+        computer.stop()
+        screenControl.stop()
+      }
     })
     bus.on((event) => {
       if (event.type === 'notify') parentPort.postMessage({ type: 'notify', title: event.title, body: event.body })

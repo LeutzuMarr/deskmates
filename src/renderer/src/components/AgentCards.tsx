@@ -5,6 +5,7 @@ import { useStore } from '../lib/store'
 import { concentricVars } from '../lib/design'
 import { AssistantText } from './Markdown'
 import type { ToolItem } from '../../../shared/protocol'
+import type { QuickReplies } from '../../../shared/quick-replies'
 
 /** Tools shown as their own card in the conversation instead of inside the gray activity summary. */
 export const CARD_TOOLS = new Set(['AskUserQuestion', 'ask_user', 'SendUserMessage', 'SendUserFile'])
@@ -81,6 +82,8 @@ function QuestionCard({ taskId, item, answered, running }: { taskId: string; ite
   )
   const [busy, setBusy] = useState(false)
   const [sent, setSent] = useState(false)
+  /** What the user typed in a choice question's "Other" box. */
+  const [other, setOther] = useState<Record<string, string>>({})
   const done = answered || sent
 
   const toggle = (field: QuestionField, label: string): void =>
@@ -91,7 +94,10 @@ function QuestionCard({ taskId, item, answered, running }: { taskId: string; ite
     })
 
   const send = async (): Promise<void> => {
-    const lines = fields.map((f) => `- ${f.subtitle ?? f.title}: ${(values[f.id] ?? []).join(', ') || '(no answer)'}`)
+    const lines = fields.map((f) => {
+      const picked = [...(values[f.id] ?? []), ...(f.kind === 'choice' && other[f.id]?.trim() ? [other[f.id]!.trim()] : [])]
+      return `- ${f.subtitle ?? f.title}: ${picked.join(', ') || '(no answer)'}`
+    })
     setBusy(true)
     try {
       await core.call('tasks.send', { id: taskId, text: `My answers:\n${lines.join('\n')}` })
@@ -130,6 +136,19 @@ function QuestionCard({ taskId, item, answered, running }: { taskId: string; ite
                     </button>
                   )
                 })}
+                <input
+                  disabled={done}
+                  className="input min-w-[160px] flex-1"
+                  placeholder="Other: type your own answer"
+                  aria-label={`Other answer to: ${field.title}`}
+                  value={other[field.id] ?? ''}
+                  onChange={(e) => {
+                    const value = e.target.value
+                    setOther((prev) => ({ ...prev, [field.id]: value }))
+                    // A typed answer replaces a single choice.
+                    if (!field.multi && value.trim()) setValues((prev) => ({ ...prev, [field.id]: [] }))
+                  }}
+                />
               </div>
             )}
             {field.kind === 'color' && (
@@ -231,4 +250,59 @@ export function AgentCard({ taskId, item, answered, running }: { taskId: string;
   }
   if (item.toolName === 'SendUserFile') return item.state === 'done' ? <FileCards item={item} /> : null
   return <QuestionCard taskId={taskId} item={item} answered={answered} running={running} />
+}
+
+/**
+ * Tap-to-answer options under a reply that asked the user to choose in plain text (what Freebuff and
+ * the other command-line agents do, since they can't draw a question card). A tap sends that option;
+ * the box sends anything else.
+ */
+export function QuickReplyCard({ taskId, replies, running }: { taskId: string; replies: QuickReplies; running: boolean }) {
+  const showToast = useStore((s) => s.showToast)
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [sent, setSent] = useState<string | null>(null)
+  const send = async (answer: string): Promise<void> => {
+    if (!answer.trim() || busy || sent) return
+    setBusy(true)
+    try {
+      await core.call('tasks.send', { id: taskId, text: answer.trim() })
+      setSent(answer.trim())
+    } catch (error) {
+      showToast(`Couldn't send your answer: ${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+  if (sent) return null
+  return (
+    <div className="msg-in mt-3 rounded-3xl border border-rule bg-card p-3" aria-label="Quick answers">
+      <div className="flex flex-wrap gap-2">
+        {replies.options.map((option) => (
+          <button
+            key={option}
+            type="button"
+            className="btn btn-outline r-concentric text-left"
+            style={concentricVars(14)}
+            disabled={busy || running}
+            onClick={() => void send(option)}
+          >
+            {option}
+          </button>
+        ))}
+      </div>
+      <form
+        className="mt-2 flex gap-2"
+        onSubmit={(event) => {
+          event.preventDefault()
+          void send(text)
+        }}
+      >
+        <input className="input flex-1" placeholder="Or type something else" value={text} disabled={busy || running} onChange={(e) => setText(e.target.value)} aria-label="Your own answer" />
+        <button type="submit" className="btn btn-clay r-concentric" style={concentricVars(14)} disabled={busy || running || !text.trim()}>
+          Send
+        </button>
+      </form>
+    </div>
+  )
 }

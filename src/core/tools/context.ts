@@ -8,6 +8,7 @@ import type { MemoriesRepo } from '../store/repos'
 import type { RenderClient } from '../render/types'
 import type { BrowserService } from '../browser/service'
 import type { TaskScheduler } from '../schedules/task-scheduler'
+import type { ScreenControl } from './screen-control'
 
 /** Everything a tool needs to act for one task. Built fresh for every run. */
 export interface ToolContext {
@@ -41,6 +42,8 @@ export interface ToolContext {
   browser?: BrowserService
   /** Who is acting, as the user reads it in browser questions: "Work", "Design", or a scheduled task's name. */
   agentName?: string
+  /** Screen control (screen_look / screen_act); absent without a desktop. */
+  screen?: ScreenControl
   /** Scheduled tasks; absent in tests and bots. */
   schedules?: TaskScheduler
   /** Whether this project's model is a command-line tool (its scheduled runs wait for a Start tap). */
