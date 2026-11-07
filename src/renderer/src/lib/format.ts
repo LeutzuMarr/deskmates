@@ -153,6 +153,8 @@ export function toolLabel(toolName: string, input: unknown): string {
       return `Edited ${str(inputObj.path)}`
     case 'read_file':
       return `Read ${str(inputObj.path)}`
+    case 'read_skill_file':
+      return `Read ${str(inputObj.path)} from the ${str(inputObj.name)} skill`
     case 'list_files':
       return `Listed ${str(inputObj.path)}`
     case 'read_document':

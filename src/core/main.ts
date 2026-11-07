@@ -104,7 +104,8 @@ async function main(): Promise<void> {
   const keys = new KeyStore(keysFromEnv())
   const models = new ModelService(keys, () => repos.settings.get())
   const changes = new ChangeLog(repos.changes, join(dataDir, 'snapshots'))
-  const skills = new SkillsService({ repos, dataDir })
+  // Skills installed for Claude Code (~/.claude/skills) are used in place, so Deskmates sees new ones without an import.
+  const skills = new SkillsService({ repos, dataDir, linkedDirs: [join(homedir(), '.claude', 'skills')] })
   const connectors = new McpConnectorManager({ repos, createTransport: createMcpTransport })
   void connectors.refresh().catch((error) => {
     console.error('[core] connector startup failed', error)
