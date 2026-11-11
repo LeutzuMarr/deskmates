@@ -10,6 +10,9 @@ import { FreebuffStatusLine } from '../components/FreebuffStatusLine'
 import { DiffChip } from '../components/DiffChip'
 import type { ChangeStats, FileChange, PlanItem } from '../../../shared/protocol'
 
+/** Provider and folder pairs whose agent has already run once since the app opened. */
+const startedOnce = new Set<string>()
+
 export function TaskView({ projectId, taskId }: { projectId: string; taskId: string }) {
   const projects = useStore((s) => s.projects)
   const tasks = useStore((s) => s.tasksByProject[projectId])
@@ -51,7 +54,16 @@ export function TaskView({ projectId, taskId }: { projectId: string; taskId: str
     }
   }, [running, project?.folder])
 
-  const starting = startingNotice(project?.model, warm)
+  // The start-up notice is for the first run only: once an agent has answered in this folder, later
+  // prompts go back to the usual rotating words.
+  const startKey = `${model?.provider ?? ''}:${project?.folder ?? ''}`
+  useEffect(() => {
+    if (!running) return
+    return () => {
+      startedOnce.add(startKey)
+    }
+  }, [running, startKey])
+  const starting = startedOnce.has(startKey) ? null : startingNotice(project?.model, warm)
 
   // Lines added and removed so far. Re-counted when a change is recorded or undone, and once more
   // when the run ends, since the last edits can land after the last change was recorded.
