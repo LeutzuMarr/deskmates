@@ -6,6 +6,9 @@
 import { decodePairing, fromBase64Url } from '../../../shared/remote-crypto'
 import { RelayConnection, RelaySocket, type RemoteDevice } from './relay'
 import '../styles.css'
+import '../styles/glass.css'
+import '../styles/sidebar.css'
+import '../styles/marks.css'
 
 const STORAGE = 'deskmates:remote-device'
 

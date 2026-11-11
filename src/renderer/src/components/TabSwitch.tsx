@@ -1,73 +1,43 @@
-import { useLayoutEffect, useRef, useState } from 'react'
-import type { KeyboardEvent } from 'react'
+import { useEffect, useRef } from 'react'
+import { TabBar } from 'glisse'
 import { useStore } from '../lib/store'
 import type { Tab } from '../lib/store'
+import { TAB_SHORTCUTS } from '../lib/shortcuts'
 
-const TABS: { id: Tab; label: string }[] = [
-  { id: 'duo', label: 'Duo' },
-  { id: 'work', label: 'Work' },
-  { id: 'design', label: 'Design' },
-  { id: 'bots', label: 'Bots' },
-  { id: 'agents', label: 'Agents' },
-  { id: 'extras', label: 'Extras' }
+const TABS: { value: Tab; label: string }[] = [
+  { value: 'duo', label: 'Duo' },
+  { value: 'work', label: 'Work' },
+  { value: 'design', label: 'Design' },
+  { value: 'bots', label: 'Bots' },
+  { value: 'agents', label: 'Agents' },
+  { value: 'extras', label: 'Extras' }
 ]
 
+const MOD = window.deskmates.platform === 'darwin' ? '⌘' : 'Ctrl+'
+
+/**
+ * The section tabs, on glass: the selection springs between them, follows a drag, and lifts into a
+ * lens while held. Arrow keys, Home and End move between tabs.
+ */
 export function TabSwitch() {
   const tab = useStore((s) => s.tab)
   const setTab = useStore((s) => s.setTab)
-  const listRef = useRef<HTMLDivElement>(null)
-  const [pill, setPill] = useState<{ left: number; width: number } | null>(null)
+  const barRef = useRef<HTMLDivElement>(null)
 
-  // The selected tab's background is one shared pill that slides between tabs.
-  useLayoutEffect(() => {
-    const measure = (): void => {
-      const el = listRef.current?.querySelector<HTMLElement>('[aria-selected="true"]')
-      if (el) setPill({ left: el.offsetLeft, width: el.offsetWidth })
-    }
-    measure()
-    void document.fonts?.ready.then(measure)
-    window.addEventListener('resize', measure)
-    return () => window.removeEventListener('resize', measure)
-  }, [tab])
-
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
-    event.preventDefault()
-    const index = TABS.findIndex((t) => t.id === tab)
-    const nextIndex = event.key === 'ArrowRight' ? (index + 1) % TABS.length : (index - 1 + TABS.length) % TABS.length
-    setTab(TABS[nextIndex].id)
-  }
+  // The bar draws its own buttons, so each one's id (`tab-work`…) and shortcut hint are set here.
+  useEffect(() => {
+    const buttons = barRef.current?.querySelectorAll<HTMLElement>('[role="tab"]') ?? []
+    buttons.forEach((button, index) => {
+      const item = TABS[index]
+      if (!item) return
+      button.id = `tab-${item.value}`
+      button.title = `${item.label} (${MOD}${TAB_SHORTCUTS[item.value]})`
+    })
+  }, [])
 
   return (
-    <div
-      ref={listRef}
-      role="tablist"
-      aria-label="Sections"
-      className={`segmented no-drag ${pill ? 'segmented-sliding' : ''}`}
-      onKeyDown={onKeyDown}
-    >
-      {pill && (
-        <span
-          aria-hidden="true"
-          className="segmented-indicator"
-          style={{ width: pill.width, transform: `translateX(${pill.left}px)` }}
-        />
-      )}
-      {TABS.map((t) => (
-        <button
-          key={t.id}
-          type="button"
-          role="tab"
-          id={`tab-${t.id}`}
-          aria-selected={tab === t.id}
-          tabIndex={tab === t.id ? 0 : -1}
-          className="segmented-item"
-          title={`${t.label} (${window.deskmates.platform === 'darwin' ? '⌘' : 'Ctrl+'}${TABS.indexOf(t) + 1})`}
-          onClick={() => setTab(t.id)}
-        >
-          {t.label}
-        </button>
-      ))}
+    <div ref={barRef} className="section-tabs no-drag">
+      <TabBar aria-label="Sections" items={TABS} value={tab} onValueChange={(value) => setTab(value as Tab)} />
     </div>
   )
 }

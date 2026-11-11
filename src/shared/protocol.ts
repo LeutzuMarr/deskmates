@@ -275,6 +275,16 @@ export interface FileChange {
   createdAt: number
 }
 
+/** A task's changes in numbers, for a diff-style summary ("+12 −3"). */
+export interface ChangeStats {
+  /** Lines added across the files the task changed. */
+  added: number
+  /** Lines removed across the files the task changed. */
+  removed: number
+  /** Files the task changed and hasn't undone. */
+  files: number
+}
+
 export interface UsageRow {
   day: string
   provider: ProviderId
@@ -644,6 +654,7 @@ export interface RpcMethods {
   'changes.list': { params: { taskId: string }; result: FileChange[] }
   'changes.undo': { params: { id: string }; result: FileChange[] }
   'changes.undoAll': { params: { taskId: string }; result: FileChange[] }
+  'changes.stats': { params: { taskId: string }; result: ChangeStats }
   'memory.list': { params: { projectId: string }; result: Memory[] }
   'memory.add': { params: { projectId: string; content: string }; result: Memory[] }
   'memory.delete': { params: { id: string; projectId: string }; result: Memory[] }

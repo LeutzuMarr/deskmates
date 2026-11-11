@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useId, useImperativeHandle, useRef, useState } from 'react'
 import type { ClipboardEvent, DragEvent, KeyboardEvent } from 'react'
 import { ArrowUp, Square, X } from 'lucide-react'
+import { Glass } from 'glisse'
 import { core } from '../lib/rpc'
 import { useStore } from '../lib/store'
 import { concentricVars, decorateWithSelection } from '../lib/design'
@@ -182,8 +183,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           </button>
         </div>
       )}
-      <div
-        className={`composer-box rounded-3xl border bg-card p-2 ${dragging ? 'border-ink-muted' : 'border-rule'}`}
+      <Glass
+        className={`composer-box p-2 ${dragging ? 'composer-box-dropping' : ''}`}
         onDragOver={(event) => {
           if (!event.dataTransfer.types.includes('Files')) return
           event.preventDefault()
@@ -226,7 +227,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               type="button"
               aria-label="Stop"
               title="Stop (Esc)"
-              className="r-concentric flex h-8 w-9 items-center justify-center border border-ink-muted text-ink hover:bg-oat"
+              className="stop-btn r-concentric flex h-8 w-9 items-center justify-center text-ink"
               style={concentricVars(8)}
               onClick={() => void stop()}
             >
@@ -245,7 +246,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             </button>
           )}
         </div>
-      </div>
+      </Glass>
     </div>
   )
 })

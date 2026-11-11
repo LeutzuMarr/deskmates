@@ -27,6 +27,7 @@ import {
   Wrench
 } from 'lucide-react'
 import { extractImageUrl, prettyJSON, summarizeActivity, toolLabel } from '../lib/format'
+import { StatusMark } from './StatusMark'
 import type { ToolItem, ToolItemState } from '../../../shared/protocol'
 
 const TOOL_ICONS: Record<string, LucideIcon> = {
@@ -59,11 +60,11 @@ function iconFor(toolName: string): LucideIcon {
   return Wrench
 }
 
-function StatusMark({ state }: { state: ToolItemState }) {
+function StepMark({ state }: { state: ToolItemState }) {
   if (state === 'done') return <Check size={13} aria-hidden="true" style={{ color: 'var(--olive)' }} />
   if (state === 'error') return <OctagonX size={13} aria-hidden="true" style={{ color: 'var(--brick)' }} />
   if (state === 'denied') return <span className="italic text-ink-faint">denied</span>
-  if (state === 'running') return <span className="mark-dot pulse-txt" style={{ background: 'var(--ink-muted)' }} />
+  if (state === 'running') return <StatusMark kind="working" />
   return null
 }
 
@@ -121,7 +122,7 @@ export function ActivityGroup({ items }: { items: ToolItem[] }) {
                     {toolLabel(item.toolName, item.input)}
                   </span>
                   <span className="shrink-0">
-                    <StatusMark state={item.state} />
+                    <StepMark state={item.state} />
                   </span>
                 </button>
                 {isOpen && (

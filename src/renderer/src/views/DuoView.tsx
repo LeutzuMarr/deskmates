@@ -1,3 +1,4 @@
+import { SidebarPanel } from '../components/SidebarParts'
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { CalendarClock, Check, Pause, Pencil, Play, Send, Settings2, Square, X } from 'lucide-react'
 import { core } from '../lib/rpc'
@@ -401,7 +402,8 @@ export function DuoSidebar(): ReactNode {
   const toast = useStore((s) => s.showToast)
   const todos = duo?.todos ?? []
   return (
-    <aside className="flex h-full flex-col gap-2 overflow-y-auto px-3 py-4">
+    <SidebarPanel>
+      <div className="scroll-area flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-3 py-4">
       <div className="caption px-2">To do</div>
       {todos.length === 0 && <p className="px-2 text-[12px] text-ink-faint">Homework, tests and replies Duo finds land here.</p>}
       <ul className="flex flex-col gap-1">
@@ -418,6 +420,7 @@ export function DuoSidebar(): ReactNode {
           </li>
         ))}
       </ul>
-    </aside>
+      </div>
+    </SidebarPanel>
   )
 }

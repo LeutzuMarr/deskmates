@@ -115,3 +115,44 @@ describe('ChangeLog', () => {
     expect(repos.changes.list(taskId).every((c) => c.undone)).toBe(true)
   })
 })
+
+describe('ChangeLog.stats', () => {
+  const file = (name: string) => join(root, name)
+
+  it('counts lines added and removed against the file as it was before the task', () => {
+    writeFileSync(file('a.txt'), 'one\ntwo\nthree\n')
+    log.record(taskId, root, file('a.txt'), 'modify')
+    writeFileSync(file('a.txt'), 'one\n2\nthree\nfour\n')
+    // A second edit of the same file still compares against the first snapshot.
+    log.record(taskId, root, file('a.txt'), 'modify')
+    writeFileSync(file('a.txt'), 'one\n2\nthree\nfour\nfive\n')
+
+    log.record(taskId, root, file('new.txt'), 'create')
+    writeFileSync(file('new.txt'), 'a\nb\n')
+
+    expect(log.stats(taskId)).toEqual({ added: 5, removed: 1, files: 2 })
+  })
+
+  it('counts a deleted file as removed lines and leaves undone changes out', () => {
+    writeFileSync(file('gone.txt'), 'x\ny\nz')
+    log.record(taskId, root, file('gone.txt'), 'delete')
+    rmSync(file('gone.txt'))
+    const created = log.record(taskId, root, file('made.txt'), 'create')
+    writeFileSync(file('made.txt'), 'hello\n')
+    expect(log.stats(taskId)).toEqual({ added: 1, removed: 3, files: 2 })
+
+    log.undo(created.id)
+    expect(log.stats(taskId)).toEqual({ added: 0, removed: 3, files: 1 })
+  })
+
+  it('counts a file that is not text as changed without counting lines', () => {
+    writeFileSync(file('img.bin'), Buffer.from([0, 1, 2, 0, 3]))
+    log.record(taskId, root, file('img.bin'), 'modify')
+    writeFileSync(file('img.bin'), Buffer.from([9, 0, 9]))
+    expect(log.stats(taskId)).toEqual({ added: 0, removed: 0, files: 1 })
+  })
+
+  it('is empty for a task that changed nothing', () => {
+    expect(log.stats(taskId)).toEqual({ added: 0, removed: 0, files: 0 })
+  })
+})

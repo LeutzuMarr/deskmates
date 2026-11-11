@@ -1,8 +1,6 @@
 import type { TaskStatus } from '../../../shared/protocol'
+import { StatusMark, taskMark } from './StatusMark'
 
-export function TaskStatusMark({ status }: { status: TaskStatus }) {
-  if (status === 'running') return <span className="mark-dot pulse-txt" style={{ background: 'var(--ink-muted)' }} />
-  if (status === 'waiting-approval') return <span className="mark-ring" />
-  if (status === 'error') return <span className="mark-dot" style={{ background: 'var(--brick)' }} />
-  return <span className="mark-dot" style={{ border: '1px solid var(--rule)' }} />
+export function TaskStatusMark({ status, unread, quietIdle }: { status: TaskStatus; unread?: boolean; quietIdle?: boolean }) {
+  return <StatusMark kind={taskMark(status, unread)} quietIdle={quietIdle} />
 }

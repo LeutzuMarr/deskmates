@@ -26,7 +26,12 @@ export function startNewTask(): void {
   focusComposer()
 }
 
-const TAB_KEYS: Record<string, Tab> = { '1': 'work', '2': 'design', '3': 'bots', '4': 'agents', '5': 'extras', '0': 'duo' }
+/** The number key that, with Ctrl (or Cmd), jumps to each tab. */
+export const TAB_SHORTCUTS: Record<Tab, string> = { work: '1', design: '2', bots: '3', agents: '4', extras: '5', duo: '0' }
+
+const TAB_KEYS: Record<string, Tab> = Object.fromEntries(
+  (Object.entries(TAB_SHORTCUTS) as [Tab, string][]).map(([tab, key]) => [key, tab])
+)
 
 /** App-wide keyboard shortcuts. Ctrl on Windows and Linux, Cmd on macOS. */
 export function useGlobalShortcuts(openPalette: () => void): void {

@@ -1,13 +1,14 @@
 import { useStore } from '../lib/store'
 import { formatClock, formatDay } from '../lib/format'
 import { handoffStateLabel } from '../lib/bots'
+import { StatusMark } from './StatusMark'
 import type { HandoffState } from '../../../shared/protocol'
 
 function HandoffStateMark({ state }: { state: HandoffState }) {
-  if (state === 'running') return <span className="mark-dot pulse-txt" style={{ background: 'var(--ink-muted)' }} />
-  if (state === 'done') return <span className="mark-dot" style={{ background: 'var(--olive)' }} />
-  if (state === 'error') return <span className="mark-dot" style={{ background: 'var(--brick)' }} />
-  return <span className="mark-dot" style={{ border: '1px dashed var(--ink-faint)' }} />
+  if (state === 'running') return <StatusMark kind="working" />
+  if (state === 'done') return <StatusMark kind="ok" />
+  if (state === 'error') return <StatusMark kind="problem" />
+  return <span className="mark mark-queued" role="img" aria-label="Queued" title="Queued" />
 }
 
 export function HandoffsPanel() {

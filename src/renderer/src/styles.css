@@ -390,35 +390,8 @@ select {
   outline: none;
 }
 
-/* ---- Collapsible sidebar ---- */
-.sidebar-shell {
-  display: flex;
-  flex-shrink: 0;
-  width: 264px;
-  overflow: hidden;
-  transition: width 200ms cubic-bezier(0.2, 0, 0, 1);
-}
-.sidebar-shell-collapsed {
-  width: 0;
-}
-
 /* ---- Phone-sized screens (the phone app) ---- */
 @media (max-width: 699px) {
-  /* The sidebar is a drawer over the page instead of a column beside it. */
-  .sidebar-shell {
-    position: fixed;
-    top: 40px;
-    bottom: 0;
-    left: 0;
-    z-index: 30;
-    width: min(85vw, 300px);
-    background: var(--sidebar);
-    box-shadow: 0 0 32px rgba(0, 0, 0, 0.35);
-  }
-  .sidebar-shell-collapsed {
-    width: 0;
-    box-shadow: none;
-  }
   /* The header keeps the menu button, the tabs (scrolling sideways) and the browser button. */
   header.drag-region {
     gap: 6px;
@@ -430,11 +403,6 @@ select {
   header.drag-region > span,
   header.drag-region > .titlebar-search {
     display: none;
-  }
-  header.drag-region .segmented {
-    min-width: 0;
-    overflow-x: auto;
-    scrollbar-width: none;
   }
 }
 
@@ -519,50 +487,6 @@ select {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--ink-faint);
-}
-
-/* ---- Sidebar ---- */
-.sidebar-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  box-sizing: border-box;
-  padding: 8px 12px;
-  text-align: left;
-  font-size: 14px;
-  color: var(--ink);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  border-radius: 0;
-}
-.sidebar-row:hover {
-  background: color-mix(in srgb, var(--ink) 8%, transparent);
-}
-.sidebar-row-active {
-  background: color-mix(in srgb, var(--ink) 10%, transparent);
-}
-.sidebar-nav {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-/* The clickable name/open part of a sidebar row that also carries a trailing "more options" button:
-   the row div keeps .sidebar-row's padding and hover fill, this fills the remaining space. */
-.sidebar-row-main {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  align-items: center;
-  gap: 8px;
-  border: none;
-  background: transparent;
-  padding: 0;
-  text-align: left;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
 }
 
 /* ---- Conversation ---- */
@@ -667,14 +591,6 @@ select {
   margin: 0;
   border: none;
   border-radius: 0;
-}
-
-/* ---- Composer ---- */
-.composer-box {
-  transition: border-color 120ms ease;
-}
-.composer-box:focus-within {
-  border-color: var(--ink-faint);
 }
 
 /* ---- Home starters and recent tasks ---- */
@@ -839,22 +755,7 @@ select {
   text-align: left;
 }
 
-/* ---- Status marks ---- */
-.mark-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 9999px;
-  flex-shrink: 0;
-}
-.mark-ring {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 9999px;
-  border: 2px solid var(--clay);
-  flex-shrink: 0;
-}
+/* ---- Plan marks (status marks live in styles/marks.css) ---- */
 .plan-mark {
   position: relative;
   overflow: hidden;
@@ -1181,15 +1082,7 @@ dialog:modal {
   animation: dm-slide-left 240ms var(--ease-out);
 }
 
-/* The message box: a soft float, and a warm ring when it has the keyboard. */
-.composer-box {
-  box-shadow: var(--shadow-soft);
-  transition: border-color 160ms var(--ease-out), box-shadow 220ms var(--ease-out);
-}
-.composer-box:focus-within {
-  border-color: color-mix(in srgb, var(--clay) 45%, var(--rule));
-  box-shadow: var(--shadow-soft), 0 0 0 4px color-mix(in srgb, var(--clay) 12%, transparent);
-}
+/* The send button springs. (The message box itself is glass: see styles/glass.css.) */
 .send-btn {
   transition: transform 220ms var(--ease-spring), background-color 140ms var(--ease-out), opacity 140ms var(--ease-out);
 }
@@ -1222,29 +1115,6 @@ dialog:modal {
 }
 .greet-in-3 {
   animation-delay: 220ms;
-}
-
-/* Sliding selection behind the section tabs. */
-.segmented {
-  position: relative;
-}
-.segmented-indicator {
-  position: absolute;
-  top: 2px;
-  bottom: 2px;
-  left: 0;
-  border-radius: 999px;
-  background: var(--card);
-  box-shadow: 0 1px 2px rgb(20 20 19 / 0.08);
-  transition: transform 280ms var(--ease-spring), width 280ms var(--ease-spring);
-  pointer-events: none;
-}
-.segmented-sliding .segmented-item {
-  position: relative;
-  z-index: 1;
-}
-.segmented-sliding .segmented-item[aria-selected='true'] {
-  background: transparent;
 }
 
 /* Thinking: a live tail while it streams, the full text on request. */

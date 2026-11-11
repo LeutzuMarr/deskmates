@@ -46,7 +46,7 @@ export function App() {
   }, [settings])
 
   return (
-    <div className="flex h-full flex-col overflow-hidden bg-canvas">
+    <div className="app-shell flex h-full flex-col overflow-hidden">
       <TitleBar onSearch={openPalette} />
       <div className="flex min-h-0 min-w-0 flex-1">
         <div className={`sidebar-shell ${sidebarCollapsed ? 'sidebar-shell-collapsed' : ''}`} inert={sidebarCollapsed}>
@@ -64,21 +64,24 @@ export function App() {
           <Sidebar />
         )}
         </div>
-        <main className="min-w-0 flex-1">
-          {view.name === 'home' && <HomeView />}
-          {view.name === 'project' && <ProjectView projectId={view.projectId} />}
-          {view.name === 'task' && <TaskView projectId={view.projectId} taskId={view.taskId} />}
-          {view.name === 'settings' && <SettingsView />}
-          {view.name === 'project-settings' && <ProjectSettingsView projectId={view.projectId} />}
-          {view.name === 'design-home' && <DesignHomeView />}
-          {view.name === 'design' && <DesignView key={view.projectId} projectId={view.projectId} />}
-          {view.name === 'bots-home' && <BotsHomeView />}
-          {view.name === 'bot' && <BotView key={view.botId} botId={view.botId} />}
-          {view.name === 'agents-home' && <AgentsHomeView />}
-          {view.name === 'agents-session' && <AgentsSessionView key={view.sessionId} sessionId={view.sessionId} />}
-          {view.name === 'agents-attach' && <AgentsAttachView key={view.sessionId} sessionId={view.sessionId} />}
-          {view.name === 'extras-home' && <ExtrasHomeView />}
-          {view.name === 'duo-home' && <DuoView />}
+        <main className="app-sheet min-w-0 flex-1">
+          {/* Keyed by screen, not by item: moving between two tasks keeps the view and its scroll. */}
+          <div key={view.name} className="view-in">
+            {view.name === 'home' && <HomeView />}
+            {view.name === 'project' && <ProjectView projectId={view.projectId} />}
+            {view.name === 'task' && <TaskView projectId={view.projectId} taskId={view.taskId} />}
+            {view.name === 'settings' && <SettingsView />}
+            {view.name === 'project-settings' && <ProjectSettingsView projectId={view.projectId} />}
+            {view.name === 'design-home' && <DesignHomeView />}
+            {view.name === 'design' && <DesignView key={view.projectId} projectId={view.projectId} />}
+            {view.name === 'bots-home' && <BotsHomeView />}
+            {view.name === 'bot' && <BotView key={view.botId} botId={view.botId} />}
+            {view.name === 'agents-home' && <AgentsHomeView />}
+            {view.name === 'agents-session' && <AgentsSessionView key={view.sessionId} sessionId={view.sessionId} />}
+            {view.name === 'agents-attach' && <AgentsAttachView key={view.sessionId} sessionId={view.sessionId} />}
+            {view.name === 'extras-home' && <ExtrasHomeView />}
+            {view.name === 'duo-home' && <DuoView />}
+          </div>
         </main>
       </div>
       <BrowserPanel />

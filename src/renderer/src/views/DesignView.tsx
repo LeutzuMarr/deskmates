@@ -156,21 +156,23 @@ export function DesignView({ projectId }: { projectId: string }) {
             emptyHint="Describe what to design in the box below."
             contentClassName="max-w-[680px] px-6 py-6"
             pill={false}
+            dock={
+              <>
+                {task?.status === 'error' && task.error && (
+                  <div className="error-bar mb-3" role="alert">
+                    {task.error}
+                  </div>
+                )}
+                <Composer
+                  ref={composerRef}
+                  projectId={projectId}
+                  taskId={task?.id}
+                  selection={selection}
+                  onClearSelection={clearSelection}
+                />
+              </>
+            }
           />
-          <div className="shrink-0 px-6 py-4">
-            {task?.status === 'error' && task.error && (
-              <div className="error-bar mb-3" role="alert">
-                {task.error}
-              </div>
-            )}
-            <Composer
-              ref={composerRef}
-              projectId={projectId}
-              taskId={task?.id}
-              selection={selection}
-              onClearSelection={clearSelection}
-            />
-          </div>
         </div>
 
         <div

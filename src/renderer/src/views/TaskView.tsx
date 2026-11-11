@@ -7,7 +7,8 @@ import { formatClock, formatDay, statusLabel, startingNotice } from '../lib/form
 import { Composer } from '../components/Composer'
 import { Conversation } from '../components/Conversation'
 import { FreebuffStatusLine } from '../components/FreebuffStatusLine'
-import type { FileChange, PlanItem, Task } from '../../../shared/protocol'
+import { DiffChip } from '../components/DiffChip'
+import type { ChangeStats, FileChange, PlanItem } from '../../../shared/protocol'
 
 export function TaskView({ projectId, taskId }: { projectId: string; taskId: string }) {
   const projects = useStore((s) => s.projects)
@@ -51,6 +52,27 @@ export function TaskView({ projectId, taskId }: { projectId: string; taskId: str
   }, [running, project?.folder])
 
   const starting = startingNotice(project?.model, warm)
+
+  // Lines added and removed so far. Re-counted when a change is recorded or undone, and once more
+  // when the run ends, since the last edits can land after the last change was recorded.
+  const [stats, setStats] = useState<ChangeStats | null>(null)
+  const changeKey = taskChanges.map((change) => `${change.id}:${change.undone ? 1 : 0}`).join(',')
+  useEffect(() => {
+    let live = true
+    if (changeKey === '') {
+      setStats(null)
+      return
+    }
+    void core
+      .call('changes.stats', { taskId })
+      .then((next) => {
+        if (live) setStats(next)
+      })
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [taskId, changeKey, running])
 
   useEffect(() => {
     if (task && task.plan.length > 0) setPanelOpen(true)
@@ -113,6 +135,7 @@ export function TaskView({ projectId, taskId }: { projectId: string; taskId: str
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {project && model?.provider === 'freebuff' && <FreebuffStatusLine folder={project.folder} modelId={model.modelId} />}
+          {stats && <DiffChip stats={stats} />}
           <button
             type="button"
             aria-expanded={panelOpen}
@@ -132,6 +155,16 @@ export function TaskView({ projectId, taskId }: { projectId: string; taskId: str
           running={task?.status === 'running'}
           emptyHint="No messages yet — ask something in the box below."
           starting={starting}
+          dock={
+            <>
+              {task?.status === 'error' && task.error && (
+                <div className="error-bar mb-3" role="alert">
+                  {task.error}
+                </div>
+              )}
+              <Composer projectId={projectId} taskId={taskId} />
+            </>
+          }
         />
 
         {panelOpen && (
@@ -151,7 +184,10 @@ export function TaskView({ projectId, taskId }: { projectId: string; taskId: str
               </section>
               <section className="mt-7">
                 <div className="flex items-center justify-between">
-                  <h2 className="caption">Changes</h2>
+                  <h2 className="caption flex items-center gap-2">
+                    Changes
+                    {stats && <DiffChip stats={stats} />}
+                  </h2>
                   {taskChanges.some((change) => !change.undone) && (
                     <button type="button" className="btn btn-text px-0 text-[13px]" onClick={() => void undoAll(taskId)}>
                       Undo all
@@ -173,16 +209,6 @@ export function TaskView({ projectId, taskId }: { projectId: string; taskId: str
         )}
       </div>
 
-      <footer className="shrink-0 border-t border-rule">
-        <div className="mx-auto w-full max-w-[720px] px-8 pb-5 pt-4">
-          {task?.status === 'error' && task.error && (
-            <div className="error-bar mb-3" role="alert">
-              {task.error}
-            </div>
-          )}
-          <Composer projectId={projectId} taskId={taskId} />
-        </div>
-      </footer>
     </div>
   )
 }

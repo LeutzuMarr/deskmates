@@ -311,6 +311,8 @@ export function createHandlers(services: HandlerServices): Handlers {
 
     'changes.list': (params: { taskId: string }) => repos.changes.list(params.taskId),
 
+    'changes.stats': (params: { taskId: string }) => changes.stats(params.taskId),
+
     'changes.undo': (params: { id: string }) => {
       const record = changes.undo(params.id)
       const list = repos.changes.list(record.taskId)

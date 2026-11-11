@@ -6,6 +6,7 @@ import { concentricVars } from '../lib/design'
 import { extractImageUrl, formatClock, formatDay, toolLabel } from '../lib/format'
 import { CRON_PRESETS, runStateLabel } from '../lib/bots'
 import { Conversation } from './Conversation'
+import { StatusMark } from './StatusMark'
 import type { Bot, BotRun, RunState, Schedule, TimelineItem, ToolItem } from '../../../shared/protocol'
 
 function errorMessage(error: unknown): string {
@@ -13,12 +14,12 @@ function errorMessage(error: unknown): string {
 }
 
 function RunStateMark({ state }: { state: RunState }) {
-  if (state === 'running') return <span className="mark-dot pulse-txt" style={{ background: 'var(--ink-muted)' }} />
-  if (state === 'waiting-approval') return <span className="mark-ring" />
-  if (state === 'done') return <span className="mark-dot" style={{ background: 'var(--olive)' }} />
-  if (state === 'error') return <span className="mark-dot" style={{ background: 'var(--brick)' }} />
-  if (state === 'stopped') return <span className="mark-dot" style={{ border: '1px solid var(--rule)' }} />
-  return <span className="mark-dot" style={{ border: '1px dashed var(--ink-faint)' }} />
+  if (state === 'running') return <StatusMark kind="working" />
+  if (state === 'waiting-approval') return <StatusMark kind="attention" />
+  if (state === 'done') return <StatusMark kind="ok" />
+  if (state === 'error') return <StatusMark kind="problem" />
+  if (state === 'stopped') return <StatusMark kind="idle" />
+  return <span className="mark mark-queued" role="img" aria-label="Queued" title="Queued" />
 }
 
 export function BotRuns({ bot }: { bot: Bot }) {

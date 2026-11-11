@@ -148,6 +148,8 @@ interface StoreState {
   taskSchedules: TaskSchedule[]
   /** The file each design's preview shows (relative to the design folder); unset means its default page. */
   designFiles: Record<string, string>
+  /** Tasks and agent sessions (by id) that finished while the user was looking at something else. */
+  unread: Record<string, true>
   init: () => void
   navigate: (view: View) => void
   setTab: (tab: Tab) => void
@@ -226,6 +228,27 @@ function upsertTask(tasks: Task[], task: Task): Task[] {
   return list
 }
 
+/** Whether `view` is showing this task's conversation right now. */
+function isViewingTask(view: View, task: Task): boolean {
+  if (view.name === 'task') return view.taskId === task.id
+  return view.name === 'design' && view.projectId === task.projectId
+}
+
+/** The tasks or agent session a view puts on screen: opening it counts as having seen them. */
+function idsShownBy(view: View, tasksByProject: Record<string, Task[]>): string[] {
+  if (view.name === 'task') return [view.taskId]
+  if (view.name === 'design') return (tasksByProject[view.projectId] ?? []).map((task) => task.id)
+  if (view.name === 'agents-session') return [view.sessionId]
+  return []
+}
+
+function withoutKeys(record: Record<string, true>, keys: string[]): Record<string, true> {
+  if (!keys.some((key) => record[key])) return record
+  const next = { ...record }
+  for (const key of keys) delete next[key]
+  return next
+}
+
 function upsertById<T extends { id: string }>(items: T[], item: T): T[] {
   const index = items.findIndex((existing) => existing.id === item.id)
   if (index >= 0) {
@@ -271,11 +294,15 @@ export const useStore = create<StoreState>()((set, get) => {
         break
       case 'task.updated': {
         const tasks = state.tasksByProject[event.task.projectId] ?? []
+        const before = tasks.find((t) => t.id === event.task.id)
+        const wasWorking = before?.status === 'running' || before?.status === 'waiting-approval'
+        const finished = wasWorking && event.task.status === 'idle'
         set({
           tasksByProject: {
             ...state.tasksByProject,
             [event.task.projectId]: upsertTask(tasks, event.task)
-          }
+          },
+          unread: finished && !isViewingTask(state.view, event.task) ? { ...state.unread, [event.task.id]: true } : state.unread
         })
         break
       }
@@ -288,15 +315,15 @@ export const useStore = create<StoreState>()((set, get) => {
         set({
           tasksByProject: { ...state.tasksByProject, [event.projectId]: tasks },
           timelines,
-          changes
+          changes,
+          unread: withoutKeys(state.unread, [event.taskId])
         })
         break
       }
-      case 'project.updated': {
-        const projects = state.projects.filter((p) => p.id !== event.project.id)
-        set({ projects: [...projects, event.project] })
+      case 'project.updated':
+        // In place: a rename or a model change must not move the project to the end of the sidebar.
+        set({ projects: upsertById(state.projects, event.project) })
         break
-      }
       case 'project.deleted': {
         const projects = state.projects.filter((p) => p.id !== event.projectId)
         const tasksByProject = { ...state.tasksByProject }
@@ -375,12 +402,21 @@ export const useStore = create<StoreState>()((set, get) => {
         // Newest first, matching the repo's handoffs.list ordering.
         set({ handoffs: upsertById(state.handoffs, event.handoff).sort((a, b) => b.createdAt - a.createdAt) })
         break
-      case 'terminals.session.updated':
-        set({ terminalSessions: upsertById(state.terminalSessions, event.session) })
+      case 'terminals.session.updated': {
+        const before = state.terminalSessions.find((s) => s.id === event.session.id)
+        const finished = (before?.state === 'busy' || before?.state === 'starting') && event.session.state === 'idle'
+        const viewing = state.view.name === 'agents-session' && state.view.sessionId === event.session.id
+        set({
+          terminalSessions: upsertById(state.terminalSessions, event.session),
+          unread: finished && !viewing ? { ...state.unread, [event.session.id]: true } : state.unread
+        })
         break
+      }
       case 'terminals.session.item': {
+        // Upsert, not append: opening a session reloads its items while events keep arriving, and the
+        // same item can come in both ways.
         const items = state.terminalItemsBySession[event.sessionId] ?? []
-        set({ terminalItemsBySession: { ...state.terminalItemsBySession, [event.sessionId]: [...items, event.item] } })
+        set({ terminalItemsBySession: { ...state.terminalItemsBySession, [event.sessionId]: upsertById(items, event.item) } })
         break
       }
       case 'terminals.attach.updated':
@@ -530,18 +566,7 @@ export const useStore = create<StoreState>()((set, get) => {
   }
 
   const initialTab = readStoredTab()
-  const initialView: View =
-    initialTab === 'duo'
-      ? { name: 'duo-home' }
-      : initialTab === 'design'
-      ? { name: 'design-home' }
-      : initialTab === 'bots'
-        ? { name: 'bots-home' }
-        : initialTab === 'agents'
-          ? { name: 'agents-home' }
-          : initialTab === 'extras'
-            ? { name: 'extras-home' }
-            : { name: 'home' }
+  const initialView = TAB_HOMES[initialTab]
 
   return {
     started: false,
@@ -590,6 +615,7 @@ export const useStore = create<StoreState>()((set, get) => {
     setBrowserOpen: (open) => set({ browserOpen: open }),
     taskSchedules: [],
     designFiles: {},
+    unread: {},
 
     init: () => {
       const state = get()
@@ -615,7 +641,7 @@ export const useStore = create<StoreState>()((set, get) => {
       const current = get().view
       if (view.name === 'settings' && current.name !== 'settings') set({ settingsReturn: current })
       else if (view.name !== 'settings') set({ settingsReturn: null })
-      set({ view })
+      set({ view, unread: withoutKeys(get().unread, idsShownBy(view, get().tasksByProject)) })
       if (view.name === 'task') void get().openTask(view.projectId, view.taskId)
       if (view.name === 'project-settings') void get().openProjectSettings(view.projectId)
       if (view.name === 'design') void get().openDesign(view.projectId)
@@ -646,6 +672,7 @@ export const useStore = create<StoreState>()((set, get) => {
       set({
         tab,
         view: next,
+        unread: withoutKeys(state.unread, idsShownBy(next, state.tasksByProject)),
         settingsReturn: null,
         workView: saved.work,
         designView: saved.design,

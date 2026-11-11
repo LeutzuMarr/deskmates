@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { AssistantText } from './Markdown'
 import { ActivityGroup } from './ActivityGroup'
@@ -31,6 +31,9 @@ interface ConversationProps {
   /** Replaces the working row's rotating verb while the run is up but silent, for providers whose
    *  start-up is long enough that a timer over an empty transcript reads as a freeze. */
   starting?: StartingNotice | null
+  /** The message box (and anything shown with it), floated over the bottom of the conversation so
+   *  messages scroll underneath its glass. The conversation leaves room for it at the end. */
+  dock?: ReactNode
 }
 
 /** The user item that started the turn an assistant item belongs to. */
@@ -66,8 +69,31 @@ function turnText(timeline: TimelineItem[], i: number): string {
 }
 
 /** Renders a task's (or bot run's) timeline: user bubbles, assistant replies, collapsed tool activity and approval cards. */
-export function Conversation({ taskId, mode = 'task', timeline, running, emptyHint, contentClassName, pill = true, starting = null }: ConversationProps) {
+export function Conversation({ taskId, mode = 'task', timeline, running, emptyHint, contentClassName, pill = true, starting = null, dock }: ConversationProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
+  const dockRef = useRef<HTMLDivElement>(null)
+  const [dockHeight, setDockHeight] = useState(0)
+
+  // The dock grows with the message being typed; the conversation keeps that much room under its
+  // last message, and stays pinned to the bottom when it was already there.
+  useLayoutEffect(() => {
+    const el = dockRef.current
+    if (!el) {
+      setDockHeight(0)
+      return
+    }
+    const measure = (): void => setDockHeight(el.offsetHeight)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [dock !== undefined])
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    if (el && nearBottomRef.current) el.scrollTop = el.scrollHeight
+  }, [dockHeight])
+
   const nearBottomRef = useRef(true)
   const [showJump, setShowJump] = useState(false)
   // For a run that started without a prompt in this timeline (e.g. a scheduled bot run).
@@ -210,6 +236,7 @@ export function Conversation({ taskId, mode = 'task', timeline, running, emptyHi
       >
         <div
           className={`mx-auto flex w-full flex-col gap-4 ${contentClassName ?? 'max-w-[720px] px-8 py-6'} ${running && pill ? 'pt-14' : ''}`}
+          style={dockHeight > 0 ? { paddingBottom: dockHeight + 8 } : undefined}
         >
           {timeline.length === 0 && (
             <div className="flex flex-col items-center gap-3 py-14 text-center">
@@ -231,6 +258,7 @@ export function Conversation({ taskId, mode = 'task', timeline, running, emptyHi
         <button
           type="button"
           className="jump-latest"
+          style={dockHeight > 0 ? { bottom: dockHeight + 4 } : undefined}
           aria-label="Jump to latest"
           title="Jump to latest"
           onClick={() => {
@@ -240,6 +268,11 @@ export function Conversation({ taskId, mode = 'task', timeline, running, emptyHi
         >
           <ArrowDown size={15} aria-hidden="true" />
         </button>
+      )}
+      {dock !== undefined && (
+        <div ref={dockRef} className="composer-dock">
+          <div className={`mx-auto w-full ${contentClassName ? contentClassName.replace(/\bpy-\S+/g, '') : 'max-w-[720px] px-8'}`}>{dock}</div>
+        </div>
       )}
     </div>
   )
