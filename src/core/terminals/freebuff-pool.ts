@@ -48,9 +48,10 @@ export class FreebuffPool {
         request = `First read ${file}: it has your standing instructions as the Deskmates assistant in this folder, and they apply to everything below. Then: ${request}`
       }
 
-      const reply = await host.ask(request, (activity) => runOptions.onItem?.(activityItem(activityId, activity, 'running')))
+      const steps = new ActivitySteps(activityId, (item) => runOptions.onItem?.(item))
+      const reply = await host.ask(request, (activity) => steps.report(activity))
       this.instructed.add(host)
-      runOptions.onItem?.(activityItem(activityId, 'Finished', 'done'))
+      steps.finish()
       if (reply) runOptions.onItem?.({ kind: 'assistant', id: randomUUID(), at: Date.now(), text: reply })
       return { text: reply }
     } catch (error) {
@@ -102,6 +103,43 @@ export class FreebuffPool {
 }
 
 /** One timeline line that follows Freebuff's progress through a turn, updated in place by its id. */
-function activityItem(id: string, activity: string, state: 'running' | 'done'): TimelineItem {
-  return { kind: 'tool', id, at: Date.now(), toolName: 'freebuff', input: { activity }, state }
+function activityItem(id: string, activity: string, state: 'running' | 'done', at = Date.now()): TimelineItem {
+  return { kind: 'tool', id, at, toolName: 'freebuff', input: { activity }, state }
+}
+
+/**
+ * Turns Freebuff's "latest line of work" into a list of steps, the way the other agents report
+ * theirs: a new line of work closes the step before it and opens its own, while a line that only
+ * grows (the reply streaming in) keeps updating the step it is.
+ */
+export class ActivitySteps {
+  private current: { id: string; text: string; at: number } | null = null
+
+  constructor(
+    private readonly firstId: string,
+    private readonly emit: (item: TimelineItem) => void
+  ) {}
+
+  report(activity: string): void {
+    const text = activity.trim()
+    if (!text) return
+    const current = this.current
+    if (current && (text === current.text || text.startsWith(current.text) || current.text.startsWith(text))) {
+      if (text.length > current.text.length) {
+        current.text = text
+        this.emit(activityItem(current.id, text, 'running', current.at))
+      }
+      return
+    }
+    if (current) this.emit(activityItem(current.id, current.text, 'done', current.at))
+    this.current = { id: current ? randomUUID() : this.firstId, text, at: Date.now() }
+    this.emit(activityItem(this.current.id, text, 'running', this.current.at))
+  }
+
+  finish(): void {
+    const current = this.current
+    if (current) this.emit(activityItem(current.id, current.text, 'done', current.at))
+    else this.emit(activityItem(this.firstId, 'Finished', 'done'))
+    this.current = null
+  }
 }

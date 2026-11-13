@@ -813,8 +813,10 @@ export interface RpcMethods {
   /** The user's tap on a Start card (starts a run; a second tap does nothing). */
   'duo.start': { params: { cardId: string }; result: DuoState }
   'duo.dismiss': { params: { cardId: string }; result: DuoState }
-  /** The user's own message to Duo (starts a run). */
+  /** The user's own message to Duo: starts a run, or waits its turn while one is going. */
   'duo.ask': { params: { text: string }; result: DuoState }
+  /** Takes a waiting message back out before Duo gets to it. */
+  'duo.queue.remove': { params: { id: string }; result: DuoState }
   'duo.cancel': { params: NoParams; result: DuoState }
   'duo.todo.done': { params: { id: string; done: boolean }; result: DuoState }
   'duo.todo.remove': { params: { id: string }; result: DuoState }

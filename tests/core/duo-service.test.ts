@@ -21,8 +21,9 @@ function setup(start = new Date(2026, 10, 5, 7, 0).getTime()) {
     getProfile: () => profile,
     setProfile: (p) => (profile = p),
     workspace: () => 'C:/duo',
-    runCli: async (_provider, folder, prompt) => {
+    runCli: async (_provider, folder, prompt, _model, _signal, onItem) => {
       cli.push({ prompt, folder })
+      onItem?.({ kind: 'tool', id: `step-${cli.length}`, at: now, toolName: 'web_fetch', input: { url: 'https://hotelroma.it' }, state: 'running' })
       await new Promise<void>((resolve) => (release = resolve))
       return { text: 'Here is your brief.' }
     },
@@ -130,5 +131,72 @@ describe('Duo quiet hours', () => {
     t.duo.tick(new Date(2026, 10, 5, 23, 50).getTime())
     expect(t.duo.state().cards).toHaveLength(0)
     expect(t.notes).toHaveLength(0)
+  })
+
+  it("shows the run's steps live, then keeps them with the reply they led to", async () => {
+    const t = setup()
+    const run = t.duo.ask('Research Hotel Roma')
+    await new Promise((r) => setTimeout(r, 5))
+    expect(t.duo.state().steps.map((s) => [s.toolName, s.state])).toEqual([['web_fetch', 'running']])
+    expect(t.duo.state().stepsFor).toBeNull()
+    t.finish()
+    await run
+    const state = t.duo.state()
+    expect(state.steps.map((s) => s.state)).toEqual(['done'])
+    expect(state.stepsFor).toBe(state.messages.at(-1)!.id)
+  })
+
+  it('holds messages sent while working and sends them together once the run ends', async () => {
+    const t = setup()
+    const run = t.duo.ask('Do my brief')
+    await new Promise((r) => setTimeout(r, 5))
+    await t.duo.ask('also check LinkedIn')
+    await t.duo.ask('and the school site')
+    expect(t.duo.state().queued.map((q) => q.text)).toEqual(['also check LinkedIn', 'and the school site'])
+    expect(t.cli).toHaveLength(1)
+    t.finish()
+    await run
+    await new Promise((r) => setTimeout(r, 5))
+    expect(t.duo.state().queued).toHaveLength(0)
+    expect(t.cli).toHaveLength(2)
+    expect(t.cli[1]!.prompt).toBe('also check LinkedIn\n\nand the school site')
+    const users = t.duo.state().messages.filter((m) => m.role === 'user').map((m) => m.text)
+    expect(users).toEqual(['Do my brief', 'also check LinkedIn', 'and the school site'])
+    t.finish()
+  })
+
+  it('a queued message can be taken back, and Stop hands the queue back instead of sending it', async () => {
+    const t = setup()
+    void t.duo.ask('Do my brief')
+    await new Promise((r) => setTimeout(r, 5))
+    await t.duo.ask('first')
+    await t.duo.ask('second')
+    t.duo.unqueue(t.duo.state().queued[0]!.id)
+    expect(t.duo.state().queued.map((q) => q.text)).toEqual(['second'])
+    expect(t.duo.cancel()).toEqual(['second'])
+    expect(t.duo.state().queued).toHaveLength(0)
+    t.finish()
+  })
+
+  it('never ends a run in silence', async () => {
+    const t = setup()
+    const duo = new DuoService({
+      store: new DuoStore(openDatabase(':memory:')),
+      bus: new EventBus(),
+      getProfile: () => ({ ...DEFAULT_DUO_PROFILE, ready: true }),
+      setProfile: () => undefined,
+      workspace: () => 'C:/duo',
+      runCli: async () => ({ text: '' }),
+      resolveModel: () => {
+        throw new Error('no api model in tests')
+      },
+      apiTools: () => ({}),
+      operatingPrompt: () => null,
+      notify: () => undefined
+    })
+    await duo.ask('hello')
+    expect(duo.state().messages.at(-1)).toMatchObject({ role: 'duo', kind: 'note' })
+    expect(duo.state().working).toBeNull()
+    t.finish()
   })
 })

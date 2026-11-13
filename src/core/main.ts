@@ -281,10 +281,11 @@ async function main(): Promise<void> {
       prepareDuoWorkspace({ dir: duoFolder, agentCommand: commandPath, profile, myPromptPath: myPromptPath(promptRoot) })
       return duoFolder
     },
-    runCli: (provider, folder, prompt, modelId, signal) => {
+    runCli: (provider, folder, prompt, modelId, signal, onItem) => {
       if (provider !== 'freebuff' && provider !== 'opencode' && provider !== 'agy') return Promise.resolve({ text: '', error: 'Not a command-line model.' })
-      return terminals.execute(provider, folder, prompt, modelId, { signal, trustAgents: true })
+      return terminals.execute(provider, folder, prompt, modelId, { signal, trustAgents: true, onItem })
     },
+    defaultModel: () => repos.settings.get().defaultModel,
     resolveModel: (ref) => models.resolve(ref),
     apiTools: () => ({
       ...agentBrowserTools({ browser, agent: 'Duo', runKey: 'duo', sendPermit: (domain) => duo.sendPermit(domain), screenshotDir: join(duoFolder, 'screenshots') }),

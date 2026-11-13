@@ -141,6 +141,45 @@ export function extractReply(screen: string, prompt: string, skipEchoes = 0): { 
   return { text: body.join('\n'), done }
 }
 
+/**
+ * The latest finished reply on screen, found from its footer ("⎘ • 3s") rather than from the request's
+ * echo: the lines above the last footer, up to the line before it that ends a request or a reply (both
+ * carry a copy icon) or the top of the screen. For a long turn whose request has scrolled off the top
+ * of Freebuff's window, where `extractReply` has nothing to anchor on. Null when no footer is on screen.
+ */
+export function latestReply(screen: string): string | null {
+  const lines = screen.split('\n')
+  let footer = -1
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (REPLY_FOOTER.test(lines[i])) {
+      footer = i
+      break
+    }
+  }
+  if (footer < 0) return null
+  const body: string[] = []
+  for (let i = footer - 1; i >= 0; i--) {
+    if (lines[i].includes('⎘') || /^\s*[╭┌╰└│]/.test(lines[i])) break
+    body.unshift(clean(lines[i]))
+  }
+  while (body.length && !body[0]) body.shift()
+  while (body.length && !body[body.length - 1]) body.pop()
+  return body.join('\n')
+}
+
+/** The last line of chat above the input box (and any card over it), for when the request's echo has
+ *  scrolled away. Null when there is none. */
+function lastChatLine(screen: string): string | null {
+  const lines = screen.split('\n')
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]
+    if (/^\s*[╭┌╰└│]/.test(line) || BUSY.test(line) || / left · /.test(line) || /\/model to change/.test(line)) continue
+    const text = clean(line)
+    if (text) return text.slice(0, 120)
+  }
+  return null
+}
+
 /** What to say aloud from a reply: the prose, without the tool and command lines Freebuff prints. */
 export function spokenText(reply: string): string {
   return reply
@@ -154,7 +193,8 @@ export function spokenText(reply: string): string {
 /** The last line of work Freebuff shows while busy ("• Read file.ts", "$ npm test"), for the notch. */
 export function currentActivity(screen: string, prompt: string, skipEchoes = 0): string | null {
   const reply = extractReply(screen, prompt, skipEchoes)
-  if (!reply) return null
+  // A long turn pushes the request off the top of the window; its work is still at the bottom.
+  if (!reply) return lastChatLine(screen)
   // Freebuff's own "thinking... 2s ■ Esc" status isn't activity worth showing.
   const lines = reply.text.split('\n').filter((line) => line && !BUSY.test(line))
   const last = lines[lines.length - 1]
@@ -179,6 +219,9 @@ const TURN_TIMEOUT_MS = 15 * 60_000
 const START_TIMEOUT_MS = 45_000
 /** How long the screen must stay idle and unchanged before a turn counts as finished. */
 const SETTLE_MS = 1500
+/** How long Freebuff may sit idle, after working, with no reply footer on screen before the turn is
+ *  taken as over anyway. */
+const IDLE_GIVE_UP_MS = 20_000
 
 /**
  * Runs Freebuff in a console window nobody sees and talks to it the way a person would: typing
@@ -452,6 +495,9 @@ export class FreebuffHost {
     const deadline = Date.now() + TURN_TIMEOUT_MS
     const startBy = Date.now() + 20_000
     let started = false
+    let sawBusy = false
+    /** The reply as last seen while its request was still on screen. */
+    let lastText = ''
     let retries = 0
     for (;;) {
       await this.nextScreen()
@@ -470,6 +516,8 @@ export class FreebuffHost {
         throw new StoppedError()
       }
       const reply = extractReply(screen, prompt, this.echoesBefore)
+      if (reply?.text) lastText = reply.text
+      if (isBusy(screen)) sawBusy = true
       if (reply || isBusy(screen)) started = true
       if (!started && Date.now() > startBy) throw new Error("Freebuff didn't take the request. Try again.")
       if (Date.now() > deadline) throw new Error('Freebuff took too long, so Deskmates stopped waiting.')
@@ -489,6 +537,19 @@ export class FreebuffHost {
       }
       const settled = Date.now() - this.screenAt > SETTLE_MS
       if (started && reply?.done && isIdle(screen) && settled) return reply.text
+      // A long turn (browsing, reading a site) prints more than Freebuff's window holds, and the
+      // request scrolls off the top: `extractReply` then has nothing to anchor on and would wait for
+      // the full timeout while the answer sits right there. Freebuff idle again after working means
+      // the turn is over, so the reply is read from above its footer instead.
+      if (sawBusy && !reply?.done && isIdle(screen) && settled) {
+        // Only with the request gone from the screen: while it shows, the last footer could still be
+        // the previous turn's, above it.
+        const fallback = reply ? null : latestReply(screen)
+        if (fallback) return fallback
+        if (fallback === '' && lastText) return lastText
+        // Idle with no footer at all (an error card, say): give it a while, then hand back what was seen.
+        if (Date.now() - this.screenAt > IDLE_GIVE_UP_MS) return lastText || (lastChatLine(screen) ?? '')
+      }
     }
   }
 

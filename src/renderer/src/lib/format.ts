@@ -1,5 +1,6 @@
 import { isCliProvider, PROVIDER_LABELS } from '../../../shared/protocol'
 import type { ModelRef, SessionContextUsage, TaskStatus, TimelineItem, ToolItem } from '../../../shared/protocol'
+import { stepLabel } from './steps'
 
 const DAY_MS = 86_400_000
 
@@ -220,10 +221,10 @@ export function summarizeActivity(tools: ToolItem[]): ActivitySummary {
   const running = tools.some((t) => t.state === 'running')
   if (running) {
     const lastRunning = [...tools].reverse().find((t) => t.state === 'running')
-    return { text: `Working… ${toolLabel(lastRunning?.toolName ?? '', lastRunning?.input)}`, failed, denied, running }
+    return { text: lastRunning ? `${stepLabel(lastRunning)}…` : 'Working…', failed, denied, running }
   }
   if (tools.length === 1) {
-    return { text: toolLabel(tools[0].toolName, tools[0].input), failed, denied, running }
+    return { text: stepLabel(tools[0]), failed, denied, running }
   }
   const count = (match: (t: ToolItem) => boolean): number => tools.filter(match).length
   const plural = (n: number, one: string): string => (n === 1 ? one : `${one}s`)
@@ -251,7 +252,12 @@ export function summarizeActivity(tools: ToolItem[]): ActivitySummary {
   if (saved > 0) parts.push(`saved ${saved} ${plural(saved, 'memory')}`)
   if (count((t) => t.toolName === 'notify_user') > 0) parts.push('sent a notification')
   const joined = parts.join(', ')
-  const text = joined.length > 0 ? joined.charAt(0).toUpperCase() + joined.slice(1) : ''
+  // Steps the tally doesn't count (the browser, the web, a CLI's own tools) still get named, so a
+  // finished group never reads as an empty line.
+  const text =
+    joined.length > 0
+      ? joined.charAt(0).toUpperCase() + joined.slice(1)
+      : `${stepLabel(tools[tools.length - 1])}${tools.length > 1 ? ` and ${tools.length - 1} more ${plural(tools.length - 1, 'step')}` : ''}`
   return { text, failed, denied, running }
 }
 

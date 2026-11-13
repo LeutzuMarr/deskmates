@@ -3,7 +3,8 @@ import { ChevronLeft } from 'lucide-react'
 import { core } from '../lib/rpc'
 import { useStore } from '../lib/store'
 import { concentricVars } from '../lib/design'
-import { extractImageUrl, formatClock, formatDay, toolLabel } from '../lib/format'
+import { extractImageUrl, formatClock, formatDay } from '../lib/format'
+import { stepLabel } from '../lib/steps'
 import { CRON_PRESETS, runStateLabel } from '../lib/bots'
 import { Conversation } from './Conversation'
 import { StatusMark } from './StatusMark'
@@ -186,7 +187,7 @@ function RunScreenshots({ items }: { items: TimelineItem[] }) {
 
   const shots = items
     .filter((item): item is ToolItem => item.kind === 'tool')
-    .map((item) => ({ id: item.id, url: extractImageUrl(item.output), label: toolLabel(item.toolName, item.input) }))
+    .map((item) => ({ id: item.id, url: extractImageUrl(item.output), label: stepLabel(item) }))
     .filter((shot): shot is { id: string; url: string; label: string } => shot.url !== null)
 
   if (shots.length === 0) {

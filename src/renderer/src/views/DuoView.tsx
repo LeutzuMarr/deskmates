@@ -6,8 +6,13 @@ import { useStore } from '../lib/store'
 import { concentricVars } from '../lib/design'
 import { AssistantText } from '../components/Markdown'
 import { BrandMark } from '../components/Mascot'
+import { ActivityGroup } from '../components/ActivityGroup'
+import { WorkingLine } from '../components/Working'
+import { currentActivity } from '../lib/steps'
 import { quickReplies } from '../../../shared/quick-replies'
 import type { DuoProfile, DuoState, OutboxItem } from '../../../shared/duo'
+import { PROVIDERS, PROVIDER_LABELS, isCliProvider, isLocalProvider, type ModelRef, type ProviderId } from '../../../shared/protocol'
+import { freebuffModelLabel } from '../../../shared/freebuff'
 
 async function call<T>(run: () => Promise<T>, toast: (m: string) => void): Promise<T | undefined> {
   try {
@@ -176,9 +181,12 @@ function Thread({ duo }: { duo: DuoState }): ReactNode {
   // Braces matter: Chromium's scrollIntoView now returns a promise, which React would take for a cleanup.
   useEffect(() => {
     void end.current?.scrollIntoView({ block: 'end' })
-  }, [duo.messages.length, duo.working])
+  }, [duo.messages.length, duo.working, duo.queued.length, duo.steps.length])
   const last = duo.messages.at(-1)
   const replies = last?.role === 'duo' && !duo.working ? quickReplies(last.text) : null
+  // The run's steps sit above the reply they led to, folded; while it runs they're live at the end.
+  const steps = duo.steps.length > 0 ? <ActivityGroup key={duo.steps[0]!.id} items={duo.steps} /> : null
+  const lastUserAt = [...duo.messages].reverse().find((m) => m.role === 'user')?.at ?? null
   return (
     <section className="mt-8 flex flex-col gap-4">
       {duo.messages.length === 0 && !duo.working && (
@@ -190,7 +198,9 @@ function Thread({ duo }: { duo: DuoState }): ReactNode {
             <div className="user-bubble max-w-[80%] whitespace-pre-wrap">{m.text}</div>
           </div>
         ) : (
-          <div key={m.id} className="flex gap-3">
+          <div key={m.id} className="flex flex-col gap-2">
+          {!duo.working && duo.stepsFor === m.id && <div className="ml-8">{steps}</div>}
+          <div className="flex gap-3">
             <div className="mt-1 shrink-0">
               <BrandMark size={20} />
             </div>
@@ -198,6 +208,7 @@ function Thread({ duo }: { duo: DuoState }): ReactNode {
               {m.kind === 'brief' && <div className="caption mb-2">Morning brief · {clock(m.at)}</div>}
               <AssistantText text={m.text} />
             </div>
+          </div>
           </div>
         )
       )}
@@ -211,9 +222,33 @@ function Thread({ duo }: { duo: DuoState }): ReactNode {
         </div>
       )}
       {duo.working && (
-        <div className="flex items-center gap-3 text-[13px] text-ink-muted">
-          <BrandMark size={20} working />
-          <span>{duo.working}…</span>
+        <div className="flex flex-col gap-2">
+          {steps && <div className="ml-8">{steps}</div>}
+          <div className="flex items-start gap-3">
+            <BrandMark size={20} working />
+            <WorkingLine since={lastUserAt} label={currentStep(duo) ?? `${duo.working}…`} />
+          </div>
+        </div>
+      )}
+      {duo.queued.length > 0 && (
+        <div className="flex flex-col items-end gap-2" aria-label="Waiting to be sent">
+          {duo.queued.map((q) => (
+            <div key={q.id} className="group flex max-w-[80%] items-start gap-1">
+              <button
+                type="button"
+                className="mt-2 text-ink-faint opacity-0 group-hover:opacity-100 focus:opacity-100"
+                aria-label="Don't send this"
+                title="Don't send this"
+                onClick={() => void call(() => core.call('duo.queue.remove', { id: q.id }), toast)}
+              >
+                <X size={13} />
+              </button>
+              <div className="flex flex-col items-end">
+                <div className="user-bubble whitespace-pre-wrap opacity-60">{q.text}</div>
+                <span className="mt-0.5 text-[11px] text-ink-faint">Queued · goes in when Duo finishes</span>
+              </div>
+            </div>
+          ))}
         </div>
       )}
       <div ref={end} />
@@ -231,26 +266,40 @@ function Composer({ duo }: { duo: DuoState }): ReactNode {
       if (ok) setText('')
     })
   }
+  // Stop hands back what was waiting, so nothing typed is lost and nothing goes in unasked.
+  const stop = (): void => {
+    const waiting = duo.queued.map((q) => q.text)
+    void call(() => core.call('duo.cancel', {}), toast).then((ok) => {
+      if (ok && waiting.length > 0) setText((current) => [...waiting, current].filter((t) => t.trim()).join('\n\n'))
+    })
+  }
   return (
     <form className="sticky bottom-0 mt-6 flex items-end gap-2 bg-canvas pb-6 pt-2" onSubmit={submit}>
       <textarea
         className="input min-h-[48px] flex-1 resize-none"
         rows={2}
-        placeholder={duo.working ? 'Duo is working…' : 'Ask Duo anything, or tell it what to do'}
+        placeholder={duo.working ? 'Duo is working. Type away: your message goes in when it finishes' : 'Ask Duo anything, or tell it what to do'}
         value={text}
-        disabled={Boolean(duo.working)}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' && !e.shiftKey) submit(e)
         }}
         aria-label="Message Duo"
       />
-      {duo.working ? (
-        <button type="button" className="btn btn-outline r-concentric" style={concentricVars(16)} onClick={() => void call(() => core.call('duo.cancel', {}), toast)}>
+      {duo.working && (
+        <button type="button" className="btn btn-outline r-concentric" style={concentricVars(16)} onClick={stop}>
           <Square size={13} aria-hidden="true" /> Stop
         </button>
-      ) : (
-        <button type="submit" className="btn btn-clay r-concentric" style={concentricVars(16)} disabled={!text.trim()}>
+      )}
+      {(!duo.working || text.trim()) && (
+        <button
+          type="submit"
+          className="btn btn-clay r-concentric"
+          style={concentricVars(16)}
+          disabled={!text.trim()}
+          aria-label={duo.working ? 'Queue message' : 'Send'}
+          title={duo.working ? 'Queue: sent when Duo finishes' : 'Send'}
+        >
           <Send size={14} aria-hidden="true" />
         </button>
       )}
@@ -260,6 +309,84 @@ function Composer({ duo }: { duo: DuoState }): ReactNode {
 
 const FREEBUFF_MODEL = { provider: 'freebuff' as const, modelId: 'current' }
 
+/** Which model does Duo's work: any provider and model Deskmates knows, or Deskmates' default. */
+function DuoModelField({ value, onChange }: { value: ModelRef | null; onChange: (model: ModelRef | null) => void }): ReactNode {
+  const models = useStore((s) => s.models)
+  const loadModels = useStore((s) => s.loadModels)
+  const defaultModel = useStore((s) => s.settings?.defaultModel ?? null)
+  const toast = useStore((s) => s.showToast)
+  const [loading, setLoading] = useState(false)
+  const provider = value?.provider ?? ''
+  const list = provider ? (models[provider] ?? []) : []
+
+  useEffect(() => {
+    if (!provider || models[provider]) return
+    setLoading(true)
+    loadModels(provider)
+      .catch((error: unknown) => toast(`Couldn't load the models: ${error instanceof Error ? error.message : String(error)}`))
+      .finally(() => setLoading(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [provider])
+
+  // A provider picked before its list arrived starts on its first model once the list is in.
+  useEffect(() => {
+    if (value && !value.modelId && list.length > 0) onChange({ provider: value.provider, modelId: list[0]! })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value?.provider, value?.modelId, list.length])
+
+  const label = (id: string): string => (provider === 'freebuff' ? freebuffModelLabel(id) : id)
+  const ids = value && !list.includes(value.modelId) ? [value.modelId, ...list] : list
+  return (
+    <div className="flex flex-col gap-1 text-[13px] text-ink-muted">
+      The model that does Duo's work
+      <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+        <select
+          className="input w-full"
+          aria-label="Provider"
+          value={provider}
+          onChange={(e) => {
+            const next = e.target.value as ProviderId | ''
+            if (!next) return onChange(null)
+            onChange({ provider: next, modelId: next === 'freebuff' ? FREEBUFF_MODEL.modelId : (models[next]?.[0] ?? '') })
+          }}
+        >
+          <option value="">
+            Deskmates' default{defaultModel ? ` (${PROVIDER_LABELS[defaultModel.provider]} · ${defaultModel.modelId})` : ''}
+          </option>
+          {PROVIDERS.map((id) => (
+            <option key={id} value={id}>
+              {PROVIDER_LABELS[id]}
+              {id === 'freebuff' ? ' (each run starts with your tap)' : isCliProvider(id) ? ' (CLI)' : isLocalProvider(id) ? ' (local)' : ''}
+            </option>
+          ))}
+        </select>
+        <select
+          className="input w-full"
+          aria-label="Model"
+          value={value?.modelId ?? ''}
+          disabled={!value || loading}
+          onChange={(e) => value && onChange({ provider: value.provider, modelId: e.target.value })}
+        >
+          {!value && <option value="">Uses the default model</option>}
+          {value && loading && ids.length === 0 && <option value="">Loading models…</option>}
+          {value && !loading && ids.length === 0 && <option value="">No models found (add a key in Settings)</option>}
+          {ids.map((id) => (
+            <option key={id} value={id}>
+              {label(id)}
+            </option>
+          ))}
+        </select>
+      </div>
+    </div>
+  )
+}
+
+/** The step Duo is on, written out ("Analyzing hotelroma.it…"), or null before its first step. */
+function currentStep(duo: DuoState): string | null {
+  if (duo.steps.length === 0) return null
+  return currentActivity(duo.steps)
+}
+
 function Setup({ duo, onDone }: { duo: DuoState; onDone: () => void }): ReactNode {
   const toast = useStore((s) => s.showToast)
   const setBrowserOpen = useStore((s) => s.setBrowserOpen)
@@ -268,7 +395,11 @@ function Setup({ duo, onDone }: { duo: DuoState; onDone: () => void }): ReactNod
   const set = <K extends keyof DuoProfile>(key: K, value: DuoProfile[K]): void => setP((prev) => ({ ...prev, [key]: value }))
   const save = (event: FormEvent): void => {
     event.preventDefault()
-    void call(() => core.call('duo.profile.update', { patch: { ...p, model: p.model ?? FREEBUFF_MODEL, ready: true } }), toast).then((ok) => {
+    if (p.model && !p.model.modelId) {
+      toast("Pick a model for Duo, or choose Deskmates' default.")
+      return
+    }
+    void call(() => core.call('duo.profile.update', { patch: { ...p, ready: true } }), toast).then((ok) => {
       if (ok) onDone()
     })
   }
@@ -307,16 +438,9 @@ function Setup({ duo, onDone }: { duo: DuoState; onDone: () => void }): ReactNod
           </div>
         ))}
         {row('Never contact (comma separated)', <input className={field} value={p.doNotContact.join(', ')} onChange={(e) => set('doNotContact', e.target.value.split(',').map((t) => t.trim()).filter(Boolean))} />)}
-        {row('Model', (
-          <select
-            className={field}
-            value={p.model?.provider === 'freebuff' || !p.model ? 'freebuff' : 'default'}
-            onChange={(e) => set('model', e.target.value === 'freebuff' ? FREEBUFF_MODEL : null)}
-          >
-            <option value="freebuff">Freebuff (each run starts with your tap)</option>
-            <option value="default">Deskmates' default model</option>
-          </select>
-        ))}
+        <div className="md:col-span-2">
+          <DuoModelField value={p.model} onChange={(model) => set('model', model)} />
+        </div>
       </div>
       <div className="flex flex-wrap items-center gap-2 text-[13px] text-ink-muted">
         Sign in once in Duo's browser:

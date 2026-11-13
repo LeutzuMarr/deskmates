@@ -11,6 +11,7 @@ import { Thinking } from './Thinking'
 import { ArrowDown } from 'lucide-react'
 import { formatElapsed, awaitingFirstOutput } from '../lib/format'
 import { WorkingLine, WorkingPill } from './Working'
+import { currentActivity } from '../lib/steps'
 import type { StartingNotice } from '../lib/format'
 import type { TimelineItem, ToolItem } from '../../../shared/protocol'
 
@@ -116,6 +117,8 @@ export function Conversation({ taskId, mode = 'task', timeline, running, emptyHi
   // True only during start-up; once the reply starts arriving the working row goes back to its
   // rotating verb, which no longer has anything to disclaim.
   const silent = running && awaitingFirstOutput(timeline, running)
+  // The step the agent is on, written out live ("Reading src/app.ts…", "Analyzing example.com…").
+  const activity = running ? currentActivity(timeline) : null
 
   const nodes: ReactNode[] = []
   let i = 0
@@ -222,7 +225,7 @@ export function Conversation({ taskId, mode = 'task', timeline, running, emptyHi
 
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-      {running && pill && <WorkingPill since={workingSince} />}
+      {running && pill && <WorkingPill since={workingSince} label={activity ?? undefined} />}
       <div
         ref={scrollRef}
         className="scroll-area min-h-0 min-w-0 flex-1 overflow-y-auto"
@@ -248,7 +251,7 @@ export function Conversation({ taskId, mode = 'task', timeline, running, emptyHi
           {running && (
             <WorkingLine
               since={workingSince}
-              label={silent ? starting?.label : undefined}
+              label={silent ? (starting?.label ?? activity ?? undefined) : (activity ?? undefined)}
               hint={silent ? starting?.hint : undefined}
             />
           )}

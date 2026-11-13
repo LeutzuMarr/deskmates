@@ -4,6 +4,7 @@
  * covers how to behave; this covers only Duo's job and rules, without repeating it.
  */
 import type { DuoProfile } from '../../shared/duo'
+import { NARRATION_RULES } from '../engine/narration'
 
 export const DUO_BRIEF = `# You are Duo
 
@@ -16,6 +17,9 @@ folder unless the user asks.
 Read profile.md in this folder: their name, school, company, email and LinkedIn, and your limits.
 Read playbook.md before any outreach: it is their outreach playbook (who to pitch, how to write,
 the follow-up sequence, the signature). Follow it, except where this brief says otherwise.
+
+## Keeping the user posted
+${NARRATION_RULES.split('\n').slice(1).join('\n')}
 
 ## What a run is
 Each run starts with a short request from the user: their morning brief, a check-in, "send what

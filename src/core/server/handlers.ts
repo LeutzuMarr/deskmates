@@ -812,7 +812,7 @@ export function createHandlers(services: HandlerServices): Handlers {
     'duo.dismiss': (params: { cardId: string }) => requireDuo().dismissCard(params.cardId),
     'duo.ask': (params: { text: string }) => {
       const duo = requireDuo()
-      if (duo.state().working) throw new Error('Duo is still working. Wait for it, or press Stop.')
+      // While Duo works the message waits its turn (duo.ask queues it) instead of being refused.
       void duo.ask(params.text).catch((error: unknown) => console.error('[duo] run failed', error))
       return duo.state()
     },
@@ -821,6 +821,7 @@ export function createHandlers(services: HandlerServices): Handlers {
       duo.cancel()
       return duo.state()
     },
+    'duo.queue.remove': (params: { id: string }) => requireDuo().unqueue(params.id),
     'duo.todo.done': (params: { id: string; done: boolean }) => {
       const duo = requireDuo()
       duo.setTodoDone(params.id, params.done)

@@ -9,6 +9,7 @@ import {
   inputDraft,
   isBusy,
   isIdle,
+  latestReply,
   readStatus,
   withoutCursor
 } from '../../src/core/terminals/freebuff-host'
@@ -122,6 +123,42 @@ describe('Freebuff screen reading', () => {
     expect(highlightedModel(PICKER)).toBe('Solar Pro 4')
     expect(highlightedModel(' │ › Muse Spark 1.3 • high · Falls back when busy │')).toBe('Muse Spark 1.3')
     expect(highlightedModel(DONE)).toBeNull()
+  })
+})
+
+// A long turn: the request has scrolled off the top of Freebuff's 70-line window.
+const SCROLLED = `  • browser_read https://scuola.example/compiti
+  • duo_todo_add Verifica di scienze
+  Ho letto i compiti.
+  Verifica di scienze lunedì 16.
+                                                                                                ⎘ • 4m 12s • △▽
+ 41m left · 22.8K (5%)                                                                         ✕ End session
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│  ▍Enter a coding task or / for commands                                                                    │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────╯`
+
+describe('Freebuff reply after the request scrolled away', () => {
+  it('reads the reply from above its footer when the echo is gone', () => {
+    expect(extractReply(SCROLLED, 'do the daily brief')).toBeNull()
+    expect(isIdle(SCROLLED)).toBe(true)
+    expect(latestReply(SCROLLED)).toBe(
+      '• browser_read https://scuola.example/compiti\n• duo_todo_add Verifica di scienze\nHo letto i compiti.\nVerifica di scienze lunedì 16.'
+    )
+  })
+
+  it('stops at the request echo when it is still on screen', () => {
+    expect(latestReply(DONE)).toBe('SECOND OK')
+    expect(latestReply(WORKING)).toBeNull()
+  })
+
+  it('still reports the latest line of work once the echo is gone', () => {
+    const busy = `  • browser_open https://mail.zoho.eu
+  • browser_read
+ thinking...                                                                                                54s  ■ Esc
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│  ▍Add to the current task (/ for commands)                                                                           │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯`
+    expect(currentActivity(busy, 'do the daily brief')).toBe('• browser_read')
   })
 })
 

@@ -2,7 +2,7 @@
  * Duo: the assistant that works for the user in the background (its own tab in Deskmates and on the
  * phone). These are the shapes the core, the app and the phone share.
  */
-import type { ModelRef } from './protocol'
+import type { ModelRef, ToolItem } from './protocol'
 
 /** What Duo knows about the user, filled in at setup and editable in Duo's settings. */
 export interface DuoProfile {
@@ -125,6 +125,13 @@ export interface DuoMessage {
   kind: 'brief' | 'check-in' | 'chat' | 'note'
 }
 
+/** A message the user sent while Duo was working, held until the run in flight ends. */
+export interface DuoQueued {
+  id: string
+  text: string
+  at: number
+}
+
 /** A run waiting for the user's tap (every Freebuff run starts this way). */
 export interface DuoCard {
   id: string
@@ -141,6 +148,12 @@ export interface DuoState {
   cards: DuoCard[]
   /** What Duo is doing now, or null when idle. */
   working: string | null
+  /** The steps of the run in flight, or of the last one, as they happen ("Analyzing example.com"). */
+  steps: ToolItem[]
+  /** The reply the steps led to, once the run is over; null while it runs. */
+  stepsFor: string | null
+  /** Messages the user sent while Duo was busy, waiting their turn, oldest first. */
+  queued: DuoQueued[]
   /** The next brief or check-in. */
   nextAt: number | null
 }

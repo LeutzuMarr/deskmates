@@ -5,6 +5,7 @@ import { readFileSync, existsSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Memory, Project, ProviderId, Settings } from '../../shared/protocol'
 import { PROVIDER_LABELS, isCliProvider } from '../../shared/protocol'
+import { NARRATION_RULES } from './narration'
 
 /** Returns the path to the project instructions file. */
 export function projectInstructionsPath(folder: string): string {
@@ -178,6 +179,8 @@ export function buildInstructions(input: BuildInstructionsInput): string {
     parts.push(`- Now: ${timeStr} (${Intl.DateTimeFormat().resolvedOptions().timeZone})`)
     parts.push('')
     parts.push(deskmatesToolsGuide(isDesign ? 'design' : 'work', isCliProvider(model.provider), true))
+    parts.push('')
+    parts.push(NARRATION_RULES)
     pushUserContext(parts, input)
     return parts.join('\n')
   }
@@ -240,6 +243,8 @@ export function buildInstructions(input: BuildInstructionsInput): string {
 
   parts.push('')
   parts.push(deskmatesToolsGuide(isDesign ? 'design' : 'work', isCliProvider(model.provider)))
+  parts.push('')
+  parts.push(NARRATION_RULES)
 
   // 7. Identity
   parts.push('')

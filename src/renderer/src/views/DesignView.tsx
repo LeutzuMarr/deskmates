@@ -6,6 +6,7 @@ import { Conversation } from '../components/Conversation'
 import { Composer } from '../components/Composer'
 import type { ComposerHandle } from '../components/Composer'
 import { PreviewPane } from '../components/PreviewPane'
+import { currentActivity } from '../lib/steps'
 import { clamp, latestTask, postToIframe } from '../lib/design'
 import type { Selection } from '../lib/design'
 
@@ -192,6 +193,7 @@ export function DesignView({ projectId }: { projectId: string }) {
           projectId={projectId}
           running={running}
           workingSince={running ? ([...timeline].reverse().find((item) => item.kind === 'user')?.at ?? null) : null}
+          activity={running ? currentActivity(timeline) : null}
           selection={selection}
           onSelectionChange={setSelection}
           onClearSelection={clearSelection}

@@ -26,7 +26,8 @@ import {
   Trash2,
   Wrench
 } from 'lucide-react'
-import { extractImageUrl, prettyJSON, summarizeActivity, toolLabel } from '../lib/format'
+import { extractImageUrl, prettyJSON, summarizeActivity } from '../lib/format'
+import { stepLabel } from '../lib/steps'
 import { StatusMark } from './StatusMark'
 import type { ToolItem, ToolItemState } from '../../../shared/protocol'
 
@@ -43,7 +44,8 @@ const TOOL_ICONS: Record<string, LucideIcon> = {
   update_plan: ListChecks,
   remember: Bookmark,
   forget: Trash2,
-  notify_user: Bell
+  notify_user: Bell,
+  narration: MessageCircle
 }
 
 function iconFor(toolName: string): LucideIcon {
@@ -110,7 +112,7 @@ export function ActivityGroup({ items }: { items: ToolItem[] }) {
                   type="button"
                   className="flex w-full items-start gap-2 rounded-lg px-1 py-1.5 text-left font-mono text-[13px] text-ink hover:bg-oat"
                   aria-expanded={isOpen}
-                  aria-label={toolLabel(item.toolName, item.input)}
+                  aria-label={stepLabel(item)}
                   onClick={() => setOpened(isOpen ? null : item.id)}
                 >
                   {item.state === 'running' ? (
@@ -119,7 +121,7 @@ export function ActivityGroup({ items }: { items: ToolItem[] }) {
                     <Icon size={13} className="mt-0.5 shrink-0 text-ink-faint" aria-hidden="true" />
                   )}
                   <span className={`min-w-0 flex-1 break-words ${item.state === 'running' ? 'shimmer-txt' : ''}`}>
-                    {toolLabel(item.toolName, item.input)}
+                    {stepLabel(item)}
                   </span>
                   <span className="shrink-0">
                     <StepMark state={item.state} />
@@ -135,7 +137,7 @@ export function ActivityGroup({ items }: { items: ToolItem[] }) {
                     {imageUrl && (
                       <img
                         src={imageUrl}
-                        alt={`Screenshot from ${toolLabel(item.toolName, item.input)}`}
+                        alt={`Screenshot from ${stepLabel(item)}`}
                         className="mb-2 max-h-[280px] max-w-full rounded-lg border border-rule"
                       />
                     )}

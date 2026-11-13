@@ -27,6 +27,7 @@ import { isStepCount, ToolLoopAgent, type ModelMessage, type TextStreamPart, typ
 import type { Bot, BotRun, ProviderId, RunState, TimelineItem, ToolItem } from '../../shared/protocol'
 import { PROVIDER_LABELS } from '../../shared/protocol'
 import { compactHistory } from '../engine/history'
+import { NARRATION_RULES } from '../engine/narration'
 import { friendlyError, type ModelResolver } from '../engine/runner'
 import type { EventBus } from '../events'
 import type { SkillsService } from '../extensions/skills'
@@ -132,6 +133,8 @@ function buildBotInstructions(
     parts.push('Installed skills (load one with load_skill when your task matches it):')
     parts.push(installed.map((name) => `- ${name}`).join('\n'))
   }
+  parts.push('')
+  parts.push(NARRATION_RULES)
   const botInstructions = bot.instructions.trim()
   if (botInstructions) {
     parts.push('')
