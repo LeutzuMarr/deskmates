@@ -896,7 +896,9 @@ export function createHandlers(services: HandlerServices): Handlers {
     },
     'browser.tool': async (params: { name: string; input: Record<string, unknown>; agent?: string }) => {
       if (!services.browser) throw new Error('The agent browser is not available.')
-      const agent = params.agent === 'Duo' ? 'Duo' : 'Connected agent'
+      // A Work-tab agent names its project ("--as"), so the browser's questions say who is asking.
+      const named = typeof params.agent === 'string' ? params.agent.trim().slice(0, 60) : ''
+      const agent = params.agent === 'Duo' ? 'Duo' : named || 'Connected agent'
       const tools = agentBrowserTools({
         browser: services.browser,
         agent,

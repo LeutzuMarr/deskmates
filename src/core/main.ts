@@ -137,6 +137,8 @@ async function main(): Promise<void> {
   const runner = new TaskRunner({
     repos,
     bus,
+    // Read only when a task runs, by which time the agent kit below exists.
+    agentCommand: () => commandPath,
     models,
     changes,
     skills,

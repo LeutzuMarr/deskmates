@@ -17,6 +17,13 @@ describe('what agents are told about the app tools', () => {
     expect(cli).toContain('numbered list')
     expect(cli).not.toContain('browser_open')
   })
+
+  it("tells command-line agents they are on the user's PC and how to reach the browser from the shell", () => {
+    const cli = deskmatesToolsGuide('work', true, false, { command: 'C:\\kit\\deskmates.cmd', agentName: 'Daily Outreach' })
+    expect(cli).toMatch(/not in a cloud workspace/)
+    expect(cli).toContain('"C:\\kit\\deskmates.cmd" browser open <url> --as "Daily Outreach"')
+    expect(cli).toMatch(/Never give up on a browser task by writing a report file/)
+  })
 })
 
 describe('after a tab prompt', () => {

@@ -84,7 +84,8 @@ export function App() {
           </div>
         </main>
       </div>
-      <BrowserPanel />
+      {/* The Work tab's task view docks the browser beside the chat instead. */}
+      <BrowserPanel docked={view.name === 'task'} />
       <Toast />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
     </div>

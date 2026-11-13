@@ -8,6 +8,7 @@ import { Composer } from '../components/Composer'
 import { Conversation } from '../components/Conversation'
 import { FreebuffStatusLine } from '../components/FreebuffStatusLine'
 import { DiffChip } from '../components/DiffChip'
+import { BrowserSurface, DockBrowserButton } from '../components/BrowserPanel'
 import type { ChangeStats, FileChange, PlanItem } from '../../../shared/protocol'
 
 /** Provider and folder pairs whose agent has already run once since the app opened. */
@@ -20,6 +21,8 @@ export function TaskView({ projectId, taskId }: { projectId: string; taskId: str
   const changes = useStore((s) => s.changes)
   const showToast = useStore((s) => s.showToast)
   const defaultModel = useStore((s) => s.settings?.defaultModel ?? null)
+  const browserOpen = useStore((s) => s.browserOpen)
+  const setBrowserOpen = useStore((s) => s.setBrowserOpen)
   const [panelOpen, setPanelOpen] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [draft, setDraft] = useState('')
@@ -148,6 +151,7 @@ export function TaskView({ projectId, taskId }: { projectId: string; taskId: str
         <div className="flex shrink-0 items-center gap-2">
           {project && model?.provider === 'freebuff' && <FreebuffStatusLine folder={project.folder} modelId={model.modelId} />}
           {stats && <DiffChip stats={stats} />}
+          <DockBrowserButton />
           <button
             type="button"
             aria-expanded={panelOpen}
@@ -178,6 +182,13 @@ export function TaskView({ projectId, taskId }: { projectId: string; taskId: str
             </>
           }
         />
+
+        {/* Deskmates' browser beside the chat: watch the agent work on a site, or sign in for it. */}
+        {browserOpen && (
+          <aside className="flex w-[46%] min-w-[420px] max-w-[900px] shrink-0 flex-col border-l border-rule bg-canvas" aria-label="Agent browser">
+            <BrowserSurface onClose={() => setBrowserOpen(false)} />
+          </aside>
+        )}
 
         {panelOpen && (
           <aside className="w-[300px] shrink-0 border-l border-rule bg-card">

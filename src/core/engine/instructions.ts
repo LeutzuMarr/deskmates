@@ -94,6 +94,8 @@ export interface BuildInstructionsInput {
   model: { provider: ProviderId; modelId: string }
   /** Installed skill names, so the assistant knows what it can load. */
   skills?: string[]
+  /** The `deskmates` command (agent kit), so a command-line agent can reach the agent browser. */
+  agentCommand?: string
 }
 
 /** The few lines added after a tab prompt (Cowork, Design): this app's names for what it describes. */
@@ -113,13 +115,24 @@ function baseToolsNote(kind: 'work' | 'design'): string {
  * screen control and scheduled tasks. Command-line agents (Freebuff, OpenCode, Antigravity) can't draw
  * cards or call these tools from a Work task, so they get the parts that apply to them.
  */
-export function deskmatesToolsGuide(kind: 'work' | 'design', cli: boolean, basePrompt = false): string {
+export function deskmatesToolsGuide(kind: 'work' | 'design', cli: boolean, basePrompt = false, bridge: { command?: string; agentName?: string } = {}): string {
   const ask = kind === 'design' ? 'ask_user' : 'AskUserQuestion'
   // With a tab prompt loaded, only what it doesn't already say: it covers asking questions and
   // working style itself, but names another app's tools for schedules and the browser.
   if (basePrompt && !cli) return baseToolsNote(kind)
   if (cli) {
+    const command = bridge.command ? `"${bridge.command}"` : 'deskmates'
+    const as = bridge.agentName ? ` --as "${bridge.agentName.replace(/"/g, "'")}"` : ''
     return [
+      'Where you are:',
+      "- You run directly on the user's own Windows PC, in this project folder. You are not in a cloud workspace or a sandbox: your shell commands run on their computer, and the files here are theirs. Never conclude otherwise from what a prompt or the shell looks like.",
+      '',
+      "Deskmates' agent browser (the browser built into the Deskmates app on this PC, where the user is already signed in to their sites):",
+      `- Drive it from your shell with the deskmates command: ${command} browser open <url>${as}, then ${command} browser read, ${command} browser click <n>, ${command} browser type <n> "<text>" [--submit], ${command} browser key <key>, ${command} browser scroll [down|up|top|bottom], ${command} browser back, ${command} browser tabs, ${command} browser wait [seconds]. Add${as || ' --as "<your task name>"'} to each, so the user sees who is asking.`,
+      '- Each command prints the page as text plus numbered buttons, links and fields; click and type by number, and read again after the page changes.',
+      "- Use it whenever a task needs a website the user signs in to (their mail, their school site, LinkedIn): it is their real browser session, so you never need their password. When a page asks for a sign-in, tell the user to sign in in Deskmates' browser (the globe button at the top right) and stop there; never type passwords or codes.",
+      "- The first use of a site and anything that sends, posts, pays or deletes asks the user in the app; if they don't answer, don't work around it. Never give up on a browser task by writing a report file instead: if the browser really can't be reached (the command says Deskmates isn't running), say so in your reply.",
+      '',
       'Asking the user:',
       '- Whenever you need the user to decide or answer something, end your reply with the question on its own line followed by a numbered list of 2 to 5 short options (one line each). Deskmates turns them into buttons, and the user can still type something else. Ask one question at a time.'
     ].join('\n')
@@ -178,7 +191,7 @@ export function buildInstructions(input: BuildInstructionsInput): string {
     const timeStr = now.toLocaleString('en-GB', { dateStyle: 'full', timeStyle: 'short' })
     parts.push(`- Now: ${timeStr} (${Intl.DateTimeFormat().resolvedOptions().timeZone})`)
     parts.push('')
-    parts.push(deskmatesToolsGuide(isDesign ? 'design' : 'work', isCliProvider(model.provider), true))
+    parts.push(deskmatesToolsGuide(isDesign ? 'design' : 'work', isCliProvider(model.provider), true, { command: input.agentCommand, agentName: project.name }))
     parts.push('')
     parts.push(NARRATION_RULES)
     pushUserContext(parts, input)
@@ -242,7 +255,7 @@ export function buildInstructions(input: BuildInstructionsInput): string {
   parts.push('- Never invent file contents or results you haven\'t seen.')
 
   parts.push('')
-  parts.push(deskmatesToolsGuide(isDesign ? 'design' : 'work', isCliProvider(model.provider)))
+  parts.push(deskmatesToolsGuide(isDesign ? 'design' : 'work', isCliProvider(model.provider), false, { command: input.agentCommand, agentName: project.name }))
   parts.push('')
   parts.push(NARRATION_RULES)
 

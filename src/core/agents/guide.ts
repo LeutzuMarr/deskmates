@@ -252,6 +252,10 @@ browser_click, browser_type, browser_key, browser_scroll, browser_back,
 browser_tabs, browser_wait): real pages the user can watch and use from the
 globe button at the top right of Deskmates. Pages come back as text plus
 numbered elements; click and type by number, and read again after a change.
+Without MCP, the same browser works from your shell: \`deskmates browser
+open <url>\`, then \`read\`, \`click <n>\`, \`type <n> "<text>" [--submit]\`,
+\`key <key>\`, \`scroll\`, \`back\`, \`tabs\` and \`wait\`. It runs on this PC, in
+the user's own signed-in session.
 
 - Sign-ins are the user's. Password, code, card and ID fields are refused:
   ask the user to sign in in the browser panel, then continue.

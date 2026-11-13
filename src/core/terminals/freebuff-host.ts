@@ -29,7 +29,10 @@ export function highlightedModel(screen: string): string | null {
 /** The session facts Freebuff prints: its status bar ("Solar Pro 4 · ~\folder · /model to change"),
  *  the time left ("34m left · 35K (7%)") and the banner's "12/12 hours remaining". */
 export function readStatus(screen: string): Omit<FreebuffStatus, 'updatedAt'> {
-  const model = /^\s*(.+?) · .*\/model to change/m.exec(screen)?.[1]?.trim() ?? null
+  // The model is the segment just before the folder and "/model to change". Anything further left on
+  // that line is Freebuff's keyboard hint ("↻ ← for history · ? for help"), not the model.
+  const segment = /([^·\n]+?)\s*·\s*[^·\n]*·\s*\/model to change/.exec(screen)?.[1]?.trim() ?? ''
+  const model = segment && !/for (history|help)|[←→↑↓↻⟳]/.test(segment) ? segment : null
   // "34m left", "1h 5m left" or "1h left".
   const time = /(?:(\d+)h\s*)?(?:(\d+)m)?\s*left ·/.exec(screen)
   const hours = /(\d+)\/(\d+) hours remaining/.exec(screen)

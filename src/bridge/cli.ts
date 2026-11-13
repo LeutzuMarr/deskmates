@@ -32,6 +32,16 @@ Commands:
   pc exec <pc> -- <command>              run a command on a bot PC
   pc open <pc> <url>                     open a page on a bot PC
   pc screenshot <pc> <out.png>           screenshot a bot PC
+  browser open <url> [--new-tab]         open a page in Deskmates' agent browser
+  browser read                           read the current page (text + numbered elements)
+  browser click <n>                      click element number n
+  browser type <n> <text> [--submit]     type into field n (passwords and codes are refused)
+  browser key <key>                      press a key (Enter, Tab, Ctrl+A…)
+  browser scroll [down|up|top|bottom]    scroll and read what is in view
+  browser back                           go back a page
+  browser tabs [list|switch|close] [id]  list, switch or close tabs
+  browser wait [seconds]                 wait for a slow page, then read it
+                                         (--as "<name>" names who is asking in the app)
   mcp                                    run the MCP server on stdio
   help                                   show this help
 
@@ -92,6 +102,7 @@ export async function main(argv: string[], deps: CliDeps): Promise<number> {
     if (command === 'guide') return cmdGuide(dataDir, deps)
     if (command === 'design') return await cmdDesign(deps, parsed, sub, rest)
     if (command === 'pc') return await cmdPc(deps, parsed, sub, rest)
+    if (command === 'browser') return await cmdBrowser(deps, parsed, sub, rest)
     if (command === 'mcp') return await cmdMcp(deps, dataDir)
     deps.error(`Unknown command: ${command}. Run deskmates help for the list.`)
     return EXIT_USAGE
@@ -189,6 +200,106 @@ async function cmdPc(deps: CliDeps, parsed: ParsedArgs, sub: string | undefined,
       }
       await pcScreenshot(call, pc, out)
     }
+    return EXIT_OK
+  })
+}
+
+/**
+ * browser open | read | click | type | key | scroll | back | tabs | wait: Deskmates' agent browser
+ * from any agent's shell, under the same rules the app's own agents follow (asking before using a
+ * site, asking before anything that sends, never typing passwords). This is how a command-line agent
+ * in the Work tab reaches the browser without an MCP setup in the user's project folder.
+ */
+async function cmdBrowser(deps: CliDeps, parsed: ParsedArgs, sub: string | undefined, rest: string[]): Promise<number> {
+  const args = [...rest]
+  const pull = (flag: string): string | undefined => {
+    const index = args.indexOf(flag)
+    if (index === -1) return undefined
+    const value = args[index + 1]
+    args.splice(index, 2)
+    return value
+  }
+  const has = (flag: string): boolean => {
+    const index = args.indexOf(flag)
+    if (index === -1) return false
+    args.splice(index, 1)
+    return true
+  }
+  const agent = pull('--as')
+  const number = (value: string | undefined): number | null => {
+    const n = Number(value)
+    return Number.isInteger(n) && n > 0 ? n : null
+  }
+
+  let name: string
+  let input: Record<string, unknown> = {}
+  switch (sub) {
+    case 'open': {
+      const newTab = has('--new-tab')
+      const url = args[0]
+      if (!url) {
+        deps.error('browser open needs a url.')
+        return EXIT_USAGE
+      }
+      name = 'browser_open'
+      input = { url, ...(newTab ? { new_tab: true } : {}) }
+      break
+    }
+    case 'read':
+      name = 'browser_read'
+      break
+    case 'click': {
+      const element = number(args[0])
+      if (!element) {
+        deps.error('browser click needs an element number (from browser read).')
+        return EXIT_USAGE
+      }
+      name = 'browser_click'
+      input = { element }
+      break
+    }
+    case 'type': {
+      const submit = has('--submit')
+      const element = number(args[0])
+      const text = args.slice(1).join(' ')
+      if (!element || !text) {
+        deps.error('browser type needs an element number and the text: browser type <n> <text> [--submit].')
+        return EXIT_USAGE
+      }
+      name = 'browser_type'
+      input = { element, text, ...(submit ? { submit: true } : {}) }
+      break
+    }
+    case 'key':
+      if (!args[0]) {
+        deps.error('browser key needs a key, such as Enter or Ctrl+A.')
+        return EXIT_USAGE
+      }
+      name = 'browser_key'
+      input = { key: args.join(' ') }
+      break
+    case 'scroll':
+      name = 'browser_scroll'
+      if (args[0]) input = { direction: args[0] }
+      break
+    case 'back':
+      name = 'browser_back'
+      break
+    case 'tabs':
+      name = 'browser_tabs'
+      input = { ...(args[0] ? { action: args[0] } : {}), ...(args[1] ? { tab_id: args[1] } : {}) }
+      break
+    case 'wait':
+      name = 'browser_wait'
+      if (args[0]) input = { seconds: Number(args[0]) }
+      break
+    default:
+      deps.error('Missing or unknown browser subcommand. Run deskmates help.')
+      return EXIT_USAGE
+  }
+  return await withClient(deps, parsed, async (call) => {
+    const result = await call('browser.tool', { name, input, ...(agent ? { agent } : {}) })
+    emitText(deps, parsed.json, result, result.text)
     return EXIT_OK
   })
 }

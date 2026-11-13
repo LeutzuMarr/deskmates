@@ -82,13 +82,55 @@ function AskCard({ ask }: { ask: SiteAsk }): ReactNode {
 }
 
 /**
- * The browser panel: the agent browser's live page, shown in the window by the app (a real page the
- * user can click and type in, for signing in). This component draws the toolbar and reserves the
- * area; the page itself is placed over `pageRef` by the main process.
+ * The floating browser panel, over the right of the window. Not drawn where a view docks the browser
+ * itself (the Work tab's task view), so only one place ever holds the page.
  */
-export function BrowserPanel(): ReactNode {
+export function BrowserPanel({ docked = false }: { docked?: boolean }): ReactNode {
   const open = useStore((s) => s.browserOpen)
   const setOpen = useStore((s) => s.setBrowserOpen)
+
+  // Escape closes the panel.
+  useEffect(() => {
+    if (!open || docked) return
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, docked, setOpen])
+
+  if (!open || docked) return null
+  return (
+    <div className="fixed bottom-0 right-0 top-10 z-40 flex w-[58vw] min-w-[560px] max-w-full flex-col border-l border-rule bg-canvas shadow-2xl" role="dialog" aria-label="Agent browser">
+      <BrowserSurface onClose={() => setOpen(false)} />
+    </div>
+  )
+}
+
+/** The Work tab's browser button: always there, so the browser can be opened before any agent uses it. */
+export function DockBrowserButton(): ReactNode {
+  const open = useStore((s) => s.browserOpen)
+  const setOpen = useStore((s) => s.setBrowserOpen)
+  const browser = useStore((s) => s.browser)
+  const waiting = (browser?.asks.length ?? 0) > 0
+  return (
+    <button type="button" aria-pressed={open} className="btn btn-outline relative" onClick={() => setOpen(!open)} title={open ? 'Hide the browser' : "Show Deskmates' browser beside the chat"}>
+      <Globe size={14} aria-hidden="true" className="mr-1.5" />
+      Browser
+      {(browser?.busy || waiting) && (
+        <span aria-hidden="true" className={`absolute right-1 top-1 h-2 w-2 rounded-full ${waiting ? 'bg-clay' : 'bg-olive'} ${browser?.busy && !waiting ? 'animate-pulse' : ''}`} />
+      )}
+    </button>
+  )
+}
+
+/**
+ * The agent browser's live page, shown in the window by the app (a real page the user can click and
+ * type in, for signing in). This draws the toolbar and reserves the area; the page itself is placed
+ * over `pageRef` by the main process, for as long as this is mounted.
+ */
+export function BrowserSurface({ onClose }: { onClose: () => void }): ReactNode {
+  const open = true
   const browser = useStore((s) => s.browser)
   const pageRef = useRef<HTMLDivElement>(null)
   const active = browser?.tabs.find((t) => t.active)
@@ -98,16 +140,6 @@ export function BrowserPanel(): ReactNode {
   useEffect(() => {
     if (!editing) setAddress(active?.url ?? '')
   }, [active?.url, editing])
-
-  // Escape closes the panel.
-  useEffect(() => {
-    if (!open) return
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setOpen(false)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open, setOpen])
 
   // Tell the app where the page goes; null hides it again (and hands the browser back to the agent).
   const hasPage = Boolean(active) && api.browser !== undefined
@@ -132,7 +164,6 @@ export function BrowserPanel(): ReactNode {
     }
   }, [open, hasPage, browser?.asks.length])
 
-  if (!open) return null
   const userDriving = browser?.controller === 'user'
 
   const go = (event: FormEvent): void => {
@@ -142,7 +173,7 @@ export function BrowserPanel(): ReactNode {
   }
 
   return (
-    <div className="fixed bottom-0 right-0 top-10 z-40 flex w-[58vw] min-w-[560px] max-w-full flex-col border-l border-rule bg-canvas shadow-2xl" role="dialog" aria-label="Agent browser">
+    <>
       <div className="flex items-center gap-1 border-b border-rule px-2 py-1.5">
         <button type="button" className="btn-icon" aria-label="Back" disabled={!api.browser} onClick={() => void api.browser?.navigate('back')}>
           <ArrowLeft size={15} />
@@ -165,7 +196,7 @@ export function BrowserPanel(): ReactNode {
             onChange={(e) => setAddress(e.target.value)}
           />
         </form>
-        <button type="button" className="btn-icon" aria-label="Close the browser panel" onClick={() => setOpen(false)}>
+        <button type="button" className="btn-icon" aria-label="Close the browser panel" onClick={onClose}>
           <X size={16} />
         </button>
       </div>
@@ -212,6 +243,6 @@ export function BrowserPanel(): ReactNode {
           </div>
         )}
       </div>
-    </div>
+    </>
   )
 }

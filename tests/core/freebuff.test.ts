@@ -114,6 +114,9 @@ describe('Freebuff screen reading', () => {
       hoursPerDay: 12,
       context: '35K (7%)'
     })
+    // Freebuff's keyboard hint on the same line isn't the model.
+    expect(readStatus(' ↻ ← for history · ? for help · Solar Pro 4 · ~\\Desktop\\outreach · /model to change').model).toBe('Solar Pro 4')
+    expect(readStatus(' ↻ ← for history · ? for help · /model to change').model).toBeNull()
     expect(readStatus('1h 5m left · 2K (1%)').sessionMinutesLeft).toBe(65)
     expect(readStatus(' 1h left · 2K (1%)').sessionMinutesLeft).toBe(60)
     expect(readStatus('nothing here')).toEqual({ model: null, sessionMinutesLeft: null, hoursLeftToday: null, hoursPerDay: null, context: null })

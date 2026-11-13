@@ -53,6 +53,9 @@ export interface RunnerDeps {
   screen?: ToolContext['screen']
   /** Scheduled tasks; absent in tests. A getter, since the scheduler is built after the runner. */
   getSchedules?: () => ToolContext['schedules']
+  /** The `deskmates` command, for command-line agents to reach the agent browser from their shell.
+   *  A getter, since the agent kit is written after the runner is built. */
+  agentCommand?: () => string | undefined
   /** The name a run acts under in browser questions (a scheduled task's name), when it isn't the tab's. */
   agentNameFor?: (taskId: string) => string | undefined
   now?: () => Date
@@ -362,6 +365,7 @@ export class TaskRunner {
         projectInstructions: readProjectInstructions(project.folder),
         now: getNow(),
         model: { provider, modelId },
+        agentCommand: deps.agentCommand?.(),
         ...(deps.skills
           ? { skills: deps.skills.catalog() }
           : {})
