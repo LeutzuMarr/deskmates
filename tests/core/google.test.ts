@@ -15,7 +15,7 @@ afterEach(() => {
 /** A stand-in for Google's token and userinfo endpoints. */
 function fakeGoogle() {
   const calls: Array<{ url: string; body: string }> = []
-  const impl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  const impl = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input)
     const body = init?.body ? String(init.body) : ''
     calls.push({ url, body })
