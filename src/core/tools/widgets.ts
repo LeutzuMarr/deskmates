@@ -6,7 +6,7 @@
  * which reports its height so the frame fits it.
  */
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 export const WIDGET_URL_PREFIX = 'deskmates-preview://widget/'
@@ -39,7 +39,7 @@ const safeUrl = (value: unknown): string => {
 const BASE_CSS = `
 :root{--bg:transparent;--card:#fffdf8;--ink:#1f1d1a;--muted:#6b665e;--faint:#9a958c;--rule:#e6e0d4;--accent:#c96442;--accent-soft:#f4e3da;--good:#2f7d4f;--bad:#b3412f;color-scheme:light dark}
 @media (prefers-color-scheme:dark){:root{--card:#262421;--ink:#f1ede4;--muted:#b4ada1;--faint:#8a8378;--rule:#3a3631;--accent:#e08a68;--accent-soft:#3b2a22;--good:#6cc290;--bad:#ec8b78}}
-*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,"Segoe UI",system-ui,sans-serif}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,"Segoe UI",system-ui,sans-serif;overflow:hidden}
 body{padding:2px}
 h1{font-size:17px;margin:0 0 4px}h2{font-size:15px;margin:14px 0 6px}h3{font-size:14px;margin:0 0 2px}
 p{margin:4px 0}.muted{color:var(--muted)}.faint{color:var(--faint);font-size:12px}
@@ -57,7 +57,7 @@ ol,ul{margin:4px 0;padding-left:20px}
 `
 
 /** Reports the page height to the chat, so the frame grows and shrinks with the widget. */
-const HEIGHT_SCRIPT = `<script>(function(){var id=location.pathname.split('/').pop();function send(){parent.postMessage({type:'deskmates-widget-height',id:id,height:Math.ceil(document.documentElement.getBoundingClientRect().height)},'*')}new ResizeObserver(send).observe(document.documentElement);addEventListener('load',send);send()})();</script>`
+const HEIGHT_SCRIPT = `<script>(function(){var id=location.pathname.split('/').pop();function send(){var d=document.documentElement;parent.postMessage({type:'deskmates-widget-height',id:id,height:Math.ceil(Math.max(d.scrollHeight,d.getBoundingClientRect().height,document.body?document.body.scrollHeight:0))+2},'*')}new ResizeObserver(send).observe(document.documentElement);addEventListener('load',send);send()})();</script>`
 
 /** A whole page around a widget body. */
 export function widgetPage(title: string, body: string, extraHead = ''): string {
@@ -310,4 +310,21 @@ export function imageGallery(query: string, images: Array<{ title: string; url: 
   return `<p class="faint">Images for “${esc(query)}”</p><div class="grid">${images
     .map((img) => `<div class="card"><a href="${esc(img.source || img.url)}" target="_blank" rel="noopener"><img class="thumb" src="${esc(img.thumbnail || img.url)}" alt="${esc(img.title)}"></a><p class="faint">${esc(img.title)}${img.license ? ` · ${esc(img.license)}` : ''}</p></div>`)
     .join('')}</div>`
+}
+
+/** Deletes the widget pages a chat's stored messages point to, when that chat is deleted. */
+export function removeWidgetsOf(dataDir: string, messages: unknown): number {
+  const text = JSON.stringify(messages ?? '')
+  const ids = new Set(text.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.html/gi) ?? [])
+  let removed = 0
+  for (const id of ids) {
+    if (!text.includes(`${WIDGET_URL_PREFIX}${id}`)) continue
+    try {
+      rmSync(join(dataDir, 'widgets', id), { force: true })
+      removed++
+    } catch {
+      // Already gone, or locked: nothing to do.
+    }
+  }
+  return removed
 }

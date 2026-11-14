@@ -160,8 +160,10 @@ export class ActivitySteps {
       if (!text) continue
       let match = -1
       for (let i = from; i < this.shown.length; i++) {
-        const seen = this.shown[i]!.text
-        if (text === seen || text.startsWith(seen) || seen.startsWith(text)) {
+        const step = this.shown[i]!
+        // Only the step being written can still grow; finished steps match exactly. (A prefix match
+        // on any step would fold a new "$ npm test -- --watch" into an earlier "$ npm test".)
+        if (text === step.text || (step === this.current && text.startsWith(step.text))) {
           match = i
           break
         }

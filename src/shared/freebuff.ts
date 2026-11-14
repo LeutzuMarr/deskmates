@@ -96,10 +96,14 @@ export function parsePickerCards(screen: string): FreebuffModel[] {
   const rows = screen.split('\n').map((line) => line.replace(/^\s*│|│\s*$/g, '').trim())
   const lines = screen.split('\n')
   const cards: FreebuffModel[] = []
-  for (let i = 0; i < lines.length; i++) {
+  // Only the boxes under the picker's own key-help line are model cards: Freebuff's input box and
+  // ad cards are boxes too, and must not be read as models.
+  const start = lines.findIndex((line) => /choose model/.test(line))
+  for (let i = Math.max(0, start); i < lines.length; i++) {
     if (!/^\s*[┌╭]/.test(lines[i]!)) continue
     const first = rows[i + 1]
     if (!first || !lines[i + 1]!.includes('│')) continue
+    if (/^▍|for commands|Enter a coding task/i.test(first)) break
     const segments = first.replace(/^›\s*/, '').split(/\s+·\s+/).map((part) => part.trim()).filter(Boolean)
     const name = segments[0]
     if (!name) continue

@@ -787,7 +787,10 @@ select {
   top: 0;
   bottom: 0;
   width: 50%;
-  background: var(--ink);
+  background: var(--clay);
+}
+.plan-mark-active {
+  border-color: var(--clay);
 }
 .plan-done {
   background: var(--olive);

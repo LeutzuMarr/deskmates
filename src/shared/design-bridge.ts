@@ -133,4 +133,6 @@ export type AppToEditor =
   | { source: typeof APP_SOURCE; type: 'setText'; id: string; text: string }
   | { source: typeof APP_SOURCE; type: 'command'; name: EditorCommand }
   | { source: typeof APP_SOURCE; type: 'setEditing'; editing: boolean }
+  /** The scale the app shows the page at, so the editor keeps its handles and labels readable. */
+  | { source: typeof APP_SOURCE; type: 'setZoom'; zoom: number }
   | { source: typeof APP_SOURCE; type: 'loadFont'; family: string; href: string }

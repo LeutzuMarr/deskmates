@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto'
-import { mkdirSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, existsSync, readFileSync, renameSync, rmSync, watchFile, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { CoreToHost, HostToCore, Settings } from '../shared/protocol'
@@ -215,11 +215,23 @@ async function main(): Promise<void> {
   // section in full plus an index of the rest (with line numbers in the real file), written next to
   // the agent kit, so they never have to read the whole 470 KB file.
   const promptRoot = process.env.DESKMATES_PROMPTS_DIR ?? join(process.cwd(), 'prompts')
-  const terminalBrief = myPromptBrief('file', myPromptPath(promptRoot))
   const codePromptPath = join(kitDir, 'operating-prompt.md')
-  mkdirSync(kitDir, { recursive: true })
-  if (terminalBrief) writeFileSync(codePromptPath, `${terminalBrief}\n`, 'utf8')
-  else rmSync(codePromptPath, { force: true })
+  const writeTerminalBrief = (): string | null => {
+    const brief = myPromptBrief('file', myPromptPath(promptRoot))
+    mkdirSync(kitDir, { recursive: true })
+    if (brief) writeFileSync(codePromptPath, `${brief}\n`, 'utf8')
+    else rmSync(codePromptPath, { force: true })
+    return brief
+  }
+  const terminalBrief = writeTerminalBrief()
+  // Keep it current when the user edits their prompt while Deskmates runs, as the Work tab does.
+  watchFile(myPromptPath(promptRoot), { interval: 5000, persistent: false }, () => {
+    try {
+      writeTerminalBrief()
+    } catch (error) {
+      console.error("[core] couldn't refresh the terminal agents' prompt", error)
+    }
+  })
   const guide = writeAgentGuide({
     dataDir,
     commandPath,

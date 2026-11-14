@@ -95,6 +95,21 @@ export function Conversation({ taskId, mode = 'task', timeline, running, emptyHi
     if (el && nearBottomRef.current) el.scrollTop = el.scrollHeight
   }, [dockHeight])
 
+  // Content can also grow after it is shown (a widget sizing itself, an image loading, a step
+  // group opening): stay pinned to the bottom then too, so the latest message isn't left under
+  // the dock.
+  const contentRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const content = contentRef.current
+    const el = scrollRef.current
+    if (!content || !el) return
+    const observer = new ResizeObserver(() => {
+      if (nearBottomRef.current) el.scrollTop = el.scrollHeight
+    })
+    observer.observe(content)
+    return () => observer.disconnect()
+  }, [])
+
   const nearBottomRef = useRef(true)
   const [showJump, setShowJump] = useState(false)
   // For a run that started without a prompt in this timeline (e.g. a scheduled bot run).
@@ -238,6 +253,7 @@ export function Conversation({ taskId, mode = 'task', timeline, running, emptyHi
         }}
       >
         <div
+          ref={contentRef}
           className={`mx-auto flex w-full flex-col gap-4 ${contentClassName ?? 'max-w-[720px] px-8 py-6'} ${running && pill ? 'pt-14' : ''}`}
           style={dockHeight > 0 ? { paddingBottom: dockHeight + 8 } : undefined}
         >

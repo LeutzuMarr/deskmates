@@ -196,12 +196,12 @@ function hasEditableText(el) {
 
 const OVERLAY_HTML = `<style>
   .dm-hover, .dm-select, .dm-chip, .dm-readout, .dm-handle, .dm-guide-v, .dm-guide-h { display: none; position: absolute; pointer-events: none; }
-  .dm-hover { border: 1px solid rgba(217,119,87,0.55); }
-  .dm-select { border: 2px solid #d97757; }
-  .dm-handle { width: 8px; height: 8px; background: #ffffff; border: 1.5px solid #d97757; border-radius: 50%; pointer-events: auto; }
-  .dm-chip, .dm-readout { font: 11px/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif; color: #ffffff; background: #d97757; border-radius: 6px; padding: 2px 6px; white-space: nowrap; }
-  .dm-guide-v { width: 0; border-left: 1px dashed #d97757; }
-  .dm-guide-h { height: 0; border-top: 1px dashed #d97757; }
+  .dm-hover { border: calc(1px * var(--dm-k, 1)) solid rgba(217,119,87,0.55); }
+  .dm-select { border: calc(2px * var(--dm-k, 1)) solid #d97757; }
+  .dm-handle { width: calc(8px * var(--dm-k, 1)); height: calc(8px * var(--dm-k, 1)); background: #ffffff; border: calc(1.5px * var(--dm-k, 1)) solid #d97757; border-radius: 50%; pointer-events: auto; box-sizing: border-box; }
+  .dm-chip, .dm-readout { font: calc(11px * var(--dm-k, 1))/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif; color: #ffffff; background: #d97757; border-radius: calc(6px * var(--dm-k, 1)); padding: calc(2px * var(--dm-k, 1)) calc(6px * var(--dm-k, 1)); white-space: nowrap; }
+  .dm-guide-v { width: 0; border-left: calc(1px * var(--dm-k, 1)) dashed #d97757; }
+  .dm-guide-h { height: 0; border-top: calc(1px * var(--dm-k, 1)) dashed #d97757; }
 </style>
 <div class="dm-hover"></div>
 <div class="dm-select"></div>
@@ -269,6 +269,9 @@ export function installEditor(win) {
     undo: /** @type {UndoEntry[]} */ ([]),
     redo: /** @type {UndoEntry[]} */ ([]),
     lastHoverId: /** @type {string | null} */ (null),
+    /** How much the editor's own handles, outline and label are enlarged so they stay the same
+     * size on screen when the app shows the page zoomed out (1 / zoom, at most 4). */
+    uiScale: 1,
     changeTimer: 0,
     frameId: 0,
     destroyed: false
@@ -434,7 +437,7 @@ export function installEditor(win) {
   /** @param {string} dir
  * @param {DOMRect} r */
   function handlePosition(dir, r) {
-    const h = HANDLE_SIZE / 2
+    const h = (HANDLE_SIZE * state.uiScale) / 2
     const cx = r.left + r.width / 2 - h
     const cy = r.top + r.height / 2 - h
     const map = {
@@ -451,6 +454,17 @@ export function installEditor(win) {
     return { x: pos[0], y: pos[1] }
   }
 
+  /** Whether a handle fits on an element of this size: the middle handles of a short or narrow
+   * element would cover its centre, so a press meant to move it would resize it instead. */
+  /** @param {string} dir
+   * @param {DOMRect} r */
+  function handleFits(dir, r) {
+    const room = HANDLE_SIZE * state.uiScale * 3
+    if ((dir === 'n' || dir === 's') && r.height < room) return false
+    if ((dir === 'e' || dir === 'w') && r.width < room) return false
+    return true
+  }
+
   function draw() {
     if (!state.editing) return
     const s = state.selection
@@ -464,7 +478,7 @@ export function installEditor(win) {
       if (!s) {
         for (const dir of HANDLE_DIRS) {
           const pos = handlePosition(dir, hr)
-          ui.handles[dir].style.display = 'block'
+          ui.handles[dir].style.display = handleFits(dir, hr) ? 'block' : 'none'
           ui.handles[dir].style.left = `${pos.x}px`
           ui.handles[dir].style.top = `${pos.y}px`
         }
@@ -481,10 +495,10 @@ export function installEditor(win) {
       ui.chip.textContent = `${elTag(s)} · ${w} × ${h}`
       ui.chip.style.display = 'block'
       ui.chip.style.left = `${Math.round(r.left)}px`
-      ui.chip.style.top = `${Math.max(0, Math.round(r.top) - 24)}px`
+      ui.chip.style.top = `${Math.max(0, Math.round(r.top - 24 * state.uiScale))}px`
       for (const dir of HANDLE_DIRS) {
         const pos = handlePosition(dir, r)
-        ui.handles[dir].style.display = 'block'
+        ui.handles[dir].style.display = handleFits(dir, r) ? 'block' : 'none'
         ui.handles[dir].style.left = `${pos.x}px`
         ui.handles[dir].style.top = `${pos.y}px`
       }
@@ -553,9 +567,23 @@ export function installEditor(win) {
     requestUI()
   }
 
+  /** Puts keyboard focus in the page. A press on an element is preventDefault-ed (so a drag doesn't
+   * select text), which also stops the browser moving focus into this frame: without this, the
+   * arrow keys, Delete, Ctrl+Z and Enter would keep going to whatever had focus in the app. */
+  function takeFocus() {
+    try {
+      if (!doc.hasFocus()) win.focus()
+      const active = /** @type {HTMLElement | null} */ (doc.activeElement)
+      if (active && active !== doc.body && active !== state.textEl && typeof active.blur === 'function') active.blur()
+    } catch {
+      // Focus is best effort.
+    }
+  }
+
   /** @param {PointerEvent} e */
   function onPointerDown(e) {
     if (!state.editing) return
+    takeFocus()
     const dir = handleDirAt(e)
     if (dir) {
       e.preventDefault()
@@ -1203,7 +1231,7 @@ export function installEditor(win) {
       commitUndo(snapshotOf('style', el))
     }
     applyStyle(el, /** @type {ElementStyle} */ (style))
-    selectElement(el)
+    refreshIfSelected(el)
     scheduleChange('style')
   }
 
@@ -1213,10 +1241,21 @@ export function installEditor(win) {
     if (typeof id !== 'string' || typeof text !== 'string') return
     const el = byId(id)
     if (!el || !hasEditableText(el)) return
+    // Leaving the panel's Text field without a change is not an edit: no undo step, no save.
+    if (el.textContent === text) return
     commitUndo(snapshotOf('text', el))
     el.textContent = text
     postChange('text')
-    selectElement(el)
+    refreshIfSelected(el)
+  }
+
+  /** After the panel changes an element: redraw, and re-post its state if it is still selected.
+   * It may no longer be: the panel's field commits on blur, which can arrive just after the user
+   * clicked a different element, and that new selection must stand. */
+  /** @param {Element} el */
+  function refreshIfSelected(el) {
+    if (state.selection === el) selectElement(el)
+    else requestUI()
   }
 
   /** @param {Extract<AppToEditor, { type: 'command' }>} data */
@@ -1247,6 +1286,17 @@ export function installEditor(win) {
   }
 
   /** @param {Extract<AppToEditor, { type: 'setEditing' }>} data */
+  /** The app shows the page at `zoom` (e.g. 0.31 when fitted): keep the editor's own UI readable. */
+  /** @param {any} data */
+  function handleSetZoom(data) {
+    const zoom = Number(data.zoom)
+    if (!Number.isFinite(zoom) || zoom <= 0) return
+    state.uiScale = Math.min(4, Math.max(1, 1 / zoom))
+    ui.overlay.style.setProperty('--dm-k', String(state.uiScale))
+    requestUI()
+  }
+
+  /** @param {any} data */
   function handleSetEditing(data) {
     if (typeof data.editing !== 'boolean') return
     if (data.editing) {
@@ -1303,6 +1353,9 @@ export function installEditor(win) {
         break
       case 'setEditing':
         handleSetEditing(data)
+        break
+      case 'setZoom':
+        handleSetZoom(data)
         break
       case 'loadFont':
         handleLoadFont(data)

@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, readdir, rm, stat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { runInNewContext } from 'node:vm'
 import { tool, type ToolSet } from 'ai'
 import { z } from 'zod'
@@ -17,8 +17,28 @@ const MAX_GITHUB_FILES = 150
 const MAX_GITHUB_FILE_BYTES = 512 * 1024
 const RUN_SCRIPT_TIMEOUT_MS = 60_000
 
-const NO_LOCAL_FOLDER =
-  "No local folder is mounted in Deskmates. Ask the user to put the files into this design's folder (they can open it from the design's menu), then use read_file/list_files."
+const LOCAL_IGNORED = new Set(['node_modules', 'dist', 'build', 'out', '.next', '__pycache__', 'venv', '.venv', 'coverage'])
+const LOCAL_LIST_CAP = 500
+const LOCAL_MAX_BYTES = 20 * 1024 * 1024
+
+/** A full path on the user's PC for the local_* tools; they only read, so any existing path is fine. */
+function localPath(path: string): string {
+  const raw = String(path ?? '').trim().replace(/^["']|["']$/g, '')
+  if (!isAbsolute(raw)) {
+    throw new Error(`"${path}" isn't a full path. Ask the user for the folder's full path on this PC (e.g. C:\Users\Me\my-app), then pass it.`)
+  }
+  const abs = resolve(raw)
+  if (!existsSync(abs)) throw new Error(`Nothing at ${abs}.`)
+  return abs
+}
+
+function safeRegex(pattern: string): RegExp {
+  try {
+    return new RegExp(pattern, 'i')
+  } catch {
+    throw new Error(`"${pattern}" isn't a valid regular expression.`)
+  }
+}
 const NO_FIG_FILE =
   'No .fig file is mounted in Deskmates, and Figma files can\'t be read here. Ask the user to export what you need (SVG, PNG or copied text) into the design folder.'
 
@@ -417,31 +437,90 @@ export function designTools(ctx: ToolContext, listTools: () => ToolListing[] = (
     }),
 
     local_ls: tool({
-      description: 'List a mounted local folder. Deskmates has no mounted folders; the files must be in the design folder.',
+      description:
+        "List a folder on the user's PC, outside the design (a project they point you to, e.g. \"C:\Users\Me\my-app\src\"). Pass the folder's full path. Read-only.",
       inputSchema: z.object({ path: z.string(), depth: z.number().optional(), filter: z.string().optional(), offset: z.number().optional(), ignore_common_ignored_dirs: z.boolean().optional() }),
-      execute: async (): Promise<string> => {
-        throw new Error(NO_LOCAL_FOLDER)
+      execute: async ({ path, depth = 1, filter, offset = 0, ignore_common_ignored_dirs = true }) => {
+        const root = localPath(path)
+        const pattern = filter ? safeRegex(filter) : null
+        const entries: string[] = []
+        const walk = async (dir: string, level: number): Promise<void> => {
+          for (const item of (await readdir(dir, { withFileTypes: true })).sort((x, y) => x.name.localeCompare(y.name))) {
+            if (ignore_common_ignored_dirs && item.isDirectory() && (item.name.startsWith('.') || LOCAL_IGNORED.has(item.name))) continue
+            const abs = join(dir, item.name)
+            const shown = relative(root, abs).split(sep).join('/') + (item.isDirectory() ? '/' : '')
+            if (!pattern || pattern.test(shown)) entries.push(shown)
+            if (entries.length >= offset + LOCAL_LIST_CAP) return
+            if (item.isDirectory() && level < Math.min(depth, 6)) await walk(abs, level + 1)
+          }
+        }
+        await walk(root, 1)
+        const page = entries.slice(offset, offset + LOCAL_LIST_CAP)
+        return page.length ? `${root}\n${page.join('\n')}${entries.length > offset + page.length ? `\n[more: offset ${offset + page.length}]` : ''}` : `${root} is empty (or nothing matches).`
       }
     }),
     local_read: tool({
-      description: 'Read from a mounted local folder. Deskmates has no mounted folders; the files must be in the design folder.',
+      description: "Read a text file on the user's PC, outside the design. Pass the file's full path. Read-only.",
       inputSchema: z.object({ path: z.string(), offset: z.number().optional(), limit: z.number().optional() }),
-      execute: async (): Promise<string> => {
-        throw new Error(NO_LOCAL_FOLDER)
+      execute: async ({ path, offset = 0, limit = 1000 }) => {
+        const abs = localPath(path)
+        const buffer = await readFile(abs)
+        if (buffer.length > LOCAL_MAX_BYTES) throw new Error(`${abs} is larger than ${LOCAL_MAX_BYTES / 1024 / 1024} MB.`)
+        if (buffer.subarray(0, 8000).includes(0)) return `${abs} is a binary file. Copy it into the design with local_copy_to_project to use it.`
+        const lines = buffer.toString('utf8').split(/\r?\n/)
+        const slice = lines.slice(offset, offset + limit)
+        return slice.map((line, i) => `${offset + i + 1}\t${line}`).join('\n') + (offset + limit < lines.length ? `\n[${lines.length - offset - limit} more lines; use offset]` : '')
       }
     }),
     local_grep: tool({
-      description: 'Search a mounted local folder. Deskmates has no mounted folders; the files must be in the design folder.',
+      description: "Search text files in a folder on the user's PC, outside the design, for a regular expression (case-insensitive). Pass the folder's full path, or full file paths in paths. Read-only.",
       inputSchema: z.object({ pattern: z.string(), path: z.string().optional(), paths: z.array(z.string()).optional(), filter: z.string().optional(), offset: z.number().optional() }),
-      execute: async (): Promise<string> => {
-        throw new Error(NO_LOCAL_FOLDER)
+      execute: async ({ pattern, path, paths, filter, offset = 0 }) => {
+        const regex = safeRegex(pattern)
+        const pathFilter = filter ? safeRegex(filter) : null
+        const files: string[] = []
+        if (paths?.length) files.push(...paths.map(localPath))
+        else {
+          if (!path) throw new Error('Give path (a folder) or paths (files).')
+          const walk = async (dir: string): Promise<void> => {
+            for (const item of await readdir(dir, { withFileTypes: true })) {
+              if (files.length >= 500) return
+              const abs = join(dir, item.name)
+              if (item.isDirectory()) {
+                if (!item.name.startsWith('.') && !LOCAL_IGNORED.has(item.name)) await walk(abs)
+              } else if (!pathFilter || pathFilter.test(abs.split(sep).join('/'))) files.push(abs)
+            }
+          }
+          await walk(localPath(path))
+        }
+        const hits: string[] = []
+        for (const file of files) {
+          const info = await stat(file).catch(() => null)
+          if (!info?.isFile() || info.size > 1024 * 1024) continue
+          const buffer = await readFile(file)
+          if (buffer.subarray(0, 8000).includes(0)) continue
+          buffer.toString('utf8').split(/\r?\n/).forEach((line, i) => {
+            if (regex.test(line)) hits.push(`${file}:${i + 1}: ${line.trim().slice(0, 300)}`)
+          })
+        }
+        const page = hits.slice(offset, offset + 200)
+        return page.length ? page.join('\n') + (hits.length > offset + page.length ? `\n[more: offset ${offset + page.length}]` : '') : 'No matches.'
       }
     }),
     local_copy_to_project: tool({
-      description: 'Copy from a mounted local folder. Deskmates has no mounted folders; the files must be in the design folder.',
-      inputSchema: z.object({ files: z.array(z.object({ src: z.string(), dest: z.string() })) }),
-      execute: async (): Promise<string> => {
-        throw new Error(NO_LOCAL_FOLDER)
+      description: "Copy files from the user's PC into this design. src is the file's full path on the PC, dest a path in the design folder. Files only, not folders; the user can undo the copy.",
+      inputSchema: z.object({ files: z.array(z.object({ src: z.string(), dest: z.string() })).min(1).max(100) }),
+      execute: async ({ files }) => {
+        const copied: string[] = []
+        for (const { src, dest } of files) {
+          const from = localPath(src)
+          if (!(await stat(from)).isFile()) throw new Error(`${from} is a folder; copy its files one by one.`)
+          const buffer = await readFile(from)
+          if (buffer.length > LOCAL_MAX_BYTES) throw new Error(`${from} is larger than ${LOCAL_MAX_BYTES / 1024 / 1024} MB.`)
+          const result = await writeTracked(ctx, inside(dest), buffer)
+          copied.push(result.path)
+        }
+        return { copied }
       }
     }),
 
