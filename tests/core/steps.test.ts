@@ -72,7 +72,7 @@ describe("Freebuff's full output as steps", () => {
     expect(
       run([
         ['• Read AGENTS.md'],
-        ['• Read AGENTS.md', 'Found that the', '• Read a.ts', '$ npm test'],
+        ['• Read AGENTS.md', 'Found that the'],
         ['• Read AGENTS.md', 'Found that the deadline moved.', '• Read a.ts', '$ npm test', 'All tests pass.']
       ])
     ).toEqual([
@@ -95,8 +95,9 @@ describe("Freebuff's full output as steps", () => {
 
 describe('grouping Freebuff output lines', () => {
   it('joins a wrapped paragraph and keeps tool lines apart', () => {
-    expect(groupWork(['I will read the file', 'and then run the tests.', '• Read a.ts', '', 'thinking...', 'Done.'])).toEqual([
-      'I will read the file and then run the tests.',
+    const wrapped = 'I will read the file you named, check what changed since yesterday afternoon and then run the whole test'
+    expect(groupWork([wrapped, 'suite.', '• Read a.ts', '', 'thinking...', 'Done.'])).toEqual([
+      `${wrapped} suite.`,
       '• Read a.ts',
       'Done.'
     ])

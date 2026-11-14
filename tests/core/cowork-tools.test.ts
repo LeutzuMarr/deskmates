@@ -123,9 +123,28 @@ describe('Design tools', () => {
   it('says plainly what Deskmates does not have', async () => {
     t = makeTestContext()
     const tools = designTools(t.ctx)
-    await expect(runTool(tools.local_ls, { path: '.' })).rejects.toThrow(/No local folder is mounted/)
+    await expect(runTool(tools.local_ls, { path: '.' })).rejects.toThrow(/isn't a full path/)
     await expect(runTool(tools.fig_ls, {})).rejects.toThrow(/No \.fig file/)
     expect(await runTool(tools.get_comments, {})).toMatchObject({ comments: [] })
+  })
+
+  it('reads a folder on the PC by its full path and copies files into the design', async () => {
+    t = makeTestContext()
+    const tools = designTools(t.ctx)
+    const outside = join(t.root, '..', `outside-${Date.now()}`)
+    mkdirSync(join(outside, 'src'), { recursive: true })
+    mkdirSync(join(outside, 'node_modules', 'x'), { recursive: true })
+    writeFileSync(join(outside, 'src', 'theme.css'), ':root { --brand: teal; }\nbody { margin: 0 }\n')
+    writeFileSync(join(outside, 'node_modules', 'x', 'skip.css'), '--brand: no')
+    const listing = String(await runTool(tools.local_ls, { path: outside, depth: 3 }))
+    expect(listing).toContain('src/theme.css')
+    expect(listing).not.toContain('node_modules')
+    expect(String(await runTool(tools.local_read, { path: join(outside, 'src', 'theme.css') }))).toContain('1\t:root { --brand: teal; }')
+    const hits = String(await runTool(tools.local_grep, { pattern: '--BRAND', path: outside }))
+    expect(hits).toContain('theme.css:1:')
+    expect(hits).not.toContain('skip.css')
+    expect(await runTool(tools.local_copy_to_project, { files: [{ src: join(outside, 'src', 'theme.css'), dest: 'styles/theme.css' }] })).toMatchObject({ copied: ['styles/theme.css'] })
+    expect(readFileSync(join(t.root, 'styles', 'theme.css'), 'utf8')).toContain('--brand: teal')
   })
 
   it('runs batch scripts against the design folder only', async () => {

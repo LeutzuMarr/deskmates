@@ -197,6 +197,11 @@ export function PreviewPane({
 
   const post = (msg: OutgoingEditorMessage): void => postToIframe(iframeRef.current, msg)
 
+  // Tell the editor how far the page is zoomed out, so its handles and labels keep their size.
+  useEffect(() => {
+    if (ready && effectiveZoom > 0) postToIframe(iframeRef.current, { type: 'setZoom', zoom: effectiveZoom })
+  }, [ready, effectiveZoom, iframeRef])
+
   const runExport = async (format: DesignExportFormat): Promise<void> => {
     setExportMenuOpen(false)
     try {

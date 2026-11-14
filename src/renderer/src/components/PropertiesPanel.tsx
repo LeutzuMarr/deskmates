@@ -342,11 +342,14 @@ function SliderNumberField({
           max={max}
           value={clamp(value, min, max)}
           onChange={(event) => throttled(Number(event.target.value))}
-          className="w-full"
+          className="min-w-0 flex-1"
+          style={{ accentColor: 'var(--clay)' }}
         />
         <input
           aria-label={label}
-          className="input w-16 shrink-0"
+          className="input shrink-0"
+          // `.input` is full width by default, which squeezed the slider down to a dot.
+          style={{ width: 76, flex: 'none' }}
           type="number"
           min={min}
           max={max}

@@ -51,7 +51,7 @@ const PRESETS: ConnectorPreset[] = [
     command: 'uvx',
     args: 'workspace-mcp --tools gmail calendar drive',
     env: ['GOOGLE_OAUTH_CLIENT_ID=', 'GOOGLE_OAUTH_CLIENT_SECRET='].join('\n'),
-    note: 'Reads and sends Gmail, reads and changes your calendar, and finds and reads Drive files. Needs uv (the uvx command) and a Google Cloud OAuth client (Desktop app type) with the Gmail, Calendar and Drive APIs enabled: paste its ID and secret above. The first time an agent uses it, Google asks you to sign in and allow access in your browser.'
+    note: 'Reads and sends Gmail, reads and changes your calendar, and finds and reads Drive files. Needs uv (the uvx command) and a Google Cloud OAuth client (Desktop app type) with the Gmail, Calendar and Drive APIs enabled: paste its ID and secret into the environment variables below. The first time an agent uses it, Google asks you to sign in and allow access in your browser.'
   }
 ]
 

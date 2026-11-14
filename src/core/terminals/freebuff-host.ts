@@ -229,8 +229,9 @@ export function groupWork(lines: string[]): string[] {
     } else {
       items.push(line)
     }
-    // Prose continues onto the next line; a tool line only when it filled the width (it wrapped).
-    joinable = !marker || line.length >= WRAP_LENGTH
+    // A line continues onto the next only when it filled the window's width (it wrapped): two short
+    // lines are two things Freebuff said, and each gets its own step.
+    joinable = line.length >= WRAP_LENGTH
   }
   return items
 }
@@ -250,8 +251,10 @@ function chatLines(screen: string): string[] {
 export function workItems(screen: string, prompt: string, skipEchoes = 0): string[] {
   const reply = extractReply(screen, prompt, skipEchoes)
   if (reply) return groupWork(reply.text.split('\n'))
-  // The top line may be the tail of a paragraph cut by the window's edge: it was reported whole earlier.
-  return groupWork(chatLines(screen)).slice(1)
+  // The top line may be the tail of a paragraph cut by the window's edge (reported whole earlier):
+  // drop it then, but keep a tool or command line, which is never cut.
+  const items = groupWork(chatLines(screen))
+  return items.length > 0 && !WORK_MARKER.test(items[0]!) ? items.slice(1) : items
 }
 
 export type FreebuffState = 'starting' | 'idle' | 'busy' | 'stopped' | 'error'
@@ -459,6 +462,7 @@ export class FreebuffHost {
    */
   async listModels(): Promise<FreebuffModel[] | null> {
     if (this.state !== 'idle') return null
+    this.stopRequested = false
     this.setState('busy')
     let opened = false
     try {
@@ -470,11 +474,15 @@ export class FreebuffHost {
       const collect = (): void => {
         for (const card of parsePickerCards(this.screen)) if (!found.has(card.name)) found.set(card.name, card)
       }
+      // Stop at once if a turn cancelled this read or the picker closed: further arrow keys would
+      // walk the chat input through its history instead.
+      const interrupted = (): boolean => this.stopRequested || !PICKER.test(this.screen)
       let previous: string | null = null
       for (let i = 0; i < 60; i++) {
         this.press(['up'])
         await delay(250)
         await this.nextScreen()
+        if (interrupted()) return null
         const highlighted = highlightedModel(this.screen)
         if (highlighted === previous) break
         previous = highlighted
@@ -487,12 +495,13 @@ export class FreebuffHost {
         this.press(['down'])
         await delay(250)
         await this.nextScreen()
+        if (interrupted()) return null
         collect()
         if (highlightedModel(this.screen) === highlighted) break
       }
       return [...found.values()]
     } finally {
-      if (opened) {
+      if (opened && PICKER.test(this.screen)) {
         this.press(['escape'])
         await this.waitFor((screen) => !PICKER.test(screen), 5000)
       }

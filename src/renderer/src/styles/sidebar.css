@@ -212,6 +212,9 @@
    or a row's options menu would be cut off at the group's edge. */
 .sidebar-group-body {
   display: grid;
+  /* minmax(0, …): a grid column never shrinks below its content's width, so a long task title
+     would widen the group past the sidebar (and scroll it sideways) instead of being cut with "…". */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: 1fr;
   transition: grid-template-rows 240ms var(--ease-out);
 }
@@ -221,6 +224,7 @@
 .sidebar-group-rows {
   display: flex;
   min-height: 0;
+  min-width: 0;
   flex-direction: column;
   gap: 1px;
   padding-left: 12px;

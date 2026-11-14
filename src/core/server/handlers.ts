@@ -7,6 +7,7 @@ import type { DuoService } from '../duo/service'
 import type { RemoteAccess } from '../phone/remote'
 import type { DuoProfile } from '../../shared/duo'
 import { freebuffModels, setFreebuffModels, type FreebuffModelList } from '../../shared/freebuff'
+import { removeWidgetsOf } from '../tools/widgets'
 import type { When } from '../../shared/protocol'
 import { randomInt, randomUUID } from 'node:crypto'
 import { basename, join, resolve, sep } from 'node:path'
@@ -277,6 +278,7 @@ export function createHandlers(services: HandlerServices): Handlers {
         runner.stop(task.id)
         await runner.whenIdle(task.id)
         changes.discard(task.id)
+        removeWidgetsOf(dataDir, repos.tasks.messages(task.id))
       }
       repos.projects.delete(params.id)
       if (project.kind === 'design') removeDesignFolder(project.folder)
@@ -326,6 +328,7 @@ export function createHandlers(services: HandlerServices): Handlers {
       const task = repos.tasks.require(params.id)
       runner.stop(params.id)
       await runner.whenIdle(params.id)
+      removeWidgetsOf(dataDir, repos.tasks.messages(params.id))
       repos.tasks.delete(params.id)
       changes.discard(params.id)
       bus.emit({ type: 'task.deleted', taskId: params.id, projectId: task.projectId })
