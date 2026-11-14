@@ -26,6 +26,7 @@ import { buildTools } from './tools'
 import { PluginsService } from './extensions/plugins'
 import { SkillsService } from './extensions/skills'
 import { McpConnectorManager, createMcpTransport } from './connectors'
+import { GoogleAuth, type GoogleClient } from './google/auth'
 import { createSubagentRunner } from './engine/subagents'
 import { ChildProcessSpawner } from './terminals/process'
 import { PsAttachHelperSpawner } from './terminals/attach'
@@ -134,9 +135,24 @@ async function main(): Promise<void> {
           }),
     onActiveChange: (active) => parentPort?.postMessage({ type: 'computer-use', active } satisfies CoreToHost)
   })
+  // Google sign-in: the OAuth client comes from the app's settings (loaded once from the
+  // client_secret file) or the environment; the user only presses Connect.
+  const google = new GoogleAuth({
+    dataDir,
+    client: () => {
+      const saved = repos.settings.getExtra<GoogleClient | null>('googleClient', null)
+      if (saved?.clientId && saved.clientSecret) return saved
+      const clientId = process.env.DESKMATES_GOOGLE_CLIENT_ID?.trim()
+      const clientSecret = process.env.DESKMATES_GOOGLE_CLIENT_SECRET?.trim()
+      return clientId && clientSecret ? { clientId, clientSecret } : null
+    },
+    onChange: (status) => bus.emit({ type: 'google.updated', status })
+  })
+  void google.load()
   const runner = new TaskRunner({
     repos,
     dataDir,
+    google,
     bus,
     // Read only when a task runs, by which time the agent kit below exists.
     agentCommand: () => commandPath,
@@ -343,6 +359,7 @@ async function main(): Promise<void> {
 
   const handlers = createHandlers({
     repos,
+    google,
     bus,
     runner,
     changes,

@@ -33,6 +33,8 @@ export interface RunnerDeps {
   repos: Repos
   /** Deskmates' data folder (shared memory documents, chat widgets). */
   dataDir?: string
+  /** The connected Google account, for the Gmail, Calendar and Drive tools. */
+  google?: ToolContext['google']
   bus: EventBus
   models: ModelResolver
   changes: ChangeLog
@@ -323,6 +325,7 @@ export class TaskRunner {
         ...(deps.agentNameFor?.(taskId) ? { agentName: deps.agentNameFor(taskId) } : {}),
         cliModel: resolved.cli === true,
         ...(deps.dataDir ? { dataDir: deps.dataDir } : {}),
+        ...(deps.google ? { google: deps.google } : {}),
         chats: chatHistory(repos),
         signal: controller.signal,
         projectKind: project.kind === 'design' ? 'design' : 'work',

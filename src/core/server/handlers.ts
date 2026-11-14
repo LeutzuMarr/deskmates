@@ -8,6 +8,7 @@ import type { RemoteAccess } from '../phone/remote'
 import type { DuoProfile } from '../../shared/duo'
 import { freebuffModels, setFreebuffModels, type FreebuffModelList } from '../../shared/freebuff'
 import { removeWidgetsOf } from '../tools/widgets'
+import { parseClientFile, type GoogleAuth } from '../google/auth'
 import type { When } from '../../shared/protocol'
 import { randomInt, randomUUID } from 'node:crypto'
 import { basename, join, resolve, sep } from 'node:path'
@@ -65,6 +66,8 @@ const DEFAULT_PC_CPU_LIMIT = 2
 
 export interface HandlerServices {
   repos: Repos
+  /** Google sign-in (Gmail, Calendar, Drive); absent in tests. */
+  google?: GoogleAuth
   bus: EventBus
   runner: TaskRunner
   changes: ChangeLog
@@ -890,6 +893,29 @@ export function createHandlers(services: HandlerServices): Handlers {
     'taskSchedules.runNow': (params: { id: string }) => requireSchedules().runNow(params.id),
     'taskSchedules.start': (params: { id: string }) => requireSchedules().startPending(params.id),
     'taskSchedules.dismiss': (params: { id: string }) => requireSchedules().dismiss(params.id),
+
+    // ---- Google account ----
+
+    'google.status': () => {
+      if (!services.google) throw new Error('Google sign-in isn’t available here.')
+      return services.google.status()
+    },
+    'google.connect': () => {
+      if (!services.google) throw new Error('Google sign-in isn’t available here.')
+      return services.google.connect()
+    },
+    'google.disconnect': async () => {
+      if (!services.google) throw new Error('Google sign-in isn’t available here.')
+      await services.google.disconnect()
+      return services.google.status()
+    },
+    'google.setClient': (params: { json: string }) => {
+      if (!services.google) throw new Error('Google sign-in isn’t available here.')
+      repos.settings.setExtra('googleClient', parseClientFile(String(params?.json ?? '')))
+      const status = services.google.status()
+      bus.emit({ type: 'google.updated', status })
+      return status
+    },
 
     'freebuff.models': () => {
       void refreshFreebuffModels()

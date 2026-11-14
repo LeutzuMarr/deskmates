@@ -44,14 +44,6 @@ const PRESETS: ConnectorPreset[] = [
     args: '--claude-in-chrome-mcp',
     env: '',
     note: 'Drives your real Chrome through the Claude in Chrome extension. Needs Claude Code installed (the claude command) and the extension signed in.'
-  },
-  {
-    label: 'Gmail, Calendar + Drive',
-    name: 'google',
-    command: 'uvx',
-    args: 'workspace-mcp --tools gmail calendar drive',
-    env: ['GOOGLE_OAUTH_CLIENT_ID=', 'GOOGLE_OAUTH_CLIENT_SECRET='].join('\n'),
-    note: 'Reads and sends Gmail, reads and changes your calendar, and finds and reads Drive files. Needs uv (the uvx command) and a Google Cloud OAuth client (Desktop app type) with the Gmail, Calendar and Drive APIs enabled: paste its ID and secret into the environment variables below. The first time an agent uses it, Google asks you to sign in and allow access in your browser.'
   }
 ]
 

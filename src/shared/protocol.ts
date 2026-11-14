@@ -1,5 +1,15 @@
 import type { RenderRequest, RenderResult, VideoRequest, VideoResult } from '../core/render/types'
 import type { FreebuffModelList, FreebuffStatus } from './freebuff'
+
+/** The Google account Deskmates is signed in to. */
+export interface GoogleStatus {
+  /** Whether this copy of Deskmates has an OAuth client, so Connect can work. */
+  configured: boolean
+  connected: boolean
+  email: string | null
+  /** True while Google's sign-in page is open and the app waits for it. */
+  pending: boolean
+}
 import type { When } from './when'
 import type { DuoProfile, DuoState } from './duo'
 export type { When } from './when'
@@ -784,6 +794,13 @@ export interface RpcMethods {
   /** The Freebuff models Deskmates knows, cheapest first, with their cost. Also starts a fresh read
    *  of Freebuff's picker when an idle Freebuff runs; a changed list arrives as 'freebuff.models'. */
   'freebuff.models': { params: Record<string, never>; result: FreebuffModelList }
+  /** The Google account Deskmates is signed in to (Gmail, Calendar, Drive), if any. */
+  'google.status': { params: Record<string, never>; result: GoogleStatus }
+  /** Starts "Sign in with Google": returns Google's sign-in page for the app to open in the browser. */
+  'google.connect': { params: Record<string, never>; result: { url: string } }
+  'google.disconnect': { params: Record<string, never>; result: GoogleStatus }
+  /** Sets the app's OAuth client from the client_secret_….json Google Cloud downloads (one-time setup). */
+  'google.setClient': { params: { json: string }; result: GoogleStatus }
 
   // ---- Screen guide: lets a connected agent see the screen, point at things and talk ----
   /** A screenshot of the primary screen. Marks sent to `screen.point` use this image's pixels. */
@@ -905,6 +922,7 @@ export type CoreEvent =
   | { type: 'changes.updated'; taskId: string; changes: FileChange[] }
   | { type: 'memory.updated'; projectId: string; memories: Memory[] }
   | { type: 'freebuff.models'; list: FreebuffModelList }
+  | { type: 'google.updated'; status: GoogleStatus }
   | { type: 'settings.updated'; settings: Settings }
   | { type: 'usage.updated'; usage: UsageRow[] }
   | { type: 'notify'; title: string; body: string }
