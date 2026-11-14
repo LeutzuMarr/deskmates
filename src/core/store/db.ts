@@ -76,7 +76,24 @@ export const MIGRATIONS: string[] = [
      state TEXT NOT NULL DEFAULT 'pending',
      run_id TEXT, result TEXT,
      created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
-   CREATE INDEX handoffs_by_bot ON handoffs(to_bot_id, created_at);`
+   CREATE INDEX handoffs_by_bot ON handoffs(to_bot_id, created_at);`,
+  `CREATE TABLE task_schedules (
+     id TEXT PRIMARY KEY,
+     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+     name TEXT NOT NULL, instruction TEXT NOT NULL, when_json TEXT NOT NULL,
+     enabled INTEGER NOT NULL DEFAULT 1, missed TEXT NOT NULL DEFAULT 'run-late',
+     last_run_at INTEGER, next_run_at INTEGER, pending_since INTEGER, last_task_id TEXT,
+     created_at INTEGER NOT NULL);
+   CREATE INDEX task_schedules_by_project ON task_schedules(project_id);`,
+  `CREATE TABLE duo_messages (id TEXT PRIMARY KEY, role TEXT NOT NULL, text TEXT NOT NULL, kind TEXT NOT NULL, at INTEGER NOT NULL);
+   CREATE TABLE duo_outbox (
+     id TEXT PRIMARY KEY, kind TEXT NOT NULL, company TEXT NOT NULL, domain TEXT NOT NULL, to_addr TEXT NOT NULL,
+     source TEXT NOT NULL DEFAULT '', subject TEXT NOT NULL DEFAULT '', body TEXT NOT NULL DEFAULT '',
+     follow_up_no INTEGER, note TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, error TEXT,
+     created_at INTEGER NOT NULL, decided_at INTEGER, sent_at INTEGER);
+   CREATE TABLE duo_todos (id TEXT PRIMARY KEY, text TEXT NOT NULL, due TEXT, done INTEGER NOT NULL DEFAULT 0, source TEXT NOT NULL, created_at INTEGER NOT NULL);
+   CREATE TABLE duo_sent (domain TEXT NOT NULL, company TEXT NOT NULL, kind TEXT NOT NULL, at INTEGER NOT NULL);
+   CREATE INDEX duo_sent_by_domain ON duo_sent(domain);`
 ]
 
 export function openDatabase(file: string): DatabaseSync {

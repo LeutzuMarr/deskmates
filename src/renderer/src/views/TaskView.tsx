@@ -6,7 +6,13 @@ import { useStore } from '../lib/store'
 import { formatClock, formatDay, statusLabel, startingNotice } from '../lib/format'
 import { Composer } from '../components/Composer'
 import { Conversation } from '../components/Conversation'
-import type { FileChange, PlanItem, Task } from '../../../shared/protocol'
+import { FreebuffStatusLine } from '../components/FreebuffStatusLine'
+import { DiffChip } from '../components/DiffChip'
+import { BrowserSurface, DockBrowserButton } from '../components/BrowserPanel'
+import type { ChangeStats, FileChange, PlanItem } from '../../../shared/protocol'
+
+/** Provider and folder pairs whose agent has already run once since the app opened. */
+const startedOnce = new Set<string>()
 
 export function TaskView({ projectId, taskId }: { projectId: string; taskId: string }) {
   const projects = useStore((s) => s.projects)
@@ -14,6 +20,9 @@ export function TaskView({ projectId, taskId }: { projectId: string; taskId: str
   const timelines = useStore((s) => s.timelines)
   const changes = useStore((s) => s.changes)
   const showToast = useStore((s) => s.showToast)
+  const defaultModel = useStore((s) => s.settings?.defaultModel ?? null)
+  const browserOpen = useStore((s) => s.browserOpen)
+  const setBrowserOpen = useStore((s) => s.setBrowserOpen)
   const [panelOpen, setPanelOpen] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [draft, setDraft] = useState('')
@@ -22,14 +31,63 @@ export function TaskView({ projectId, taskId }: { projectId: string; taskId: str
   const task = (tasks ?? []).find((t) => t.id === taskId)
   const timeline = timelines[taskId] ?? []
   const taskChanges = changes[taskId] ?? []
+  const model = project?.model ?? defaultModel
 
   // A CLI-backed provider boots a whole agent process before it says anything, and on a cold start
-  // that is tens of seconds of silence. Naming it stops the wait reading as a hang.
-  const starting = startingNotice(project?.model)
-
+  // that is tens of seconds of silence. Naming it stops the wait reading as a hang — but OpenCode
+  // keeps a server per folder alive between turns, so once one is up the next prompt is answered in
+  // about a second and a half and the notice is both wrong and alarming. Asked at the moment a run
+  // starts, and reset afterwards, since the server can also time itself out while idle.
+  const [warm, setWarm] = useState(false)
+  const running = task?.status === 'running'
   useEffect(() => {
-    if (task && task.plan.length > 0) setPanelOpen(true)
-  }, [task?.plan.length])
+    if (!running || !project) {
+      if (!running) setWarm(false)
+      return
+    }
+    let live = true
+    void core
+      .call('terminals.warm', { folder: project.folder })
+      .then((result) => {
+        if (live) setWarm(result.warm)
+      })
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [running, project?.folder])
+
+  // The start-up notice is for the first run only: once an agent has answered in this folder, later
+  // prompts go back to the usual rotating words.
+  const startKey = `${model?.provider ?? ''}:${project?.folder ?? ''}`
+  useEffect(() => {
+    if (!running) return
+    return () => {
+      startedOnce.add(startKey)
+    }
+  }, [running, startKey])
+  const starting = startedOnce.has(startKey) ? null : startingNotice(project?.model, warm)
+
+  // Lines added and removed so far. Re-counted when a change is recorded or undone, and once more
+  // when the run ends, since the last edits can land after the last change was recorded.
+  const [stats, setStats] = useState<ChangeStats | null>(null)
+  const changeKey = taskChanges.map((change) => `${change.id}:${change.undone ? 1 : 0}`).join(',')
+  useEffect(() => {
+    let live = true
+    if (changeKey === '') {
+      setStats(null)
+      return
+    }
+    void core
+      .call('changes.stats', { taskId })
+      .then((next) => {
+        if (live) setStats(next)
+      })
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [taskId, changeKey, running])
 
   const startRename = (): void => {
     if (!task) return
@@ -87,6 +145,9 @@ export function TaskView({ projectId, taskId }: { projectId: string; taskId: str
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          {project && model?.provider === 'freebuff' && <FreebuffStatusLine folder={project.folder} modelId={model.modelId} />}
+          {stats && <DiffChip stats={stats} />}
+          <DockBrowserButton />
           <button
             type="button"
             aria-expanded={panelOpen}
@@ -106,7 +167,33 @@ export function TaskView({ projectId, taskId }: { projectId: string; taskId: str
           running={task?.status === 'running'}
           emptyHint="No messages yet — ask something in the box below."
           starting={starting}
+          dock={
+            <>
+              {task?.status === 'error' && task.error && (
+                <div className="error-bar mb-3" role="alert">
+                  {task.error}
+                </div>
+              )}
+              {task && task.plan.length > 0 && !task.plan.every((item) => item.status === 'done') && (
+                <div className="mb-3 rounded-2xl border border-rule bg-card px-4 py-3" aria-label="Task list">
+                  <ul className="flex flex-col gap-2">
+                    {task.plan.map((item, index) => (
+                      <PlanRow key={`${item.text}-${index}`} item={item} />
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <Composer projectId={projectId} taskId={taskId} />
+            </>
+          }
         />
+
+        {/* Deskmates' browser beside the chat: watch the agent work on a site, or sign in for it. */}
+        {browserOpen && (
+          <aside className="flex w-[46%] min-w-[420px] max-w-[900px] shrink-0 flex-col border-l border-rule bg-canvas" aria-label="Agent browser">
+            <BrowserSurface onClose={() => setBrowserOpen(false)} />
+          </aside>
+        )}
 
         {panelOpen && (
           <aside className="w-[300px] shrink-0 border-l border-rule bg-card">
@@ -125,7 +212,10 @@ export function TaskView({ projectId, taskId }: { projectId: string; taskId: str
               </section>
               <section className="mt-7">
                 <div className="flex items-center justify-between">
-                  <h2 className="caption">Changes</h2>
+                  <h2 className="caption flex items-center gap-2">
+                    Changes
+                    {stats && <DiffChip stats={stats} />}
+                  </h2>
                   {taskChanges.some((change) => !change.undone) && (
                     <button type="button" className="btn btn-text px-0 text-[13px]" onClick={() => void undoAll(taskId)}>
                       Undo all
@@ -147,16 +237,6 @@ export function TaskView({ projectId, taskId }: { projectId: string; taskId: str
         )}
       </div>
 
-      <footer className="shrink-0 border-t border-rule">
-        <div className="mx-auto w-full max-w-[720px] px-8 pb-5 pt-4">
-          {task?.status === 'error' && task.error && (
-            <div className="error-bar mb-3" role="alert">
-              {task.error}
-            </div>
-          )}
-          <Composer projectId={projectId} taskId={taskId} />
-        </div>
-      </footer>
     </div>
   )
 }

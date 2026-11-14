@@ -22,6 +22,12 @@ export interface Screenshot {
 
 /** The user's own mouse, keyboard and screen. Coordinates are physical screen pixels. */
 export interface Desktop {
+  /**
+   * Optional: fails early with a readable reason when this machine can't be driven (no X11, no
+   * tool installed). Called once before the first screenshot; desktop-specific, so implementations
+   * that always can be driven leave it out.
+   */
+  check?(): Promise<void>
   screenshot(maxWidth: number): Promise<Screenshot>
   move(x: number, y: number): Promise<void>
   click(x: number, y: number, button: MouseButton, count: number): Promise<void>

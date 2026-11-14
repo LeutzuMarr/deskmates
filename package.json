@@ -46,7 +46,10 @@
     "test": "vitest run",
     "test:e2e": "electron-vite build && playwright test",
     "icon": "node scripts/make-icon.mjs",
-    "dist": "electron-vite build && electron-builder --win"
+    "dist": "electron-vite build && electron-builder --win",
+    "dist:linux": "electron-vite build && electron-builder --linux AppImage deb",
+    "build:remote": "vite build -c vite.remote.config.ts",
+    "deploy:remote": "node scripts/deploy-remote.mjs"
   },
   "build": {
     "appId": "com.deskmates.app",
@@ -77,6 +80,27 @@
       ],
       "icon": "resources/icon.ico"
     },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "resources/icon.png",
+      "category": "Development",
+      "synopsis": "AI assistant for your folders and your own computer"
+    },
+    "deb": {
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libsecret-1-0"
+      ]
+    },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
@@ -92,6 +116,7 @@
     "@ai-sdk/openai-compatible": "^3.0.52",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@pdf-lib/fontkit": "^1.1.1",
+    "@supabase/supabase-js": "^2.119.0",
     "ai": "^7.0.106",
     "docx": "^9.7.1",
     "exceljs": "^4.4.0",
@@ -99,24 +124,31 @@
     "mammoth": "^1.12.3",
     "pdf-lib": "^1.17.1",
     "pptxgenjs": "^4.0.1",
+    "qrcode": "^1.5.4",
     "unpdf": "^1.8.1",
+    "web-push": "^3.6.7",
     "ws": "^8.21.3",
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@fontsource-variable/instrument-sans": "^5.3.0",
     "@fontsource-variable/inter": "^5.3.0",
     "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@fontsource-variable/newsreader": "^5.3.0",
     "@fontsource-variable/source-serif-4": "^5.3.0",
     "@playwright/test": "^1.63.0",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^24.13.5",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@types/web-push": "^3.6.4",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^5.2.0",
     "electron": "^44.4.2",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
+    "glisse": "0.5.0",
     "happy-dom": "^20.14.5",
     "lottie-web": "^5.13.0",
     "lucide-react": "^1.47.0",

@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import { ArrowUp, RotateCw, ShieldQuestion, Unplug } from 'lucide-react'
+import { Glass } from 'glisse'
 import { useStore } from '../lib/store'
 import { concentricVars } from '../lib/design'
 import { TerminalStatusMark } from '../components/TerminalStatusMark'
@@ -155,7 +156,7 @@ export function AgentsAttachView({ sessionId }: { sessionId: string }) {
       )}
 
       <div className="shrink-0 px-8 pb-6">
-        <div className="rounded-3xl border border-rule bg-card p-2">
+        <Glass className="composer-box p-2">
           <label htmlFor={inputId} className="sr-only">
             Message
           </label>
@@ -175,14 +176,14 @@ export function AgentsAttachView({ sessionId }: { sessionId: string }) {
               type="button"
               aria-label="Send"
               disabled={!text.trim() || !canType}
-              className="r-concentric flex h-8 w-9 items-center justify-center bg-clay text-white disabled:cursor-not-allowed disabled:opacity-50 enabled:hover:bg-clay-deep"
+              className="send-btn r-concentric flex h-8 w-9 items-center justify-center bg-clay text-white disabled:cursor-not-allowed disabled:opacity-50 enabled:hover:bg-clay-deep"
               style={concentricVars(8)}
               onClick={send}
             >
               <ArrowUp size={16} aria-hidden="true" />
             </button>
           </div>
-        </div>
+        </Glass>
       </div>
     </div>
   )

@@ -34,7 +34,10 @@ export function buildTimeline(stored: StoredMessage[]): TimelineItem[] {
             : []
       let partIdx = 0
       for (const part of content) {
-        if ((part as any).type === 'text') {
+        if ((part as any).type === 'reasoning') {
+          const text = ((part as any).text ?? '').toString()
+          if (text.trim()) items.push({ kind: 'thinking', id: `m${i}r${partIdx}`, at, text })
+        } else if ((part as any).type === 'text') {
           const text = ((part as any).text ?? '').toString()
           if (text.trim()) {
             items.push({ kind: 'assistant', id: `m${i}p${partIdx}`, at, text })

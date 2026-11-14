@@ -26,6 +26,35 @@ function formatEnv(env: Record<string, string>): string {
     .join('\n')
 }
 
+/** Ready-made connectors: one click fills the form. */
+interface ConnectorPreset {
+  label: string
+  name: string
+  command: string
+  args: string
+  env: string
+  note: string
+}
+
+const PRESETS: ConnectorPreset[] = [
+  {
+    label: 'Claude in Chrome',
+    name: 'claude-in-chrome',
+    command: 'claude',
+    args: '--claude-in-chrome-mcp',
+    env: '',
+    note: 'Drives your real Chrome through the Claude in Chrome extension. Needs Claude Code installed (the claude command) and the extension signed in.'
+  },
+  {
+    label: 'Gmail, Calendar + Drive',
+    name: 'google',
+    command: 'uvx',
+    args: 'workspace-mcp --tools gmail calendar drive',
+    env: ['GOOGLE_OAUTH_CLIENT_ID=', 'GOOGLE_OAUTH_CLIENT_SECRET='].join('\n'),
+    note: 'Reads and sends Gmail, reads and changes your calendar, and finds and reads Drive files. Needs uv (the uvx command) and a Google Cloud OAuth client (Desktop app type) with the Gmail, Calendar and Drive APIs enabled: paste its ID and secret above. The first time an agent uses it, Google asks you to sign in and allow access in your browser.'
+  }
+]
+
 /** Add or edit an MCP connector (spec 5.6). */
 export function ConnectorDialog({ open, onClose, connector }: ConnectorDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null)
@@ -40,6 +69,17 @@ export function ConnectorDialog({ open, onClose, connector }: ConnectorDialogPro
   const [env, setEnv] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState<string | null>(null)
+
+  const applyPreset = (preset: ConnectorPreset): void => {
+    setName(preset.name)
+    setTransport('stdio')
+    setCommand(preset.command)
+    setArgs(preset.args)
+    setEnv(preset.env)
+    setNote(preset.note)
+    setError(null)
+  }
 
   const nameId = useId()
   const transportId = useId()
@@ -56,6 +96,7 @@ export function ConnectorDialog({ open, onClose, connector }: ConnectorDialogPro
       setUrl(connector?.url ?? '')
       setEnv(connector ? formatEnv(connector.env) : '')
       setError(null)
+      setNote(null)
       dialog.showModal()
     } else if (!open && dialog.open) {
       dialog.close()
@@ -120,6 +161,22 @@ export function ConnectorDialog({ open, onClose, connector }: ConnectorDialogPro
         command on this computer; over HTTP it reaches a streamable server.
       </p>
       <div className="mt-4 flex flex-col gap-4">
+        {!connector && (
+          <div className="flex flex-wrap gap-2">
+            {PRESETS.map((preset) => (
+              <button
+                key={preset.name}
+                type="button"
+                className="btn btn-outline r-concentric"
+                style={concentricVars(24)}
+                onClick={() => applyPreset(preset)}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+        )}
+        {note && <p className="text-[13px] text-ink-muted">{note}</p>}
         <div className="field">
           <label className="field-label" htmlFor={nameId}>
             Name

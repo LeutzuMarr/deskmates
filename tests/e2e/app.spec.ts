@@ -193,6 +193,8 @@ test('works on a folder end to end', async () => {
 
     await expect(page.getByText('Wrote hello.txt')).toBeVisible({ timeout: 30000 })
     await expect(page.getByText('I created hello.txt for you.')).toBeVisible({ timeout: 30000 })
+    // The new file shows up as added lines beside the task's title.
+    await expect(page.getByRole('img', { name: /lines added/ }).first()).toBeVisible({ timeout: 15000 })
     await page.screenshot({ path: 'test-results/screens/e2e-02-work-task.png' })
 
     const helloPath = join(projectDir, 'hello.txt')
@@ -206,6 +208,32 @@ test('works on a folder end to end', async () => {
     })
     await expect.poll(() => existsSync(helloPath), { timeout: 10000 }).toBe(false)
     await page.screenshot({ path: 'test-results/screens/e2e-03-work-undone.png' })
+
+    await test.step('search and commands open from the keyboard', async () => {
+      await page.keyboard.press('Control+K')
+      const palette = page.getByRole('dialog', { name: 'Search and commands' })
+      await expect(palette).toBeVisible()
+      await palette.getByLabel('Search').fill('hello')
+      await expect(palette.getByRole('option', { name: /Create hello\.txt/ })).toBeVisible()
+      await page.screenshot({ path: 'test-results/screens/e2e-03b-palette.png' })
+      await page.keyboard.press('Escape')
+      await expect(palette).toBeHidden()
+    })
+
+    await test.step('home shows the composer and starting points', async () => {
+      // From a task, the project's name opens the project; "New task" goes back Home.
+      const projectRow = page.locator('aside').getByRole('button', { name: /^project( \d+)?$/ })
+      await clickRobust(projectRow)
+      await expect(page.getByRole('button', { name: 'Project settings', exact: true })).toBeVisible()
+      await clickRobust(page.locator('aside').getByRole('button', { name: 'New task', exact: true }))
+      await expect(page.getByRole('tab', { name: 'Video' })).toBeVisible()
+      await clickRobust(page.getByRole('tab', { name: 'Video' }))
+      await clickRobust(page.getByRole('button', { name: 'Rough cut a recording', exact: true }))
+      await expect(page.getByLabel('Message')).toHaveValue(/DaVinci Resolve/)
+      // Let the greeting's entrance animation finish so the screenshot shows the settled page.
+      await page.waitForTimeout(800)
+      await page.screenshot({ path: 'test-results/screens/e2e-03c-home.png' })
+    })
   } finally {
     await app?.close().catch(() => undefined)
     await fake.close().catch(() => undefined)
@@ -407,7 +435,9 @@ test('Extras tab shows skills, plugins and connectors sections', async () => {
       await expect(dialog).not.toBeVisible()
 
       page.once('dialog', (dialogEvent) => void dialogEvent.accept())
-      await clickRobust(page.getByRole('button', { name: 'Remove', exact: true }))
+      // Scoped to the connector's own row: the skills above it each have a Remove button too.
+      const connectorRow = page.getByText('demo-files', { exact: true }).locator('xpath=ancestor::div[contains(@class, "rounded-3xl")][1]')
+      await clickRobust(connectorRow.getByRole('button', { name: 'Remove', exact: true }))
       await expect(page.getByText('demo-files', { exact: true })).toHaveCount(0)
       await page.screenshot({ path: 'test-results/screens/e2e-14-extras-after-remove.png' })
     })
@@ -430,7 +460,6 @@ test('Agents tab renders and lists detected sessions', async () => {
       await page.evaluate(() => (document.getElementById('tab-agents') as HTMLElement | null)?.click())
       await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeVisible()
       await expect(page.getByRole('heading', { name: 'Running on this computer' })).toBeVisible()
-      // "Managed sessions" also appears as a sidebar caption (a div); the main view's is the h2.
       await expect(page.getByRole('heading', { name: 'Managed sessions' })).toBeVisible()
     })
 
@@ -438,7 +467,7 @@ test('Agents tab renders and lists detected sessions', async () => {
     // none are running. Both are acceptable proof that the tab renders and lists what it found.
     await test.step('detection results or an honest empty state', async () => {
       const detected = page.getByText(/pid \d+/)
-      const emptyNote = page.getByText('No OpenCode or Antigravity processes found right now.', { exact: true })
+      const emptyNote = page.getByText('No OpenCode, Antigravity or Freebuff processes found right now.', { exact: true })
       await expect
         .poll(async () => ((await detected.count()) > 0 || (await emptyNote.count()) > 0), { timeout: 15000 })
         .toBe(true)

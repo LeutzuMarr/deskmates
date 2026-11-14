@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { myPromptBrief } from '../engine/my-prompt'
 import { APICallError, streamText, tool } from 'ai'
 import type { ModelMessage } from 'ai'
 import { z } from 'zod'
@@ -44,7 +45,18 @@ const VALID_ACTIONS = 'Use one of: open, click, double_click, right_click, move,
 const NUDGE =
   'You did not use the computer tool. Act now by calling the `computer` tool (for example a click, a key press or typing). Reply without a tool call only when the whole task is finished.'
 
-const INSTRUCTIONS = `You are operating the user's own Windows computer through the \`computer\` tool. You see the screen as screenshots and act with the mouse and keyboard, exactly like a person sitting at the desk.
+/** The key that opens the desktop's app launcher: Windows and macOS have one, GNOME shows its
+ *  overview on Super alone. On Linux, where the key is the same as Windows', this is what makes the
+ *  `open` action work at all. */
+const LAUNCHER_KEY = process.platform === 'darwin' ? 'cmd' : 'win'
+
+/** The user's own operating prompt (its first section), ahead of the computer-use rules. */
+function withOperatingPrompt(rules: string): string {
+  const operating = myPromptBrief('none')
+  return operating ? `${operating}\n\n---\n\n${rules}` : rules
+}
+
+const INSTRUCTIONS = `You are operating the user's own computer through the \`computer\` tool. You see the screen as screenshots and act with the mouse and keyboard, exactly like a person sitting at the desk.
 
 How to work:
 - Coordinates are pixels in the most recent screenshot (top-left is 0,0).
@@ -77,6 +89,8 @@ const computerInput = z.object({
 })
 
 type ComputerInput = z.infer<typeof computerInput>
+/** One mouse or keyboard action, as `perform` takes it (also used by the agents' screen_act tool). */
+export type ComputerActionInput = ComputerInput
 
 const computerTool = tool({
   description: "Look at and operate the user's computer: mouse, keyboard, and screenshots.",
@@ -187,6 +201,9 @@ export class ComputerUseService {
     let acted = false
     let nudges = 0
     try {
+      // Before any screen work, so a session that can't be driven at all (no X11, no tool
+      // installed) ends with that reason instead of a failed screenshot.
+      await desktop.check?.()
       let shot = await desktop.screenshot(SHOT_WIDTH)
       const messages: ModelMessage[] = [
         {
@@ -341,7 +358,7 @@ export class ComputerUseService {
     try {
       const result = streamText({
         model,
-        instructions: INSTRUCTIONS,
+        instructions: withOperatingPrompt(INSTRUCTIONS),
         messages,
         tools: { computer: computerTool },
         maxOutputTokens: capTokens ? MAX_OUTPUT_TOKENS : undefined,
@@ -491,7 +508,7 @@ export async function perform(
         await sleep(2500)
         return `open ${url}`
       }
-      await desktop.key('win')
+      await desktop.key(LAUNCHER_KEY)
       await sleep(700)
       await desktop.type(target)
       await sleep(900)

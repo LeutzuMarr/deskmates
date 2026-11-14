@@ -1,6 +1,6 @@
 /**
  * Small helpers used only by `core/main.ts` to wire the bot services together safely. Kept out of
- * `engine.ts`/`local-wsl-host.ts` themselves so those stay exactly what their own tasks built and
+ * `engine.ts`/`local-docker-host.ts` themselves so those stay exactly what their own tasks built and
  * tested; this file only adds a defensive layer on top for the composition root.
  */
 import { readFileSync } from 'node:fs'
@@ -11,7 +11,7 @@ import type { CommandRunner } from './command-runner'
 import type { BotHost, CreatePcOptions, PcEndpoints, PcMode, ExecOptions, ExecResult } from './host'
 import { BotHostError } from './host'
 import type { EngineService } from './services'
-import { LocalWslHost } from './local-wsl-host'
+import { LocalDockerHost } from './local-docker-host'
 import { CloudHost } from './cloud-host'
 import { createDockerApi, parseDockerEndpoint, type DockerTls } from './docker-api'
 
@@ -118,7 +118,7 @@ export class UnavailableHost implements BotHost {
 
 /**
  * Picks which `BotHost` implementation bot PCs run on for this session, from the saved settings.
- * `pcHost: 'local'` always yields a `LocalWslHost`; `'cloud'` yields a `CloudHost` only when the
+ * `pcHost: 'local'` always yields a `LocalDockerHost`; `'cloud'` yields a `CloudHost` only when the
  * connection is complete (a parseable endpoint, and — if any TLS path is set — all three TLS files
  * readable) and `null` otherwise, so callers can fall back to "not set up" answers instead of
  * guessing. Both returned concrete hosts carry the extra methods `PcService` wants (setMode,
@@ -130,10 +130,10 @@ export function resolveBotHost(options: {
   dataDir: string
   runner: CommandRunner
   mode?: PcMode
-}): LocalWslHost | CloudHost | null {
+}): LocalDockerHost | CloudHost | null {
   const { settings, dataDir, runner, mode } = options
   if (settings.pcHost !== 'cloud') {
-    return new LocalWslHost({ runner, dataDir, mode: mode ?? 'own' })
+    return new LocalDockerHost({ runner, dataDir, mode: mode ?? 'own' })
   }
 
   const connection = settings.pcConnection

@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { Trash2 } from 'lucide-react'
 import { core } from '../lib/rpc'
 import { useStore } from '../lib/store'
-import { PROVIDERS, PROVIDER_LABELS, isLocalProvider } from '../../../shared/protocol'
+import { PROVIDERS, PROVIDER_LABELS, isCliProvider, isLocalProvider } from '../../../shared/protocol'
+import { freebuffModelLabel } from '../../../shared/freebuff'
 import type { Memory, ProviderId } from '../../../shared/protocol'
 
 export function ProjectSettingsView({ projectId }: { projectId: string }) {
@@ -186,7 +187,7 @@ export function ProjectSettingsView({ projectId }: { projectId: string }) {
                       {PROVIDERS.map((provider) => (
                         <option key={provider} value={provider}>
                           {PROVIDER_LABELS[provider]}
-                          {provider === 'opencode' || provider === 'agy' ? ' (CLI)' : ''}
+                          {isCliProvider(provider) ? ' (CLI)' : ''}
                           {isLocalProvider(provider) ? ' (local)' : ''}
                         </option>
                       ))}
@@ -209,7 +210,7 @@ export function ProjectSettingsView({ projectId }: { projectId: string }) {
                       <option value="">Choose a model</option>
                       {(models[modelProvider as ProviderId] ?? []).map((model) => (
                         <option key={model} value={model}>
-                          {model}
+                          {modelProvider === 'freebuff' ? freebuffModelLabel(model) : model}
                         </option>
                       ))}
                     </select>

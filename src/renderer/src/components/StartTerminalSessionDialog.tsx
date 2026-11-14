@@ -7,11 +7,13 @@ import type { TerminalTool } from '../../../shared/protocol'
 interface StartTerminalSessionDialogProps {
   open: boolean
   onClose: () => void
+  /** The folder to start in, when the dialog is opened from a folder's own group. */
+  initialFolder?: string
 }
 
 const TOOLS: TerminalTool[] = ['opencode', 'agy']
 
-export function StartTerminalSessionDialog({ open, onClose }: StartTerminalSessionDialogProps) {
+export function StartTerminalSessionDialog({ open, onClose, initialFolder = '' }: StartTerminalSessionDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const startTerminalSession = useStore((s) => s.startTerminalSession)
   const [tool, setTool] = useState<TerminalTool>('opencode')
@@ -29,14 +31,14 @@ export function StartTerminalSessionDialog({ open, onClose }: StartTerminalSessi
     if (!dialog) return
     if (open && !dialog.open) {
       setTool('opencode')
-      setFolder('')
+      setFolder(initialFolder)
       setModel('')
       setError(null)
       dialog.showModal()
     } else if (!open && dialog.open) {
       dialog.close()
     }
-  }, [open])
+  }, [open, initialFolder])
 
   const browse = async (): Promise<void> => {
     const chosen = await window.deskmates.pickFolder()

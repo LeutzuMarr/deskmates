@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import { ArrowUp, Square } from 'lucide-react'
+import { Glass } from 'glisse'
 import { useStore } from '../lib/store'
 import { concentricVars } from '../lib/design'
 import { Conversation } from '../components/Conversation'
@@ -92,38 +93,37 @@ export function AgentsSessionView({ sessionId }: { sessionId: string }) {
         timeline={timeline}
         running={busy}
         emptyHint="Deskmates is checking in with the agent. Its reply — and the check-in confirmation — will show up here."
+        dock={
+          <Glass className="composer-box p-2">
+            <label htmlFor={inputId} className="sr-only">
+              Message
+            </label>
+            <textarea
+              id={inputId}
+              ref={textareaRef}
+              value={text}
+              disabled={busy}
+              placeholder={busy ? 'Waiting for the agent to reply…' : `Send a prompt to ${TOOL_LABELS[session.tool]}`}
+              onChange={(event) => setText(event.target.value)}
+              onKeyDown={onKeyDown}
+              rows={1}
+              className="w-full resize-none bg-transparent text-[15px] leading-normal text-ink outline-none placeholder:text-ink-faint"
+            />
+            <div className="mt-2 flex items-center justify-end">
+              <button
+                type="button"
+                aria-label="Send"
+                disabled={!text.trim() || busy}
+                className="send-btn r-concentric flex h-8 w-9 items-center justify-center bg-clay text-white disabled:cursor-not-allowed disabled:opacity-50 enabled:hover:bg-clay-deep"
+                style={concentricVars(8)}
+                onClick={send}
+              >
+                <ArrowUp size={16} aria-hidden="true" />
+              </button>
+            </div>
+          </Glass>
+        }
       />
-
-      <div className="shrink-0 px-8 pb-6">
-        <div className="rounded-3xl border border-rule bg-card p-2">
-          <label htmlFor={inputId} className="sr-only">
-            Message
-          </label>
-          <textarea
-            id={inputId}
-            ref={textareaRef}
-            value={text}
-            disabled={busy}
-            placeholder={busy ? 'Waiting for the agent to reply…' : `Send a prompt to ${TOOL_LABELS[session.tool]}`}
-            onChange={(event) => setText(event.target.value)}
-            onKeyDown={onKeyDown}
-            rows={1}
-            className="w-full resize-none bg-transparent text-[15px] leading-normal text-ink outline-none placeholder:text-ink-faint"
-          />
-          <div className="mt-2 flex items-center justify-end">
-            <button
-              type="button"
-              aria-label="Send"
-              disabled={!text.trim() || busy}
-              className="r-concentric flex h-8 w-9 items-center justify-center bg-clay text-white disabled:cursor-not-allowed disabled:opacity-50 enabled:hover:bg-clay-deep"
-              style={concentricVars(8)}
-              onClick={send}
-            >
-              <ArrowUp size={16} aria-hidden="true" />
-            </button>
-          </div>
-        </div>
-      </div>
     </div>
   )
 }

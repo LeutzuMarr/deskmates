@@ -1,0 +1,106 @@
+/**
+ * The phone web app's start: pairs from the "Add a phone" link (#pair=…, read here and never sent
+ * anywhere), keeps the pairing on this phone, stands in for the desktop API, and then starts the
+ * same app the PC shows, connected through the encrypted relay.
+ */
+import { decodePairing, fromBase64Url } from '../../../shared/remote-crypto'
+import { RelayConnection, RelaySocket, type RemoteDevice } from './relay'
+import '../styles.css'
+import '../styles/glass.css'
+import '../styles/sidebar.css'
+import '../styles/marks.css'
+
+const STORAGE = 'deskmates:remote-device'
+
+function readDevice(): RemoteDevice | null {
+  try {
+    const raw = localStorage.getItem(STORAGE)
+    return raw ? (JSON.parse(raw) as RemoteDevice) : null
+  } catch {
+    return null
+  }
+}
+
+function message(title: string, body: string): void {
+  document.body.innerHTML = ''
+  const main = document.createElement('main')
+  main.style.cssText = 'max-width:380px;margin:18vh auto;padding:0 24px;font-family:system-ui,sans-serif;text-align:center;color:inherit'
+  const h = document.createElement('h1')
+  h.textContent = title
+  h.style.cssText = 'font-family:Georgia,serif;font-weight:400;font-size:28px;margin:0 0 12px'
+  const p = document.createElement('p')
+  p.textContent = body
+  p.style.cssText = 'font-size:14px;line-height:1.5;opacity:.75'
+  main.append(h, p)
+  document.body.append(main)
+}
+
+/** Web push: shown as a small button until the user allows notifications (browsers need a tap). */
+async function offerNotifications(connection: RelayConnection): Promise<void> {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return
+  const registration = await navigator.serviceWorker.register('/sw.js')
+  const subscribe = async (): Promise<void> => {
+    const subscription =
+      (await registration.pushManager.getSubscription()) ??
+      (await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: fromBase64Url(connection.device.vapid) }))
+    await connection.send({ t: 'push', sub: subscription.toJSON() })
+  }
+  if (Notification.permission === 'granted') {
+    await subscribe().catch(() => undefined)
+    return
+  }
+  if (Notification.permission === 'denied') return
+  const button = document.createElement('button')
+  button.textContent = 'Turn on notifications'
+  button.style.cssText =
+    'position:fixed;left:50%;bottom:calc(16px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:60;padding:10px 18px;border-radius:999px;border:0;background:#c96442;color:#fff;font:600 14px system-ui,sans-serif;box-shadow:0 6px 18px rgba(0,0,0,.25)'
+  button.onclick = async () => {
+    if ((await Notification.requestPermission()) === 'granted') await subscribe().catch(() => undefined)
+    button.remove()
+  }
+  document.body.append(button)
+}
+
+async function start(): Promise<void> {
+  const fragment = new URLSearchParams(location.hash.slice(1)).get('pair')
+  let pairedNow = false
+  if (fragment) {
+    const pairing = decodePairing(fragment)
+    history.replaceState(null, '', location.pathname)
+    if (!pairing) {
+      message('That link has expired', 'Make a new one in Deskmates on your PC: Settings → Phone → Add a phone.')
+      return
+    }
+    const device: RemoteDevice = { relay: pairing.relay, anon: pairing.anon, device: pairing.device, key: pairing.key, pc: pairing.pc, vapid: pairing.vapid }
+    localStorage.setItem(STORAGE, JSON.stringify(device))
+    pairedNow = true
+  }
+  const device = readDevice()
+  if (!device) {
+    message('Deskmates', 'Open this from the link or QR code in Deskmates on your PC: Settings → Phone → Add a phone.')
+    return
+  }
+  const connection = new RelayConnection(device)
+  await connection.send({ t: 'hello', name: /iPhone|iPad/.test(navigator.userAgent) ? 'iPhone' : /Android/.test(navigator.userAgent) ? 'Android phone' : 'Browser' })
+  if (pairedNow) localStorage.setItem('deskmates:tab', 'duo')
+
+  const none = (): Promise<null> => Promise.resolve(null)
+  window.deskmates = {
+    platform: 'other',
+    getCoreConnection: () => Promise.resolve({ port: 0, token: '' }),
+    onCoreRestarted: () => () => undefined,
+    openSocket: () => new RelaySocket(connection) as unknown as WebSocket,
+    secrets: { status: () => Promise.resolve([]), set: () => Promise.resolve([]) },
+    pickFolder: none,
+    pathForFile: () => '',
+    openPath: () => Promise.resolve(),
+    autoStart: { get: () => Promise.resolve(false), set: () => Promise.resolve(false) },
+    appearance: { pickImage: none, pickFont: none, pickAnimation: none, setWindowIcon: () => Promise.resolve(), setTheme: () => Promise.resolve() },
+    design: { export: none, exportVideo: none, cancelVideo: () => Promise.resolve(), onVideoProgress: () => () => undefined, systemFonts: () => Promise.resolve([]) },
+    engine: { installWsl: () => Promise.resolve({ outcome: 'error', message: 'Setting up the bot engine only works in the desktop app.' }) }
+  } as unknown as typeof window.deskmates
+  await import('../main')
+  void offerNotifications(connection).catch(() => undefined)
+}
+
+void start()

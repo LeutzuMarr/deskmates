@@ -1,8 +1,28 @@
-import { contextBridge, ipcRenderer } from 'electron'
-import type { DesktopApi, DesignExportFormat, VideoExportOptions } from '../shared/desktop-api'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import type { DesktopApi, DesignExportFormat, HostPlatform, ThemeChoice, VideoExportOptions } from '../shared/desktop-api'
 import type { ProviderId } from '../shared/protocol'
 
+function hostPlatform(): HostPlatform {
+  const { platform } = process
+  return platform === 'win32' || platform === 'darwin' || platform === 'linux' ? platform : 'other'
+}
+
 const deskmates: DesktopApi = {
+  platform: hostPlatform(),
+
+  window: {
+    minimize: () => ipcRenderer.send('window:minimize'),
+    toggleMaximize: () => ipcRenderer.send('window:toggleMaximize'),
+    close: () => ipcRenderer.send('window:close'),
+    onMaximizeChange: (listener) => {
+      const handler = (_event: Electron.IpcRendererEvent, maximized: boolean): void => listener(maximized)
+      ipcRenderer.on('window:maximizeChange', handler)
+      return () => {
+        ipcRenderer.removeListener('window:maximizeChange', handler)
+      }
+    }
+  },
+
   getCoreConnection: () => ipcRenderer.invoke('core:connection'),
 
   onCoreRestarted: (listener) => {
@@ -17,6 +37,13 @@ const deskmates: DesktopApi = {
   },
 
   pickFolder: () => ipcRenderer.invoke('dialog:pickFolder'),
+  pathForFile: (file: File) => {
+    try {
+      return webUtils.getPathForFile(file)
+    } catch {
+      return ''
+    }
+  },
 
   openPath: (path: string) => ipcRenderer.invoke('shell:openPath', path),
 
@@ -29,7 +56,8 @@ const deskmates: DesktopApi = {
     pickImage: () => ipcRenderer.invoke('appearance:pickImage'),
     pickFont: () => ipcRenderer.invoke('appearance:pickFont'),
     pickAnimation: () => ipcRenderer.invoke('appearance:pickAnimation'),
-    setWindowIcon: (dataUrl: string | null) => ipcRenderer.invoke('appearance:setWindowIcon', dataUrl)
+    setWindowIcon: (dataUrl: string | null) => ipcRenderer.invoke('appearance:setWindowIcon', dataUrl),
+    setTheme: (theme: ThemeChoice) => ipcRenderer.invoke('appearance:setTheme', theme)
   },
 
   design: {
@@ -46,6 +74,14 @@ const deskmates: DesktopApi = {
       }
     },
     systemFonts: () => ipcRenderer.invoke('design:systemFonts')
+  },
+
+  browser: {
+    setBounds: (bounds) => ipcRenderer.invoke('browser:setBounds', bounds),
+    navigate: (op, url) => ipcRenderer.invoke('browser:navigate', op, url),
+    selectTab: (tabId) => ipcRenderer.invoke('browser:selectTab', tabId),
+    closeTab: (tabId) => ipcRenderer.invoke('browser:closeTab', tabId),
+    handBack: () => ipcRenderer.invoke('browser:handBack')
   },
 
   engine: {

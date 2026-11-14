@@ -22,6 +22,13 @@ export class LiveTimeline {
   /** Throttle for text-delta emissions. */
   private lastEmitTime = 0
 
+  /** Current reasoning accumulator, streamed the same way as text. */
+  private thinkingId: string | null = null
+  private thinkingText = ''
+  private thinkingAt = 0
+  private thinkingCounter = 0
+  private lastThinkingEmit = 0
+
   constructor(taskId: string, bus: EventBus, now: () => number) {
     this.taskId = taskId
     this.bus = bus
@@ -33,10 +40,34 @@ export class LiveTimeline {
 
     switch (p.type) {
       case 'start-step':
+        this.flushThinking()
         this.endCurrentText()
         break
 
+      case 'reasoning-delta': {
+        const delta: string = p.text ?? p.delta ?? ''
+        if (!delta) break
+        if (!this.thinkingId) {
+          this.thinkingCounter++
+          this.thinkingId = `live-think-${this.thinkingCounter}`
+          this.thinkingText = ''
+          this.thinkingAt = this.now()
+        }
+        this.thinkingText += delta
+        const now = this.now()
+        if (now - this.lastThinkingEmit >= 80) {
+          this.emitThinking()
+          this.lastThinkingEmit = now
+        }
+        break
+      }
+
+      case 'reasoning-end':
+        this.flushThinking()
+        break
+
       case 'text-delta': {
+        this.flushThinking()
         if (!this.currentTextId) {
           this.textCounter++
           this.currentTextId = `live-${this.textCounter}`
@@ -54,6 +85,7 @@ export class LiveTimeline {
       }
 
       case 'tool-call': {
+        this.flushThinking()
         this.flushText()
         const toolItem: ToolItem = {
           kind: 'tool',
@@ -125,7 +157,23 @@ export class LiveTimeline {
 
   /** Flush any remaining text. */
   flush(): void {
+    this.flushThinking()
     this.flushText()
+  }
+
+  private flushThinking(): void {
+    if (this.thinkingId && this.thinkingText.trim()) this.emitThinking()
+    this.thinkingId = null
+    this.thinkingText = ''
+  }
+
+  private emitThinking(): void {
+    if (!this.thinkingId || !this.thinkingText.trim()) return
+    const item: TimelineItem = { kind: 'thinking', id: this.thinkingId, at: this.thinkingAt, text: this.thinkingText }
+    const index = this.items.findIndex((i) => i.id === item.id)
+    if (index >= 0) this.items[index] = item
+    else this.items.push(item)
+    this.bus.emit({ type: 'task.item', taskId: this.taskId, item })
   }
 
   private endCurrentText(): void {

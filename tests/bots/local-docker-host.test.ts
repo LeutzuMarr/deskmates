@@ -10,7 +10,9 @@ import {
   CDP_CONTAINER_PORT,
   DISTRO,
   NOVNC_CONTAINER_PORT,
+  DOCKER_PROGRAM,
   SHARED_CONTAINER_NAME,
+  USES_WSL,
   WSL_EXE,
   dockerArgs,
   networkNameFor,
@@ -18,9 +20,9 @@ import {
   pcStorageDir,
   sharedDir,
   startDockerArgs,
-  toWslPath
+  toDockerPath
 } from '../../src/core/bots/host-paths'
-import { LocalWslHost } from '../../src/core/bots/local-wsl-host'
+import { LocalDockerHost } from '../../src/core/bots/local-docker-host'
 import type { PcProbe } from '../../src/core/bots/pc-health'
 import type { PcService } from '../../src/core/bots/services'
 
@@ -42,7 +44,7 @@ interface FakeContainer {
 
 /**
  * Keeps its own container-name -> state map and answers `run`/`inspect`/`start`/`stop`/`rm`/
- * `exec`/`cp`/`pull`/`build` the way real Docker would, so `LocalWslHost` can be driven through
+ * `exec`/`cp`/`pull`/`build` the way real Docker would, so `LocalDockerHost` can be driven through
  * realistic multi-step sequences (create-then-inspect, stop-then-start, …) instead of one canned
  * response per test. Every call is recorded in `calls` for exact-command-line assertions.
  */
@@ -68,7 +70,7 @@ class FakeDocker implements CommandRunner {
   readonly networkRmFails = new Set<string>()
   /** When true, every `docker run` that still has `--cpus` fails the way a real WSL2 distro with
    *  only the memory cgroup controller delegated does (see `runContainer`'s comment) — a retry
-   *  without `--cpus` then succeeds, the way `LocalWslHost` is expected to retry. */
+   *  without `--cpus` then succeeds, the way `LocalDockerHost` is expected to retry. */
   cpuLimitUnsupported = false
   /** When true, dockerd isn't up yet (a distro WSL just booted again): docker commands fail until the start-docker script runs. */
   daemonStopped = false
@@ -79,7 +81,7 @@ class FakeDocker implements CommandRunner {
 
   async run(file: string, args: string[], options?: RunOptions): Promise<CommandResult> {
     this.calls.push({ file, args, options })
-    if (file !== WSL_EXE) return { code: 1, stdout: '', stderr: `fake docker: unexpected program ${file}` }
+    if (file !== DOCKER_PROGRAM) return { code: 1, stdout: '', stderr: `fake docker: unexpected program ${file}` }
     if (this.engineDown) {
       return { code: 1, stdout: '', stderr: 'error during connect: this error may indicate that the docker daemon is not running.' }
     }
@@ -97,7 +99,7 @@ class FakeDocker implements CommandRunner {
         stderr: 'Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?'
       }
     }
-    const [cmd, ...rest] = args.slice(4)
+    const [cmd, ...rest] = dockerSub(args)
     switch (cmd) {
       case 'run':
         return this.handleRun(rest)
@@ -250,6 +252,16 @@ function isStartDockerCall(args: string[]): boolean {
   return args.join('\u0000') === startDockerArgs().join('\u0000')
 }
 
+/**
+ * The `docker …` part of a recorded call, without the platform prefix. On Windows the runner sees
+ * `wsl.exe -d deskmates-engine -- docker run …`; natively it sees `docker run …` directly. Tests
+ * assert against the docker arguments, so they strip whichever prefix this platform adds — which
+ * also means the same assertions hold on both without a skip.
+ */
+function dockerSub(args: string[]): string[] {
+  return USES_WSL ? args.slice(4) : args
+}
+
 interface FakeProcess {
   file: string
   args: string[]
@@ -297,13 +309,13 @@ const OPTS: CreatePcOptions = { memoryMb: 1024, cpuLimit: 2, idleStopMinutes: 30
 
 function runCallsFor(fake: FakeDocker, name: string): RunCall[] {
   return fake.calls.filter((c) => {
-    const sub = c.args.slice(4)
+    const sub = dockerSub(c.args)
     return sub[0] === 'run' && sub[sub.indexOf('--name') + 1] === name
   })
 }
 
 function callsMatching(fake: FakeDocker, subcommand: string): RunCall[] {
-  return fake.calls.filter((c) => c.args.slice(4)[0] === subcommand)
+  return fake.calls.filter((c) => dockerSub(c.args)[0] === subcommand)
 }
 
 function lastCall(fake: FakeDocker): RunCall {
@@ -315,7 +327,7 @@ function lastCall(fake: FakeDocker): RunCall {
 function allPortsFromRunCall(fake: FakeDocker, name: string, occurrence = 0): { agent: number; novnc: number; cdp: number } {
   const call = runCallsFor(fake, name)[occurrence]
   if (!call) throw new Error(`No run call #${occurrence} for ${name}`)
-  const sub = call.args.slice(4)
+  const sub = dockerSub(call.args)
   const mapped: number[] = []
   for (let i = 0; i < sub.length; i++) {
     if (sub[i] === '-p') mapped.push(Number(sub[i + 1].split(':')[1]))
@@ -327,7 +339,7 @@ function allPortsFromRunCall(fake: FakeDocker, name: string, occurrence = 0): { 
 function tokenFromRunCall(fake: FakeDocker, name: string, occurrence = 0): string {
   const call = runCallsFor(fake, name)[occurrence]
   if (!call) throw new Error(`No run call #${occurrence} for ${name}`)
-  const tokenArg = call.args.slice(4).find((a) => a.startsWith('DESKMATES_TOKEN='))
+  const tokenArg = dockerSub(call.args).find((a) => a.startsWith('DESKMATES_TOKEN='))
   if (!tokenArg) throw new Error('No DESKMATES_TOKEN argument found in that run call.')
   return tokenArg.slice('DESKMATES_TOKEN='.length)
 }
@@ -349,7 +361,7 @@ function makeHost(
   const fake = overrides.fake ?? new FakeDocker()
   const clock = overrides.clock ?? makeClock(1_000_000)
   const spawner = new FakeSpawner()
-  const host = new LocalWslHost({
+  const host = new LocalDockerHost({
     runner: fake,
     dataDir,
     image: IMAGE,
@@ -369,7 +381,7 @@ afterEach(() => {
 // ---- PcService compatibility ----
 
 describe('PcService compatibility', () => {
-  it('LocalWslHost structurally satisfies PcService — fails to typecheck if the two drift apart', () => {
+  it('LocalDockerHost structurally satisfies PcService — fails to typecheck if the two drift apart', () => {
     const { host } = makeHost()
     const _check: PcService = host
     expect(_check).toBe(host)
@@ -404,7 +416,7 @@ describe('create', () => {
     const ports = allPortsFromRunCall(fake, name)
 
     // The network is created before the container that joins it, and nothing else uses it.
-    expect(callsMatching(fake, 'network').map((c) => c.args.slice(4))).toEqual([['network', 'create', network]])
+    expect(callsMatching(fake, 'network').map((c) => dockerSub(c.args))).toEqual([['network', 'create', network]])
     expect(fake.networks.has(network)).toBe(true)
 
     expect(runCallsFor(fake, name)).toHaveLength(1)
@@ -429,20 +441,20 @@ describe('create', () => {
         '-p',
         `127.0.0.1:${ports.cdp}:${CDP_CONTAINER_PORT}`,
         '-v',
-        `${toWslPath(pcStorageDir(dataDir, 'bot-a'))}:/home/bot/data`,
+        `${toDockerPath(pcStorageDir(dataDir, 'bot-a'))}:/home/bot/data`,
         '-v',
-        `${toWslPath(sharedDir(dataDir))}:/shared`,
+        `${toDockerPath(sharedDir(dataDir))}:/shared`,
         '-e',
         `DESKMATES_TOKEN=${token}`,
         IMAGE
       ])
     )
     // The network is created strictly before the container that references it.
-    const networkCallIndex = fake.calls.findIndex((c) => c.args.slice(4).join(' ') === `network create ${network}`)
-    const runCallIndex = fake.calls.findIndex((c) => c.args.slice(4)[0] === 'run')
+    const networkCallIndex = fake.calls.findIndex((c) => dockerSub(c.args).join(' ') === `network create ${network}`)
+    const runCallIndex = fake.calls.findIndex((c) => dockerSub(c.args)[0] === 'run')
     expect(networkCallIndex).toBeGreaterThanOrEqual(0)
     expect(networkCallIndex).toBeLessThan(runCallIndex)
-    expect(fake.calls.some((c) => c.args.slice(4)[0] === 'inspect')).toBe(true)
+    expect(fake.calls.some((c) => dockerSub(c.args)[0] === 'inspect')).toBe(true)
   })
 
   it('gives each bot its own isolated network, distinct from every other bot and from the shared PC', async () => {
@@ -458,8 +470,8 @@ describe('create', () => {
     expect(fake.networks.has(networkA)).toBe(true)
     expect(fake.networks.has(networkB)).toBe(true)
 
-    const argsA = runCallsFor(fake, nameA)[0].args.slice(4)
-    const argsB = runCallsFor(fake, nameB)[0].args.slice(4)
+    const argsA = dockerSub(runCallsFor(fake, nameA)[0].args)
+    const argsB = dockerSub(runCallsFor(fake, nameB)[0].args)
     expect(argsA[argsA.indexOf('--network') + 1]).toBe(networkA)
     expect(argsB[argsB.indexOf('--network') + 1]).toBe(networkB)
     // Neither bot's --network value ever matches the other bot's container name or network.
@@ -474,7 +486,7 @@ describe('create', () => {
 
     const pc = await host.create('bot-a', OPTS)
     expect(pc.state).toBe('running')
-    expect(callsMatching(fake, 'network').map((c) => c.args.slice(4))).toEqual([['network', 'create', network]])
+    expect(callsMatching(fake, 'network').map((c) => dockerSub(c.args))).toEqual([['network', 'create', network]])
   })
 
   it('is idempotent: calling it again on an already-running PC does not run a second container', async () => {
@@ -658,7 +670,7 @@ describe('delete', () => {
     expect(fake.networks.has(networkA)).toBe(false)
     expect(existsSync(pcStorageDir(dataDir, 'bot-a'))).toBe(false)
     expect(fake.networks.has(networkB)).toBe(true) // bot-b's isolation is untouched by deleting bot-a
-    expect(callsMatching(fake, 'network').map((c) => c.args.slice(4))).toEqual([
+    expect(callsMatching(fake, 'network').map((c) => dockerSub(c.args))).toEqual([
       ['network', 'create', networkA],
       ['network', 'create', networkB],
       ['network', 'rm', networkA]
@@ -796,7 +808,7 @@ describe('copyIn / copyOut', () => {
     await host.create('bot-a', OPTS)
     const name = ownContainerName('bot-a')
     await host.copyIn('bot-a', 'C:\\Users\\david\\file.txt', '/home/bot/data/file.txt')
-    expect(lastCall(fake).args).toEqual(dockerArgs(['cp', toWslPath('C:\\Users\\david\\file.txt'), `${name}:/home/bot/data/file.txt`]))
+    expect(lastCall(fake).args).toEqual(dockerArgs(['cp', toDockerPath('C:\\Users\\david\\file.txt'), `${name}:/home/bot/data/file.txt`]))
   })
 
   it('copyOut passes container:path and the WSL-mapped local path as separate array elements', async () => {
@@ -804,7 +816,7 @@ describe('copyIn / copyOut', () => {
     await host.create('bot-a', OPTS)
     const name = ownContainerName('bot-a')
     await host.copyOut('bot-a', '/home/bot/data/out.png', 'C:\\Users\\david\\out.png')
-    expect(lastCall(fake).args).toEqual(dockerArgs(['cp', `${name}:/home/bot/data/out.png`, toWslPath('C:\\Users\\david\\out.png')]))
+    expect(lastCall(fake).args).toEqual(dockerArgs(['cp', `${name}:/home/bot/data/out.png`, toDockerPath('C:\\Users\\david\\out.png')]))
   })
 
   it('maps a failed copy to a classified BotHostError', async () => {
@@ -835,7 +847,7 @@ describe('pull / buildLocal', () => {
   it('buildLocal runs docker build with -t <image> and the WSL-mapped context dir', async () => {
     const { host, fake } = makeHost()
     await host.buildLocal('C:\\Projects\\Deskmates\\bot-image', 'my-custom:tag')
-    expect(lastCall(fake).args).toEqual(dockerArgs(['build', '-t', 'my-custom:tag', toWslPath('C:\\Projects\\Deskmates\\bot-image')]))
+    expect(lastCall(fake).args).toEqual(dockerArgs(['build', '-t', 'my-custom:tag', toDockerPath('C:\\Projects\\Deskmates\\bot-image')]))
   })
 })
 
@@ -853,7 +865,7 @@ describe('port allocation', () => {
     expect(b.cdp).toBe(a.cdp + 1)
     // Every `-p` port mapping (as opposed to the `-v` volume args, which also contain a `:`) is host-bound to 127.0.0.1.
     for (const call of [...runCallsFor(fake, ownContainerName('bot-a')), ...runCallsFor(fake, ownContainerName('bot-b'))]) {
-      const sub = call.args.slice(4)
+      const sub = dockerSub(call.args)
       const mappings = sub.filter((_arg, i) => sub[i - 1] === '-p')
       expect(mappings).toHaveLength(3)
       for (const mapping of mappings) expect(mapping.startsWith('127.0.0.1:')).toBe(true)
@@ -865,14 +877,14 @@ describe('port allocation', () => {
     createdDataDirs.push(dataDir)
     const fake = new FakeDocker()
 
-    const host1 = new LocalWslHost({ runner: fake, dataDir, image: IMAGE, clock: makeClock().now, spawner: new FakeSpawner(), probe: answeringProbe })
+    const host1 = new LocalDockerHost({ runner: fake, dataDir, image: IMAGE, clock: makeClock().now, spawner: new FakeSpawner(), probe: answeringProbe })
     await host1.create('bot-a', OPTS)
     const originalPorts = allPortsFromRunCall(fake, ownContainerName('bot-a'))
 
-    // A fresh LocalWslHost over the same dataDir simulates the app restarting: its PcRegistry
+    // A fresh LocalDockerHost over the same dataDir simulates the app restarting: its PcRegistry
     // reloads from registry.json, while `fake` keeps standing in for the containers Docker itself
     // would still have running.
-    const host2 = new LocalWslHost({ runner: fake, dataDir, image: IMAGE, clock: makeClock().now, spawner: new FakeSpawner(), probe: answeringProbe })
+    const host2 = new LocalDockerHost({ runner: fake, dataDir, image: IMAGE, clock: makeClock().now, spawner: new FakeSpawner(), probe: answeringProbe })
     await host2.reset('bot-a') // removes the container but keeps the registry's slot
     await host2.create('bot-a', OPTS)
     expect(allPortsFromRunCall(fake, ownContainerName('bot-a'), 1)).toEqual(originalPorts)
@@ -1023,11 +1035,11 @@ describe('checkIdle', () => {
     const dataDir = realpathSync.native(mkdtempSync(join(tmpdir(), 'deskmates-host-')))
     createdDataDirs.push(dataDir)
     const fake = new FakeDocker()
-    const host1 = new LocalWslHost({ runner: fake, dataDir, image: IMAGE, clock: makeClock(0).now, spawner: new FakeSpawner(), probe: answeringProbe })
+    const host1 = new LocalDockerHost({ runner: fake, dataDir, image: IMAGE, clock: makeClock(0).now, spawner: new FakeSpawner(), probe: answeringProbe })
     await host1.create('bot-a', { ...OPTS, idleStopMinutes: 5 })
 
     const clock2 = makeClock(10_000_000)
-    const host2 = new LocalWslHost({ runner: fake, dataDir, image: IMAGE, clock: clock2.now, spawner: new FakeSpawner(), probe: answeringProbe })
+    const host2 = new LocalDockerHost({ runner: fake, dataDir, image: IMAGE, clock: clock2.now, spawner: new FakeSpawner(), probe: answeringProbe })
     await host2.checkIdle()
     expect(fake.containers.get(ownContainerName('bot-a'))?.status).toBe('running')
   })
@@ -1127,7 +1139,9 @@ describe('error mapping', () => {
     fake.engineDown = true
     await expect(host.start('bot-a')).rejects.toMatchObject({
       code: 'engine-not-running',
-      message: "The Deskmates engine isn't running. Open the setup wizard to start it."
+      message: USES_WSL
+        ? "The Deskmates engine isn't running. Open the setup wizard to start it."
+        : "Docker isn't running. Start Docker, then try again."
     })
   })
 })
@@ -1146,10 +1160,14 @@ describe('engine keep-alive and readiness', () => {
 
     const pc = await host.start('bot-a')
     expect(pc.state).toBe('running')
-    const startDockerIndex = fake.calls.findIndex((c) => isStartDockerCall(c.args))
-    const inspectIndex = fake.calls.findIndex((c) => c.args.slice(4)[0] === 'inspect')
-    expect(startDockerIndex).toBeGreaterThanOrEqual(0)
-    expect(startDockerIndex).toBeLessThan(inspectIndex)
+    // On Windows this is the start-docker script that revives dockerd in the distro; natively there
+    // is nothing to start, so the readiness probe (`docker info`) is what has to come first.
+    const readinessIndex = USES_WSL
+      ? fake.calls.findIndex((c) => isStartDockerCall(c.args))
+      : fake.calls.findIndex((c) => dockerSub(c.args)[0] === 'info')
+    const inspectIndex = fake.calls.findIndex((c) => dockerSub(c.args)[0] === 'inspect')
+    expect(readinessIndex).toBeGreaterThanOrEqual(0)
+    expect(readinessIndex).toBeLessThan(inspectIndex)
     expect(callsMatching(fake, 'start')).toHaveLength(1)
   })
 
@@ -1161,7 +1179,7 @@ describe('engine keep-alive and readiness', () => {
     expect(spawner.alive()).toHaveLength(0)
   })
 
-  it('holds one keep-alive wsl.exe while any PC is running and releases it when the last one stops', async () => {
+  it.skipIf(!USES_WSL)('holds one keep-alive wsl.exe while any PC is running and releases it when the last one stops', async () => {
     const { host, spawner } = makeHost()
     await host.create('bot-a', OPTS)
     await host.create('bot-b', OPTS)
@@ -1179,7 +1197,9 @@ describe('engine keep-alive and readiness', () => {
     expect(spawner.alive()).toHaveLength(0)
   })
 
-  it('releases the keep-alive when the last running PC is idle-stopped', async () => {
+  // The rest of this block covers keep-alive lifecycle. That only exists on Windows — natively
+  // `hold()` is a no-op, so there is no process to count and these assertions can't hold.
+  it.skipIf(!USES_WSL)('releases the keep-alive when the last running PC is idle-stopped', async () => {
     const clock = makeClock(0)
     const { host, spawner } = makeHost({ clock })
     await host.create('bot-a', { ...OPTS, idleStopMinutes: 5 })
@@ -1190,7 +1210,7 @@ describe('engine keep-alive and readiness', () => {
     expect(spawner.alive()).toHaveLength(0)
   })
 
-  it('holds the shared PC too, and releases it once the last bot gives up its turn', async () => {
+  it.skipIf(!USES_WSL)('holds the shared PC too, and releases it once the last bot gives up its turn', async () => {
     const { host, spawner } = makeHost()
     host.setMode('shared')
     await host.start('bot-a')
@@ -1199,7 +1219,7 @@ describe('engine keep-alive and readiness', () => {
     expect(spawner.alive()).toHaveLength(0)
   })
 
-  it('starts a new keep-alive when the previous one exited on its own (e.g. wsl --shutdown)', async () => {
+  it.skipIf(!USES_WSL)('starts a new keep-alive when the previous one exited on its own (e.g. wsl --shutdown)', async () => {
     const { host, spawner } = makeHost()
     await host.create('bot-a', OPTS)
     spawner.spawned[0].exit()
@@ -1209,7 +1229,7 @@ describe('engine keep-alive and readiness', () => {
     expect(spawner.alive()).toHaveLength(1)
   })
 
-  it('dispose releases the keep-alive', async () => {
+  it.skipIf(!USES_WSL)('dispose releases the keep-alive', async () => {
     const { host, spawner } = makeHost()
     await host.create('bot-a', OPTS)
     host.dispose()

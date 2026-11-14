@@ -31,6 +31,8 @@ export interface ModelResolver {
 
 export interface RunnerDeps {
   repos: Repos
+  /** Deskmates' data folder (shared memory documents, chat widgets). */
+  dataDir?: string
   bus: EventBus
   models: ModelResolver
   changes: ChangeLog
@@ -47,6 +49,17 @@ export interface RunnerDeps {
   getTerminals?: () => TerminalsService | undefined
   /** Offscreen page rendering in the host, for the design tools that screenshot or run pages. */
   render?: ToolContext['render']
+  /** The agent browser; absent without the app. */
+  browser?: ToolContext['browser']
+  /** Screen control for screen_look / screen_act; absent without a desktop. */
+  screen?: ToolContext['screen']
+  /** Scheduled tasks; absent in tests. A getter, since the scheduler is built after the runner. */
+  getSchedules?: () => ToolContext['schedules']
+  /** The `deskmates` command, for command-line agents to reach the agent browser from their shell.
+   *  A getter, since the agent kit is written after the runner is built. */
+  agentCommand?: () => string | undefined
+  /** The name a run acts under in browser questions (a scheduled task's name), when it isn't the tab's. */
+  agentNameFor?: (taskId: string) => string | undefined
   now?: () => Date
 }
 
@@ -304,6 +317,14 @@ export class TaskRunner {
         ...(deps.plugins ? { plugins: deps.plugins } : {}),
         ...(deps.subagents ? { subagents: deps.subagents } : {}),
         ...(deps.render ? { render: deps.render } : {}),
+        ...(deps.browser ? { browser: deps.browser } : {}),
+        ...(deps.screen ? { screen: deps.screen } : {}),
+        ...(deps.getSchedules?.() ? { schedules: deps.getSchedules() } : {}),
+        ...(deps.agentNameFor?.(taskId) ? { agentName: deps.agentNameFor(taskId) } : {}),
+        cliModel: resolved.cli === true,
+        ...(deps.dataDir ? { dataDir: deps.dataDir } : {}),
+        chats: chatHistory(repos),
+        signal: controller.signal,
         projectKind: project.kind === 'design' ? 'design' : 'work',
         renameProject: (title) => {
           const renamed = repos.projects.update(task.projectId, { name: title })
@@ -348,6 +369,7 @@ export class TaskRunner {
         projectInstructions: readProjectInstructions(project.folder),
         now: getNow(),
         model: { provider, modelId },
+        agentCommand: deps.agentCommand?.(),
         ...(deps.skills
           ? { skills: deps.skills.catalog() }
           : {})
@@ -374,10 +396,13 @@ export class TaskRunner {
         }),
         instructions,
         tools,
+        // Gemini 2.5 and later think before answering; this asks it to share a summary of that
+        // thinking so the transcript can show it. Older Gemini models reject the setting.
+        providerOptions: sharesThoughts(provider, modelId) ? { google: { thinkingConfig: { includeThoughts: true } } } : undefined,
         toolApproval: ({ toolCall }: { toolCall: { toolName: string } }) =>
           approvalFor(toolCall.toolName, repos.tasks.require(taskId).autoApprove),
         // A question to the user ends the turn: the answers come back as the next message.
-        stopWhen: [isStepCount(settings.maxSteps), hasToolCall('AskUserQuestion'), hasToolCall('ask_user')]
+        stopWhen: [isStepCount(settings.maxSteps), hasToolCall('AskUserQuestion'), hasToolCall('ask_user'), hasToolCall('ask_user_input_v0'), hasToolCall('end_conversation')]
       })
 
       // Stream
@@ -454,6 +479,7 @@ export class TaskRunner {
       }
     } finally {
       this.runs.delete(taskId)
+      deps.browser?.endRun(taskId)
       bus.emit({ type: 'task.updated', task: repos.tasks.require(taskId) })
       bus.emit({ type: 'task.timeline', taskId, timeline: this.timeline(taskId) })
       bus.emit({ type: 'usage.updated', usage: repos.usage.list() })
@@ -485,7 +511,7 @@ export class TaskRunner {
     const { repos, bus } = this.deps
     const terminals = this.deps.getTerminals?.()
     if (!terminals) {
-      throw new Error("CLI providers (OpenCode/agy) need terminal sessions, which aren't available here.")
+      throw new Error("CLI providers (OpenCode/agy/Freebuff) need terminal sessions, which aren't available here.")
     }
 
     const stored = repos.tasks.messages(taskId)
@@ -494,15 +520,21 @@ export class TaskRunner {
       typeof content === 'string'
         ? content
         : content.map((part) => ('text' in part ? part.text : String(part))).join(' ')
-    const prompt = `${instructions.trimEnd()}\n\n${userText.trim()}`.trim()
+    // The Work tab's standing instructions are handed over separately rather than prepended to the
+    // question. For OpenCode that means they become the conversation's `system` block, sent once and
+    // then remembered by the session — the 175KB prompt is no longer re-sent, and no longer re-read,
+    // before every question. It is also what makes the second prompt in a session cheap: the model
+    // already has the brief and only has to read the new message.
+    const prompt = userText.trim()
 
     const live = new LiveTimeline(taskId, bus, () => Date.now())
     const result = await terminals.execute(
-      resolved.provider as 'opencode' | 'agy',
+      resolved.provider as 'opencode' | 'agy' | 'freebuff',
       project.folder,
       prompt,
       resolved.modelId,
       {
+        system: instructions,
         signal: controller.signal,
         onItem: (item) => {
           if (item.kind === 'assistant') {
@@ -535,5 +567,39 @@ export class TaskRunner {
     if (project.kind === 'design') {
       bus.emit({ type: 'design.updated', projectId: task.projectId, updatedAt: Date.now(), source: 'editor' })
     }
+  }
+}
+
+/** Whether this model streams a summary of its reasoning when asked (see the providerOptions above). */
+export function sharesThoughts(provider: string, modelId: string): boolean {
+  if (provider !== 'google') return false
+  // Image, speech and embedding variants share the family name but don't think.
+  return /gemini-(2\.5|[3-9])/i.test(modelId) && !/image|tts|embedding|live|audio/i.test(modelId)
+}
+
+/** The text of a stored message: its text parts, joined. */
+function messageText(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  return content
+    .map((part) => (part && typeof part === 'object' && (part as { type?: string }).type === 'text' ? String((part as { text?: unknown }).text ?? '') : ''))
+    .filter(Boolean)
+    .join('\n')
+}
+
+/** Every project's chats, for the chat-history tools. */
+export function chatHistory(repos: Repos): NonNullable<ToolContext['chats']> {
+  return {
+    list: () =>
+      repos.projects
+        .list()
+        .flatMap((project) => repos.tasks.list(project.id).map((task) => ({ id: task.id, title: task.title, project: project.name, updatedAt: task.updatedAt })))
+        .sort((a, b) => b.updatedAt - a.updatedAt),
+    turns: (id) =>
+      repos.tasks
+        .messages(id)
+        .filter((stored) => stored.message.role === 'user' || stored.message.role === 'assistant')
+        .map((stored) => ({ role: stored.message.role as 'user' | 'assistant', text: messageText(stored.message.content) }))
+        .filter((turn) => turn.text.trim())
   }
 }

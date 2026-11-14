@@ -344,6 +344,81 @@ describe('PluginsService', () => {
   })
 })
 
+describe('linked folders of skills (~/.claude/skills)', () => {
+  function linkedFixture(): Fixture & { linked: string; service: SkillsService } {
+    const f = makeFixture()
+    const linked = join(f.base, 'claude-skills')
+    writeSkillAt(join(linked, 'video-creation'), 'video-creation')
+    mkdirSync(join(linked, 'video-creation', 'tools'), { recursive: true })
+    writeFileSync(join(linked, 'video-creation', 'tools', 'render.py'), 'print("render")\n')
+    mkdirSync(join(linked, 'video-creation', 'node_modules', 'dep'), { recursive: true })
+    writeFileSync(join(linked, 'video-creation', 'node_modules', 'dep', 'index.js'), '\n')
+    mkdirSync(join(linked, 'not-a-skill'), { recursive: true })
+    const service = new SkillsService({ repos: f.repos, dataDir: f.base, linkedDirs: [linked, join(f.base, 'missing-dir')] })
+    return { ...f, linked, service }
+  }
+
+  it('lists linked skills in place, without copying them', () => {
+    const f = linkedFixture()
+    const list = f.service.list()
+    expect(list.map((s) => s.name)).toEqual(['video-creation'])
+    expect(list[0]!.folder).toBe(join(f.linked, 'video-creation'))
+    expect(list[0]!.source).toBe(`linked:${f.linked}`)
+    expect(existsSync(join(f.base, SKILLS_DIR, 'video-creation'))).toBe(false)
+  })
+
+  it('picks up new skills and drops removed ones on the next list', () => {
+    const f = linkedFixture()
+    f.service.list()
+    writeSkillAt(join(f.linked, 'watch'), 'watch')
+    expect(f.service.list().map((s) => s.name)).toEqual(['video-creation', 'watch'])
+    rmSync(join(f.linked, 'watch'), { recursive: true, force: true })
+    expect(f.service.list().map((s) => s.name)).toEqual(['video-creation'])
+  })
+
+  it('keeps an imported copy of the same name instead of the linked one', () => {
+    const f = linkedFixture()
+    const copy = f.service.import(writeSkill('video-creation'))
+    expect(copy[0]!.folder).toBe(join(f.base, SKILLS_DIR, 'video-creation'))
+    expect(f.service.list()[0]!.folder).toBe(join(f.base, SKILLS_DIR, 'video-creation'))
+  })
+
+  it('removing a linked skill turns it off and never deletes the user folder', () => {
+    const f = linkedFixture()
+    const [skill] = f.service.list()
+    const list = f.service.remove(skill!.id)
+    expect(list[0]!.enabled).toBe(false)
+    expect(existsSync(join(f.linked, 'video-creation', 'SKILL.md'))).toBe(true)
+    expect(f.service.list()[0]!.enabled).toBe(false)
+  })
+
+  it('load_skill gives the folder, skips dependency folders, and read_skill_file reads inside the skill only', async () => {
+    const f = linkedFixture()
+    const tools = skillsTools(f.service)
+    const loaded = (await tools['load_skill']!.execute!({ name: 'video-creation' } as never, { signal: undefined } as never)) as {
+      folder: string
+      files: string[]
+    }
+    expect(loaded.folder).toBe(join(f.linked, 'video-creation'))
+    expect(loaded.files.sort()).toEqual(['SKILL.md', 'helper.txt', 'tools/render.py'])
+
+    const file = (await tools['read_skill_file']!.execute!(
+      { name: 'video-creation', path: 'tools/render.py' } as never,
+      { signal: undefined } as never
+    )) as { path: string; content: string; absolutePath: string }
+    expect(file.path).toBe('tools/render.py')
+    expect(file.content).toBe('print("render")\n')
+    expect(file.absolutePath).toBe(join(f.linked, 'video-creation', 'tools', 'render.py'))
+
+    await expect(
+      tools['read_skill_file']!.execute!({ name: 'video-creation', path: '../not-a-skill/x' } as never, { signal: undefined } as never)
+    ).rejects.toThrow('outside')
+    await expect(
+      tools['read_skill_file']!.execute!({ name: 'video-creation', path: 'nope.md' } as never, { signal: undefined } as never)
+    ).rejects.toThrow('has no file')
+  })
+})
+
 describe('load_skill tool', () => {
   it('returns the skill instructions and files', async () => {
     const f = makeFixture()

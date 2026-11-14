@@ -1,5 +1,6 @@
 import { isCliProvider, PROVIDER_LABELS } from '../../../shared/protocol'
-import type { ModelRef, TaskStatus, TimelineItem, ToolItem } from '../../../shared/protocol'
+import type { ModelRef, SessionContextUsage, TaskStatus, TimelineItem, ToolItem } from '../../../shared/protocol'
+import { stepLabel } from './steps'
 
 const DAY_MS = 86_400_000
 
@@ -78,14 +79,62 @@ export function awaitingFirstOutput(timeline: TimelineItem[], running: boolean):
  *
  *  A CLI-backed provider boots a whole agent process before it says anything, and on a cold start
  *  that is tens of seconds of silence. Naming it stops the wait reading as a hang. API-backed
- *  providers stream a token almost immediately, so they keep the plain working row. */
-export function startingNotice(model: ModelRef | null | undefined): StartingNotice | null {
+ *  providers stream a token almost immediately, so they keep the plain working row.
+ *
+ *  `warm` suppresses it for OpenCode, which keeps one server per project folder alive between turns:
+ *  a follow-up question in a folder that already has a server is answered in about a second and a
+ *  half, so telling the user to expect a minute of booting would be both false and — after the first
+ *  prompt — a reminder that the whole thing is restarting from scratch, which is the impression this
+ *  notice is only supposed to give on a genuinely cold start. agy has no such server and is still a
+ *  one-shot spawn, so it keeps the notice. */
+export function startingNotice(model: ModelRef | null | undefined, warm = false): StartingNotice | null {
   const provider = model?.provider
   if (!provider || !isCliProvider(provider)) return null
+  if (warm && provider === 'opencode') return null
   return {
     label: `Starting ${PROVIDER_LABELS[provider]}…`,
     hint: 'It boots a whole agent process before it replies — this can take a minute.'
   }
+}
+
+/** Tokens as a short human number. Kept to three characters where it can: `18.4k`, not `18,412`. */
+export function formatTokens(tokens: number): string {
+  if (tokens < 1000) return String(Math.round(tokens))
+  if (tokens < 1_000_000) return `${Math.round(tokens / 100) / 10}k`
+  return `${Math.round(tokens / 100_000) / 10}M`
+}
+
+/** What the context meter should say, and how full it should read.
+ *
+ *  Null whenever the numbers wouldn't be honest: no conversation, or a model that won't report a
+ *  limit to measure against. A meter showing "0%" for a nearly-full context is the one wrong answer
+ *  here, so an unknown limit hides the meter rather than inventing a ceiling. */
+export function contextMeter(usage: SessionContextUsage | null): { label: string; percent: number } | null {
+  if (!usage || !usage.limit || usage.limit <= 0) return null
+  const percent = Math.min(100, Math.max(0, Math.round((usage.used / usage.limit) * 100)))
+  return { label: `${formatTokens(usage.used)} of ${formatTokens(usage.limit)}`, percent }
+}
+
+/** Whether compacting is worth offering right now. Below a tenth of the window there is nothing worth
+ *  folding in, and spending a model call to summarise an almost-empty conversation would only lose
+ *  detail. */
+export function compactWorthwhile(usage: SessionContextUsage | null): boolean {
+  if (!usage || !usage.limit) return false
+  return usage.used / usage.limit >= 0.1
+}
+
+/** Why a compaction isn't available, for the button's tooltip. Null when it is. */
+export function compactBlockedReason(
+  usage: SessionContextUsage | null,
+  compacting: boolean,
+  running: boolean
+): string | null {
+  if (compacting) return 'Compacting…'
+  if (running) return 'Wait for the current reply to finish.'
+  if (!usage) return 'Send a prompt first — an empty conversation has nothing to compact.'
+  if (usage.summarized) return 'Already compacted. The latest reply is a summary of the conversation.'
+  if (!compactWorthwhile(usage)) return 'The context is barely used yet — nothing worth compacting.'
+  return null
 }
 
 export function greeting(date: Date): string {
@@ -105,6 +154,8 @@ export function toolLabel(toolName: string, input: unknown): string {
       return `Edited ${str(inputObj.path)}`
     case 'read_file':
       return `Read ${str(inputObj.path)}`
+    case 'read_skill_file':
+      return `Read ${str(inputObj.path)} from the ${str(inputObj.name)} skill`
     case 'list_files':
       return `Listed ${str(inputObj.path)}`
     case 'read_document':
@@ -170,10 +221,10 @@ export function summarizeActivity(tools: ToolItem[]): ActivitySummary {
   const running = tools.some((t) => t.state === 'running')
   if (running) {
     const lastRunning = [...tools].reverse().find((t) => t.state === 'running')
-    return { text: `Working… ${toolLabel(lastRunning?.toolName ?? '', lastRunning?.input)}`, failed, denied, running }
+    return { text: lastRunning ? `${stepLabel(lastRunning)}…` : 'Working…', failed, denied, running }
   }
   if (tools.length === 1) {
-    return { text: toolLabel(tools[0].toolName, tools[0].input), failed, denied, running }
+    return { text: stepLabel(tools[0]), failed, denied, running }
   }
   const count = (match: (t: ToolItem) => boolean): number => tools.filter(match).length
   const plural = (n: number, one: string): string => (n === 1 ? one : `${one}s`)
@@ -201,7 +252,12 @@ export function summarizeActivity(tools: ToolItem[]): ActivitySummary {
   if (saved > 0) parts.push(`saved ${saved} ${plural(saved, 'memory')}`)
   if (count((t) => t.toolName === 'notify_user') > 0) parts.push('sent a notification')
   const joined = parts.join(', ')
-  const text = joined.length > 0 ? joined.charAt(0).toUpperCase() + joined.slice(1) : ''
+  // Steps the tally doesn't count (the browser, the web, a CLI's own tools) still get named, so a
+  // finished group never reads as an empty line.
+  const text =
+    joined.length > 0
+      ? joined.charAt(0).toUpperCase() + joined.slice(1)
+      : `${stepLabel(tools[tools.length - 1])}${tools.length > 1 ? ` and ${tools.length - 1} more ${plural(tools.length - 1, 'step')}` : ''}`
   return { text, failed, denied, running }
 }
 

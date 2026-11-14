@@ -8,8 +8,9 @@ import {
   AGENT_CONTAINER_PORT,
   CDP_CONTAINER_PORT,
   NOVNC_CONTAINER_PORT,
+  DOCKER_PROGRAM,
   SHARED_CONTAINER_NAME,
-  WSL_EXE,
+  USES_WSL,
   dockerArgs,
   networkNameFor,
   ownContainerName,
@@ -17,7 +18,7 @@ import {
   portsFor,
   sharedDir,
   startDockerArgs,
-  toWslPath
+  toDockerPath
 } from './host-paths'
 import { PcRegistry, SHARED_PC_ID, type PcRecord } from './host-registry'
 import { probePcServices, waitForPcServices, type PcProbe } from './pc-health'
@@ -70,7 +71,7 @@ interface SharedWaiter {
   reject: (error: unknown) => void
 }
 
-export interface LocalWslHostOptions {
+export interface LocalDockerHostOptions {
   runner: CommandRunner
   /** The app's data folder, e.g. `D:\DeskmatesData`. Owns `<dataDir>/pcs/` and reads `<dataDir>/shared/`. */
   dataDir: string
@@ -90,7 +91,7 @@ export interface LocalWslHostOptions {
 }
 
 /** `BotHost` over `wsl -d deskmates-engine -- docker …`, run through an injected `CommandRunner`. */
-export class LocalWslHost implements BotHost {
+export class LocalDockerHost implements BotHost {
   private readonly runner: CommandRunner
   private readonly dataDir: string
   private readonly image: string
@@ -116,7 +117,7 @@ export class LocalWslHost implements BotHost {
   /** Last time each PC (by botId, or `SHARED_PC_ID`) was used — start/exec/copyIn/copyOut. Not persisted; idle-stop only needs it for as long as the process runs. */
   private readonly lastUsedAt = new Map<string, number>()
 
-  constructor(options: LocalWslHostOptions) {
+  constructor(options: LocalDockerHostOptions) {
     this.runner = options.runner
     this.dataDir = options.dataDir
     this.image = options.image ?? DEFAULT_IMAGE
@@ -170,7 +171,7 @@ export class LocalWslHost implements BotHost {
       if (pcId === SHARED_PC_ID) {
         const info = await this.inspectContainer(SHARED_CONTAINER_NAME)
         if (info.state !== 'running') continue
-        const result = await this.runner.run(WSL_EXE, dockerArgs(['stop', SHARED_CONTAINER_NAME]))
+        const result = await this.runner.run(DOCKER_PROGRAM, dockerArgs(['stop', SHARED_CONTAINER_NAME]))
         if (result.code === 0) {
           this.sharedHolder = null
           this.markStopped(SHARED_PC_ID)
@@ -180,7 +181,7 @@ export class LocalWslHost implements BotHost {
         const name = ownContainerName(pcId)
         const info = await this.inspectContainer(name)
         if (info.state !== 'running') continue
-        const result = await this.runner.run(WSL_EXE, dockerArgs(['stop', name]))
+        const result = await this.runner.run(DOCKER_PROGRAM, dockerArgs(['stop', name]))
         if (result.code === 0) this.markStopped(pcId)
       }
     }
@@ -220,7 +221,7 @@ export class LocalWslHost implements BotHost {
 
   async reset(botId: string): Promise<BotPc> {
     const name = ownContainerName(botId)
-    const rm = await this.runner.run(WSL_EXE, dockerArgs(['rm', '-f', name]))
+    const rm = await this.runner.run(DOCKER_PROGRAM, dockerArgs(['rm', '-f', name]))
     if (rm.code !== 0 && !/no such container/i.test(rm.stderr)) throw classifyDockerError(rm)
     // Only a container that actually existed could have had a network created for it (`ensureNetwork`
     // only ever runs from `runContainer`) — skip the removal attempt entirely for a bot that was
@@ -234,7 +235,7 @@ export class LocalWslHost implements BotHost {
 
   async delete(botId: string): Promise<void> {
     const name = ownContainerName(botId)
-    const rm = await this.runner.run(WSL_EXE, dockerArgs(['rm', '-f', name]))
+    const rm = await this.runner.run(DOCKER_PROGRAM, dockerArgs(['rm', '-f', name]))
     if (rm.code !== 0 && !/no such container/i.test(rm.stderr)) throw classifyDockerError(rm)
     if (rm.code === 0) await this.removeNetwork(name)
     rmSync(pcStorageDir(this.dataDir, botId), { recursive: true, force: true })
@@ -276,7 +277,7 @@ export class LocalWslHost implements BotHost {
   async exec(botId: string, command: string, args: string[], options: ExecOptions = {}): Promise<ExecResult> {
     const { pcId, name } = this.targetFor(botId)
     const flags = options.input !== undefined ? ['-i'] : []
-    const result = await this.runner.run(WSL_EXE, dockerArgs(['exec', ...flags, name, command, ...args]), {
+    const result = await this.runner.run(DOCKER_PROGRAM, dockerArgs(['exec', ...flags, name, command, ...args]), {
       timeoutMs: options.timeoutMs,
       input: options.input
     })
@@ -289,25 +290,25 @@ export class LocalWslHost implements BotHost {
 
   async copyIn(botId: string, localPath: string, containerPath: string): Promise<void> {
     const { pcId, name } = this.targetFor(botId)
-    const result = await this.runner.run(WSL_EXE, dockerArgs(['cp', toWslPath(localPath), `${name}:${containerPath}`]))
+    const result = await this.runner.run(DOCKER_PROGRAM, dockerArgs(['cp', toDockerPath(localPath), `${name}:${containerPath}`]))
     if (result.code !== 0) throw classifyDockerError(result)
     this.lastUsedAt.set(pcId, this.clock())
   }
 
   async copyOut(botId: string, containerPath: string, localPath: string): Promise<void> {
     const { pcId, name } = this.targetFor(botId)
-    const result = await this.runner.run(WSL_EXE, dockerArgs(['cp', `${name}:${containerPath}`, toWslPath(localPath)]))
+    const result = await this.runner.run(DOCKER_PROGRAM, dockerArgs(['cp', `${name}:${containerPath}`, toDockerPath(localPath)]))
     if (result.code !== 0) throw classifyDockerError(result)
     this.lastUsedAt.set(pcId, this.clock())
   }
 
   async pull(image?: string): Promise<void> {
-    const result = await this.runner.run(WSL_EXE, dockerArgs(['pull', image ?? this.image]))
+    const result = await this.runner.run(DOCKER_PROGRAM, dockerArgs(['pull', image ?? this.image]))
     if (result.code !== 0) throw classifyDockerError(result)
   }
 
   async buildLocal(contextDir: string, image?: string): Promise<void> {
-    const result = await this.runner.run(WSL_EXE, dockerArgs(['build', '-t', image ?? this.image, toWslPath(contextDir)]))
+    const result = await this.runner.run(DOCKER_PROGRAM, dockerArgs(['build', '-t', image ?? this.image, toDockerPath(contextDir)]))
     if (result.code !== 0) throw classifyDockerError(result)
   }
 
@@ -341,7 +342,7 @@ export class LocalWslHost implements BotHost {
       this.markStopped(botId)
       return this.buildBotPc(botId, botId, info)
     }
-    const result = await this.runner.run(WSL_EXE, dockerArgs(['stop', name]))
+    const result = await this.runner.run(DOCKER_PROGRAM, dockerArgs(['stop', name]))
     if (result.code !== 0) throw classifyDockerError(result)
     this.markStopped(botId)
     const after = await this.inspectContainer(name)
@@ -384,7 +385,7 @@ export class LocalWslHost implements BotHost {
       if (!promoted) {
         const info = await this.inspectContainer(SHARED_CONTAINER_NAME)
         if (info.state === 'running' || info.state === 'starting') {
-          const result = await this.runner.run(WSL_EXE, dockerArgs(['stop', SHARED_CONTAINER_NAME]))
+          const result = await this.runner.run(DOCKER_PROGRAM, dockerArgs(['stop', SHARED_CONTAINER_NAME]))
           if (result.code !== 0) throw classifyDockerError(result)
         }
         this.markStopped(SHARED_PC_ID)
@@ -467,12 +468,29 @@ export class LocalWslHost implements BotHost {
     }
   }
 
+  /**
+   * Makes sure Docker is reachable before any container operation.
+   *
+   * On Windows this also *starts* dockerd inside the engine distro when it isn't up — safe there,
+   * because that distro is the app's own and the command runs unprivileged inside it. On Linux and
+   * macOS it only probes: the daemon is a host-level system service, and starting it would mean a
+   * `sudo` prompt (or a polkit dialog) from a normal app action. Failing to reach it gets the same
+   * classified error either way, so callers don't branch.
+   */
   private async ensureDocker(): Promise<void> {
-    const result = await this.runner.run(WSL_EXE, startDockerArgs(), { timeoutMs: 60_000 })
+    const result = USES_WSL
+      ? await this.runner.run(DOCKER_PROGRAM, startDockerArgs(), { timeoutMs: 60_000 })
+      : await this.runner.run(DOCKER_PROGRAM, ['info'], { timeoutMs: 30_000 })
     if (result.code === 0) return
     const error = classifyDockerError(result)
     if (error.code !== 'unknown') throw error
-    throw new BotHostError('engine-not-running', "The Deskmates engine isn't running. Open the setup wizard to start it.", result.stderr)
+    throw new BotHostError(
+      'engine-not-running',
+      USES_WSL
+        ? "The Deskmates engine isn't running. Open the setup wizard to start it."
+        : "Docker isn't running. Start Docker, then try again.",
+      result.stderr
+    )
   }
 
   private async waitUntilServing(pcId: string): Promise<void> {
@@ -537,14 +555,14 @@ export class LocalWslHost implements BotHost {
       '-p',
       `127.0.0.1:${p.cdp}:${CDP_CONTAINER_PORT}`,
       '-v',
-      `${toWslPath(pcStorageDir(this.dataDir, storageId))}:/home/bot/data`,
+      `${toDockerPath(pcStorageDir(this.dataDir, storageId))}:/home/bot/data`,
       '-v',
-      `${toWslPath(sharedDir(this.dataDir))}:/shared`,
+      `${toDockerPath(sharedDir(this.dataDir))}:/shared`,
       '-e',
       `DESKMATES_TOKEN=${record.token}`,
       this.image
     ]
-    let result = await this.runner.run(WSL_EXE, dockerArgs(runArgs(true)))
+    let result = await this.runner.run(DOCKER_PROGRAM, dockerArgs(runArgs(true)))
     // Real WSL2 machines commonly boot with a hybrid cgroup setup where only the memory
     // controller is delegated to the unified (v2) hierarchy `docker.io`'s default cgroupfs
     // driver uses, and the CPU controller stays claimed by the legacy v1 mounts WSL2 also sets
@@ -556,7 +574,7 @@ export class LocalWslHost implements BotHost {
     // the CPU controller still gets a working PC, just without the CPU cap, instead of never
     // being able to create one at all.
     if (result.code !== 0 && /nanocpus can not be set/i.test(`${result.stderr}\n${result.stdout}`)) {
-      result = await this.runner.run(WSL_EXE, dockerArgs(runArgs(false)))
+      result = await this.runner.run(DOCKER_PROGRAM, dockerArgs(runArgs(false)))
     }
     if (result.code !== 0) throw classifyDockerError(result)
     const after = await this.inspectContainer(name)
@@ -577,7 +595,7 @@ export class LocalWslHost implements BotHost {
    * pre-fix `registry.json`) and reuses it rather than failing the whole start over it.
    */
   private async ensureNetwork(network: string): Promise<void> {
-    const result = await this.runner.run(WSL_EXE, dockerArgs(['network', 'create', network]))
+    const result = await this.runner.run(DOCKER_PROGRAM, dockerArgs(['network', 'create', network]))
     if (result.code !== 0 && !/already exists/i.test(result.stderr)) throw classifyDockerError(result)
   }
 
@@ -590,11 +608,11 @@ export class LocalWslHost implements BotHost {
    * cosmetic cleanup step, which is worse than the leftover network itself.
    */
   private async removeNetwork(containerName: string): Promise<void> {
-    await this.runner.run(WSL_EXE, dockerArgs(['network', 'rm', networkNameFor(containerName)]))
+    await this.runner.run(DOCKER_PROGRAM, dockerArgs(['network', 'rm', networkNameFor(containerName)]))
   }
 
   private async startExisting(name: string, diedMessage: string): Promise<ContainerInfo> {
-    const result = await this.runner.run(WSL_EXE, dockerArgs(['start', name]))
+    const result = await this.runner.run(DOCKER_PROGRAM, dockerArgs(['start', name]))
     if (result.code !== 0) throw classifyDockerError(result)
     const after = await this.inspectContainer(name)
     if (after.state !== 'running') {
@@ -604,7 +622,7 @@ export class LocalWslHost implements BotHost {
   }
 
   private async inspectContainer(name: string): Promise<ContainerInfo> {
-    const result = await this.runner.run(WSL_EXE, dockerArgs(['inspect', name]))
+    const result = await this.runner.run(DOCKER_PROGRAM, dockerArgs(['inspect', name]))
     if (result.code !== 0) {
       if (/no such object/i.test(result.stderr) || /no such container/i.test(result.stderr)) {
         return { state: 'absent', containerId: null, error: null }

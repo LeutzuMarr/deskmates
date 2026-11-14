@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { CommandResult, CommandRunner, RunOptions } from '../../src/core/bots/command-runner'
 import { EngineManager } from '../../src/core/bots/engine'
 import type { Downloader, RootfsSource } from '../../src/core/bots/engine-download'
-import { startDockerArgs } from '../../src/core/bots/host-paths'
+import { DOCKER_PROGRAM, USES_WSL, startDockerArgs } from '../../src/core/bots/host-paths'
 import type { EngineStatus } from '../../src/shared/protocol'
 
 // ---- fakes ----
@@ -167,9 +167,15 @@ function makeManager(fake: FakeCommandRunner, downloader?: Downloader): EngineMa
   return new EngineManager({ runner: fake, dataDir, download: downloader, rootfs: FIXTURE_ROOTFS })
 }
 
+/** A manager forced down the native-Docker branch, so these run on a Windows machine too. */
+function makeNativeManager(fake: FakeCommandRunner, downloader?: Downloader): EngineManager {
+  return new EngineManager({ runner: fake, dataDir, download: downloader, rootfs: FIXTURE_ROOTFS, usesWsl: false })
+}
+
 // ---- status(): detection matrix ----
 
-describe('EngineManager.status()', () => {
+// Everything in this describe drives `wsl.exe` directly, so it only applies on Windows.
+describe.skipIf(!USES_WSL)('EngineManager.status()', () => {
   it('decodes wsl.exe\'s real UTF-16LE "not installed" bytes and reports needs-admin when a hypervisor is already running', async () => {
     const fake = new FakeCommandRunner()
     fake.respondBytes(WSL_EXE, ['--status'], WSL_NOT_INSTALLED_BYTES)
@@ -335,7 +341,7 @@ describe('EngineManager.status()', () => {
 
 // ---- setup(): idempotent, resumable, never-elevated progression ----
 
-describe('EngineManager.setup()', () => {
+describe.skipIf(!USES_WSL)('EngineManager.setup()', () => {
   it('stops at needs-admin without running or attempting anything else when WSL itself is missing', async () => {
     const fake = new FakeCommandRunner()
     fake.respondBytes(WSL_EXE, ['--status'], WSL_NOT_INSTALLED_BYTES)
@@ -483,5 +489,106 @@ describe('EngineManager.setup()', () => {
     // Only the four read-only checks — nothing from importDistro/installDocker.
     expect(fake.calls).toHaveLength(4)
     expectNeverElevated(fake)
+  })
+})
+
+// ---- native Linux/macOS path ----
+//
+// The branch with no distro: `wsl` and `distro` come back satisfied by construction, Docker is only
+// ever probed and never started, and setup's one real action is `docker pull`. Driven through
+// `usesWsl: false` so it runs on this Windows machine as well as on Linux.
+
+describe('EngineManager on a native Docker host', () => {
+  const IMAGE = 'ghcr.io/deskmates/bot-pc:latest'
+
+  it('reports ready from docker info alone, with the WSL-only steps marked as not applicable', async () => {
+    const fake = new FakeCommandRunner()
+    fake.respond(DOCKER_PROGRAM, ['info'], DOCKER_INFO_OK)
+    fake.respond(DOCKER_PROGRAM, ['image', 'inspect', IMAGE], { code: 0 })
+
+    const status = await makeNativeManager(fake).status()
+
+    expect(status.ready).toBe(true)
+    expect(status.steps.wsl.state).toBe('ok')
+    expect(status.steps.distro.state).toBe('ok')
+    expect(status.steps.wsl.detail).toMatch(/not needed/i)
+    // Nothing WSL-specific was ever executed.
+    expect(fake.calls.every((c) => c.file === DOCKER_PROGRAM)).toBe(true)
+  })
+
+  it('tells the user how to install Docker when it is missing, rather than trying to install it', async () => {
+    const fake = new FakeCommandRunner()
+    fake.respond(DOCKER_PROGRAM, ['info'], { code: 127, stderr: 'docker: command not found\n' })
+
+    const status = await makeNativeManager(fake).status()
+
+    expect(status.ready).toBe(false)
+    expect(status.steps.docker).toEqual({
+      state: 'missing',
+      detail: "Docker isn't installed. Install Docker Engine (for example, 'sudo apt install docker.io'), then try again."
+    })
+    expect(status.steps.image.state).toBe('missing')
+  })
+
+  it('reports a stopped daemon as a missing step and never attempts to start it', async () => {
+    const fake = new FakeCommandRunner()
+    fake.respond(DOCKER_PROGRAM, ['info'], DOCKER_NOT_RUNNING)
+
+    const status = await makeNativeManager(fake).status()
+
+    expect(status.steps.docker).toEqual({ state: 'missing', detail: 'Docker is installed but not running. Start it, then try again.' })
+    expect(fake.calls).toHaveLength(1)
+  })
+
+  it('explains the docker group when the socket rejects this account', async () => {
+    const fake = new FakeCommandRunner()
+    fake.respond(DOCKER_PROGRAM, ['info'], { code: 1, stderr: 'permission denied while trying to connect to the Docker daemon socket\n' })
+
+    const status = await makeNativeManager(fake).status()
+
+    expect(status.steps.docker.state).toBe('missing')
+    expect(status.steps.docker.detail).toMatch(/docker' group/)
+  })
+
+  it('setup pulls the bot PC image and downloads nothing else', async () => {
+    const fake = new FakeCommandRunner()
+    fake.respond(DOCKER_PROGRAM, ['info'], DOCKER_INFO_OK)
+    fake.respond(DOCKER_PROGRAM, ['image', 'inspect', IMAGE], { code: 1 })
+    fake.respond(DOCKER_PROGRAM, ['pull', IMAGE], { code: 0 })
+    fake.respond(DOCKER_PROGRAM, ['image', 'inspect', IMAGE], { code: 0 })
+
+    const downloader = new FakeDownloader(FIXTURE_ROOTFS_BYTES)
+    const progress: EngineStatus[] = []
+    const final = await makeNativeManager(fake, downloader).setup((s) => progress.push(s))
+
+    expect(final.ready).toBe(true)
+    expect(final.steps.image.state).toBe('ok')
+    // No rootfs, no apt, no distro: none of the Windows setup machinery applies.
+    expect(downloader.calls).toHaveLength(0)
+    expect(fake.calls.some((c) => /apt-get|--import|service docker start/.test(c.args.join(' ')))).toBe(false)
+    expect(progress.some((s) => s.steps.image.state === 'working')).toBe(true)
+  })
+
+  it('setup reports a failed pull as an image error, leaving the engine itself ready', async () => {
+    const fake = new FakeCommandRunner()
+    fake.respond(DOCKER_PROGRAM, ['info'], DOCKER_INFO_OK)
+    fake.respond(DOCKER_PROGRAM, ['image', 'inspect', IMAGE], { code: 1 })
+    fake.respond(DOCKER_PROGRAM, ['pull', IMAGE], { code: 1, stderr: 'manifest unknown\n' })
+
+    const final = await makeNativeManager(fake).setup(() => {})
+
+    expect(final.ready).toBe(true)
+    expect(final.steps.image.state).toBe('error')
+  })
+
+  it('setup returns the docker problem unchanged when Docker itself is unusable, without pulling', async () => {
+    const fake = new FakeCommandRunner()
+    fake.respond(DOCKER_PROGRAM, ['info'], DOCKER_NOT_RUNNING)
+
+    const final = await makeNativeManager(fake).setup(() => {})
+
+    expect(final.steps.docker.state).toBe('missing')
+    expect(final.steps.image.state).toBe('missing')
+    expect(fake.calls.some((c) => c.args[0] === 'pull')).toBe(false)
   })
 })

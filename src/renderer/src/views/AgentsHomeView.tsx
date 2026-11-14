@@ -15,8 +15,19 @@ export function AgentsHomeView() {
   const attached = useStore((s) => s.attachedTerminalSessions)
   const refreshDetectedAgents = useStore((s) => s.refreshDetectedAgents)
   const attachTerminal = useStore((s) => s.attachTerminal)
+  const launchTerminal = useStore((s) => s.launchTerminal)
+  const showToast = useStore((s) => s.showToast)
   const navigate = useStore((s) => s.navigate)
   const [startOpen, setStartOpen] = useState(false)
+
+  const startFreebuff = async (): Promise<void> => {
+    const folder = await window.deskmates.pickFolder()
+    if (!folder) return
+    if (await launchTerminal('freebuff', folder)) {
+      showToast('Freebuff is starting in its own window. Attach to it below once it shows up.')
+      void refreshDetectedAgents()
+    }
+  }
 
   // Refreshed every few seconds only while this screen is mounted, per the job's brief — detection
   // is a plain process listing with no event source of its own to push updates from.
@@ -31,8 +42,9 @@ export function AgentsHomeView() {
       <div className="mx-auto w-full max-w-[720px] px-8 py-10">
         <h1 className="font-serif text-[44px] leading-[1.1]">Agents</h1>
         <p className="mt-2 text-[14px] text-ink-muted">
-          Talk to the coding agents you already use. Deskmates can find OpenCode and Antigravity (agy) sessions
-          running on this computer, attach to a terminal you already have open, or start its own managed sessions.
+          Talk to the coding agents you already use. Deskmates can find OpenCode, Antigravity (agy) and Freebuff
+          sessions running on this computer, attach to a terminal you already have open, or start its own managed
+          sessions.
         </p>
 
         <div className="mt-12">
@@ -41,10 +53,13 @@ export function AgentsHomeView() {
 
         <div className="mt-12 flex items-center justify-between">
           <h2 className="caption">Running on this computer</h2>
+          <button type="button" className="btn btn-outline" onClick={() => void startFreebuff()}>
+            Start Freebuff
+          </button>
         </div>
         {detected.length === 0 ? (
           <div className="mt-3 rounded-3xl border border-rule bg-card p-5 text-[13px] text-ink-faint">
-            No OpenCode or Antigravity processes found right now.
+            No OpenCode, Antigravity or Freebuff processes found right now.
           </div>
         ) : (
           <div className="mt-3 flex flex-col gap-2">
@@ -82,7 +97,7 @@ export function AgentsHomeView() {
         <p className="mt-2 text-[12px] text-ink-faint">
           Attach types straight into the terminal window — best with Windows Terminal or a classic console window.
           It can't attach to Git Bash (mintty) or an elevated (admin) terminal. Your terminal keeps working normally
-          while Deskmates is attached.
+          while Deskmates is attached. Freebuff only runs this way: it has no mode for managed sessions.
         </p>
 
         <div className="mt-8 flex items-center justify-between">

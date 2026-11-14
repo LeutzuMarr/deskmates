@@ -3,18 +3,14 @@ import { join } from 'node:path'
 import type { EngineStatus, EngineStep, EngineStepState } from '../../shared/protocol'
 import type { CommandRunner } from './command-runner'
 import { DEBIAN_ROOTFS, FetchDownloader, sha256File, type Downloader, type RootfsSource } from './engine-download'
-import { startDockerArgs } from './host-paths'
+import { DISTRO, DOCKER_PROGRAM, USES_WSL, WSL_EXE, startDockerArgs } from './host-paths'
 import type { EngineService } from './services'
 
-/** The WSL distro this module creates and checks. Kept local to this file: `host-paths.ts` defines
- *  its own copy for `LocalWslHost`, since the two modules are built and tested independently. */
-const DEFAULT_DISTRO = 'deskmates-engine'
+/** The distro name this module creates and checks by default. `LocalDockerHost` reads the same
+ *  constant so the wizard and the host can't drift onto different distro names. */
+const DEFAULT_DISTRO = DISTRO
 
-/** The program every command in this module runs through — always `wsl.exe`, never a bare `wsl`, so
- *  Windows never has to resolve it through a shell or PATHEXT search. */
-const WSL_EXE = 'wsl.exe'
-
-/** The bot PC image the `image` step checks for. Matches `LocalWslHost`'s own default. */
+/** The bot PC image the `image` step checks for. Matches `LocalDockerHost`'s own default. */
 const DEFAULT_IMAGE = 'ghcr.io/deskmates/bot-pc:latest'
 
 type StepResult = { state: EngineStepState; detail: string }
@@ -67,6 +63,10 @@ export interface EngineManagerOptions {
    *  of the pinned production hash isn't something a test can manufacture, so this is what makes the
    *  "hash matches, import proceeds" and "cache is reused" paths reachable without real network access. */
   rootfs?: RootfsSource
+  /** Overrides the WSL-vs-native branch. Defaults to the real platform. Exists so both branches are
+   *  testable from one machine: they issue completely different command lines, and only one of them
+   *  can be exercised natively on any given host. */
+  usesWsl?: boolean
 }
 
 /**
@@ -85,6 +85,7 @@ export class EngineManager implements EngineService {
   private readonly distro: string
   private readonly downloader: Downloader
   private readonly rootfs: RootfsSource
+  private readonly usesWsl: boolean
 
   constructor(options: EngineManagerOptions) {
     this.runner = options.runner
@@ -92,9 +93,12 @@ export class EngineManager implements EngineService {
     this.distro = options.distro ?? DEFAULT_DISTRO
     this.downloader = options.download ?? new FetchDownloader()
     this.rootfs = options.rootfs ?? DEBIAN_ROOTFS
+    this.usesWsl = options.usesWsl ?? USES_WSL
   }
 
   async status(): Promise<EngineStatus> {
+    if (!this.usesWsl) return this.nativeStatus()
+
     const { result: wsl, virtualization } = await this.checkWsl()
     if (wsl.state !== 'ok') return this.buildStatus(virtualization, wsl)
 
@@ -107,6 +111,8 @@ export class EngineManager implements EngineService {
   }
 
   async setup(onProgress: (status: EngineStatus) => void): Promise<EngineStatus> {
+    if (!this.usesWsl) return this.nativeSetup(onProgress)
+
     const { result: wsl, virtualization } = await this.checkWsl()
     if (wsl.state !== 'ok') {
       const status = this.buildStatus(virtualization, wsl)
@@ -151,7 +157,78 @@ export class EngineManager implements EngineService {
     return final
   }
 
-  // ---- detection ----
+  // ---- native (Linux/macOS) ----
+  //
+  // There's no distro to create here, so the `wsl` and `distro` steps are reported `ok` with a
+  // "doesn't apply" note rather than dropped from `steps`. That keeps the wizard's step list and
+  // `EngineStatus.ready` identical across platforms — nothing downstream has to know that on Linux
+  // two of the four steps are vestigial. The only setup work left is the image, which needs no
+  // privileges: `docker pull` runs as the user.
+
+  /** The `wsl`/`distro` steps off Windows: satisfied by construction, and says so. */
+  private static readonly NOT_APPLICABLE: StepResult = {
+    state: 'ok',
+    detail: "Not needed — Docker runs natively on this system."
+  }
+
+  private async nativeStatus(): Promise<EngineStatus> {
+    const docker = await this.checkNativeDocker()
+    const image = docker.state === 'ok' ? await this.checkImage() : undefined
+    return this.buildStatus(false, EngineManager.NOT_APPLICABLE, EngineManager.NOT_APPLICABLE, docker, image)
+  }
+
+  /** Only remaining setup off Windows: fetch the bot PC image, which needs no elevation. */
+  private async nativeSetup(onProgress: (status: EngineStatus) => void): Promise<EngineStatus> {
+    const notApplicable = EngineManager.NOT_APPLICABLE
+    const docker = await this.checkNativeDocker()
+    if (docker.state !== 'ok') return this.buildStatus(false, notApplicable, notApplicable, docker)
+
+    onProgress(this.buildStatus(false, notApplicable, notApplicable, docker, { state: 'working', detail: 'Downloading the bot PC image…' }))
+    const image = await this.pullImage(notApplicable, notApplicable, docker)
+    const status = this.buildStatus(false, notApplicable, notApplicable, docker, image)
+    onProgress(status)
+    return status
+  }
+
+  /**
+   * `docker info` against the host's own daemon.
+   *
+   * Deliberately does not try to start Docker if it isn't running: on Linux that means a `sudo`
+   * password prompt (or a polkit dialog) triggered by a normal app action, which this app has no
+   * business doing. It reports the problem with the fix in the message and lets the user act.
+   */
+  private async checkNativeDocker(): Promise<StepResult> {
+    const result = await this.runner.run(DOCKER_PROGRAM, ['info'], { timeoutMs: 30_000 })
+    if (result.code === 0) return { state: 'ok', detail: 'Docker is installed and running.' }
+
+    const text = `${result.stderr}\n${result.stdout}`.toLowerCase()
+    if (/command not found|no such file or directory|is not recognized/.test(text)) {
+      return {
+        state: 'missing',
+        detail: "Docker isn't installed. Install Docker Engine (for example, 'sudo apt install docker.io'), then try again."
+      }
+    }
+    if (text.includes('cannot connect to the docker daemon') || text.includes('is the docker daemon running')) {
+      return { state: 'missing', detail: 'Docker is installed but not running. Start it, then try again.' }
+    }
+    // A user in the `docker` group that doesn't exist yet hits "permission denied" on the socket,
+    // which reads as a broken engine unless called out separately.
+    if (text.includes('permission denied')) {
+      return {
+        state: 'missing',
+        detail: "This account can't use Docker yet. Add yourself to the 'docker' group, then sign out and back in."
+      }
+    }
+    return { state: 'error', detail: genericFailure('checking Docker') }
+  }
+
+  /** `docker pull`, reporting progress under the `image` step. Never throws; failure becomes a step state. */
+  private async pullImage(wsl: StepResult, distro: StepResult, docker: StepResult): Promise<StepResult> {
+    const result = await this.runner.run(DOCKER_PROGRAM, ['pull', DEFAULT_IMAGE], { timeoutMs: 600_000 })
+    return result.code === 0 ? { state: 'ok', detail: "This bot PC's image is downloaded." } : { state: 'error', detail: "The bot PC image couldn't be downloaded. Check the internet connection and try again." }
+  }
+
+  // ---- WSL detection (Windows only) ----
 
   /** Runs `wsl.exe --status` and, only when it's needed to explain why WSL isn't ready, checks virtualization too. */
   private async checkWsl(): Promise<{ result: StepResult; virtualization: boolean }> {
@@ -243,7 +320,10 @@ export class EngineManager implements EngineService {
   }
 
   private async checkImage(): Promise<StepResult> {
-    const result = await this.runner.run(WSL_EXE, this.wslArgs('docker', 'image', 'inspect', DEFAULT_IMAGE))
+    // Inside the distro on Windows (root, so the daemon socket is readable even for a
+    // pre-existing distro that still has only the root user); a plain call everywhere else.
+    const args = this.usesWsl ? this.wslArgs('docker', 'image', 'inspect', DEFAULT_IMAGE) : ['image', 'inspect', DEFAULT_IMAGE]
+    const result = await this.runner.run(DOCKER_PROGRAM, args, { timeoutMs: 30_000 })
     return result.code === 0
       ? { state: 'ok', detail: "This bot PC's image is downloaded." }
       : { state: 'missing', detail: "This bot PC's image hasn't been downloaded yet." }

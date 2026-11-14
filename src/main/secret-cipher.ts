@@ -1,7 +1,16 @@
 import { spawn } from 'node:child_process'
 
-/** Encrypts and decrypts with Windows DPAPI for the current Windows user. */
-export interface Dpapi {
+/**
+ * Encrypts and decrypts a batch of short strings with the platform's per-user secret store:
+ * Windows DPAPI, or the OS keyring (libsecret/kwallet) through Electron's safeStorage.
+ */
+export interface SecretCipher {
+  /**
+   * Marker written in front of every blob this cipher produces, so a file written on one platform
+   * is never handed to another platform's cipher. Entries without any marker are the older
+   * `safeStorage`-only format.
+   */
+  readonly prefix: string
   /** Plain strings in, encrypted base64 blobs out (same keys). */
   protect(items: Record<string, string>): Promise<Record<string, string>>
   /** Encrypted base64 blobs in, plain strings out; an entry that won't decrypt comes back null. */
@@ -56,7 +65,9 @@ function run(mode: 'protect' | 'unprotect', items: Record<string, string>): Prom
   })
 }
 
-export const windowsDpapi: Dpapi = {
+/** Binds each saved key to the current Windows user account through DPAPI. */
+export const windowsDpapi: SecretCipher = {
+  prefix: 'dpapi:',
   async protect(items) {
     const encoded = Object.fromEntries(Object.entries(items).map(([k, v]) => [k, Buffer.from(v, 'utf8').toString('base64')]))
     const result = await run('protect', encoded)
@@ -77,4 +88,59 @@ export const windowsDpapi: Dpapi = {
       })
     )
   }
+}
+
+/**
+ * Electron's safeStorage, which is DPAPI on Windows and the desktop keyring (libsecret/kwallet) on
+ * Linux and macOS. `electron` is imported lazily so this module stays loadable from plain Node tests.
+ */
+async function safeStorageModule(): Promise<typeof import('electron').safeStorage> {
+  const { safeStorage } = await import('electron')
+  return safeStorage
+}
+
+const NO_KEYRING =
+  'Saving an API key needs an encrypted keyring, and this Linux system does not have one available. ' +
+  'Install one and sign in to it — on Ubuntu, "sudo apt install gnome-keyring" (GNOME) or ' +
+  '"libsecret-tools" (KDE) — then start Deskmates from inside your desktop session and try again.'
+
+/** Binds each saved key to the desktop keyring's unlocked session. */
+export const osKeyring: SecretCipher = {
+  prefix: 'oskeyring:',
+  async protect(items) {
+    if (Object.keys(items).length === 0) return {}
+    const safeStorage = await safeStorageModule()
+    if (!safeStorage.isEncryptionAvailable()) throw new Error(NO_KEYRING)
+    const out: Record<string, string> = {}
+    for (const [key, value] of Object.entries(items)) {
+      try {
+        out[key] = safeStorage.encryptString(value).toString('base64')
+      } catch (error) {
+        throw new Error(`${NO_KEYRING} (${(error as Error).message})`)
+      }
+    }
+    return out
+  },
+  async unprotect(items) {
+    const keys = Object.keys(items)
+    if (keys.length === 0) return {}
+    const safeStorage = await safeStorageModule()
+    // A missing or locked keyring is not an error here: the contract says an unreadable entry comes
+    // back null, and the store turns that into "this key has to be entered again".
+    if (!safeStorage.isEncryptionAvailable()) return Object.fromEntries(keys.map((key) => [key, null]))
+    return Object.fromEntries(
+      keys.map((key) => {
+        try {
+          return [key, safeStorage.decryptString(Buffer.from(items[key], 'base64'))]
+        } catch {
+          return [key, null]
+        }
+      })
+    )
+  }
+}
+
+/** The cipher for the platform the app is running on. */
+export function createSecretCipher(): SecretCipher {
+  return process.platform === 'win32' ? windowsDpapi : osKeyring
 }

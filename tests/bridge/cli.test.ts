@@ -325,3 +325,28 @@ describe('not running and closing', () => {
   })
 })
 
+
+describe('deskmates browser', () => {
+  it("drives the agent browser from the shell, under the caller's name", async () => {
+    const dir = makeDataDir()
+    const core = newCore({ 'browser.tool': () => ({ text: 'Zoho Mail · [1] Inbox [2] New Mail' }) })
+    expect(await main(['browser', 'open', 'https://mail.zoho.eu', '--as', 'Daily Outreach', '--data-dir', dir], core.deps)).toBe(EXIT_OK)
+    expect(await main(['browser', 'type', '3', 'Hello', 'there', '--submit', '--data-dir', dir], core.deps)).toBe(EXIT_OK)
+    expect(await main(['browser', 'click', '2', '--data-dir', dir], core.deps)).toBe(EXIT_OK)
+    expect(core.calls.map((c) => c.params)).toEqual([
+      { name: 'browser_open', input: { url: 'https://mail.zoho.eu' }, agent: 'Daily Outreach' },
+      { name: 'browser_type', input: { element: 3, text: 'Hello there', submit: true } },
+      { name: 'browser_click', input: { element: 2 } }
+    ])
+    expect(core.out[0]).toContain('Inbox')
+  })
+
+  it('refuses a missing url or element number without calling the app', async () => {
+    const dir = makeDataDir()
+    const core = newCore()
+    expect(await main(['browser', 'open', '--data-dir', dir], core.deps)).toBe(EXIT_USAGE)
+    expect(await main(['browser', 'click', 'abc', '--data-dir', dir], core.deps)).toBe(EXIT_USAGE)
+    expect(await main(['browser', 'fly', '--data-dir', dir], core.deps)).toBe(EXIT_USAGE)
+    expect(core.calls).toHaveLength(0)
+  })
+})

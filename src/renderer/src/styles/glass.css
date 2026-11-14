@@ -1,0 +1,337 @@
+/* ==== Liquid glass ====
+   The glass itself is Glisse (https://glisse.kelvinzhang.ca): its components draw the lens, the lit
+   rim and the press highlight. This file gives that glass the app's own colours, lays a soft
+   wallpaper behind it so there is something to bend, and dresses the app's remaining surfaces
+   (menus, dialogs, pills) in the same material. */
+
+/* ---- Glisse, in Deskmates' palette ---- */
+:root {
+  --lg-fill: var(--clay);
+  --lg-on: var(--olive);
+  --lg-destructive: var(--brick);
+  --lg-foreground: var(--ink);
+  --lg-muted: var(--ink-muted);
+  --lg-ring: var(--ink);
+
+  /* The content sheet and floating surfaces: the card colour, let through a little. */
+  --sheet: color-mix(in srgb, color-mix(in srgb, var(--card) 60%, var(--canvas)) 76%, transparent);
+  --sheet-edge: color-mix(in srgb, var(--ink) 9%, transparent);
+  --glass-surface: color-mix(in srgb, var(--card) 80%, transparent);
+  --glass-hover: color-mix(in srgb, var(--ink) 7%, transparent);
+  --glass-selected: color-mix(in srgb, var(--ink) 11%, transparent);
+  --wall-a: color-mix(in srgb, var(--clay) 38%, transparent);
+  --wall-b: color-mix(in srgb, var(--manilla) 95%, transparent);
+  --wall-c: color-mix(in srgb, var(--olive) 30%, transparent);
+  --r-sheet: 18px;
+  --gutter: 8px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --sheet: color-mix(in srgb, var(--canvas) 78%, transparent);
+    --sheet-edge: color-mix(in srgb, #fff 9%, transparent);
+    --glass-surface: color-mix(in srgb, var(--card) 78%, transparent);
+    --glass-hover: color-mix(in srgb, #fff 7%, transparent);
+    --glass-selected: color-mix(in srgb, #fff 12%, transparent);
+    --wall-a: color-mix(in srgb, var(--clay) 30%, transparent);
+    --wall-b: color-mix(in srgb, var(--manilla) 80%, transparent);
+    --wall-c: color-mix(in srgb, var(--olive) 20%, transparent);
+  }
+}
+
+/* ---- The wallpaper behind everything ----
+   Kept out of the top-right corner: Windows paints its own window buttons there in the flat canvas colour. */
+.app-shell {
+  position: relative;
+  isolation: isolate;
+  background: var(--canvas);
+  /* clip, not hidden: a hidden box can still be scrolled by focus, which would slide the whole app. */
+  overflow: clip;
+}
+.app-shell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(42% 52% at 8% 96%, var(--wall-a), transparent 72%),
+    radial-gradient(34% 44% at 20% 12%, var(--wall-b), transparent 72%),
+    radial-gradient(40% 50% at 96% 100%, var(--wall-c), transparent 72%);
+  animation: dm-drift 48s ease-in-out infinite alternate;
+}
+@keyframes dm-drift {
+  from {
+    transform: scale(1.04);
+  }
+  to {
+    transform: scale(1.14) translate3d(1.5%, -1.5%, 0);
+  }
+}
+
+/* ---- The content sheet ---- */
+.app-sheet {
+  position: relative;
+  margin: 0 var(--gutter) var(--gutter) var(--gutter);
+  border-radius: var(--r-sheet);
+  background: var(--sheet);
+  box-shadow:
+    inset 0 0 0 1px var(--sheet-edge),
+    var(--shadow-soft);
+  -webkit-backdrop-filter: blur(28px) saturate(1.4);
+  backdrop-filter: blur(28px) saturate(1.4);
+  overflow: hidden;
+}
+/* A new screen arrives rather than swapping in. */
+.view-in {
+  height: 100%;
+  animation: dm-view-in 260ms var(--ease-out);
+}
+@keyframes dm-view-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.995);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ---- Section tabs (Glisse TabBar), sized for the 40px title bar ---- */
+.section-tabs {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.section-tabs .lg-tab-bar {
+  --lg-tab-width: 66px;
+  --lg-tab-height: 26px;
+  --lg-tab-inset: 3px;
+  --lg-lens-grow-x: 14px;
+  --lg-lens-grow-y: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* ---- Title bar ---- */
+.titlebar-search {
+  border: none;
+  background: var(--lg-glass);
+  box-shadow: inset 0 0 0 0.5px var(--lg-edge), 0 1px 3px var(--lg-drop);
+  -webkit-backdrop-filter: blur(3px) saturate(1.5);
+  backdrop-filter: blur(3px) saturate(1.5);
+}
+.titlebar-search:hover {
+  background: var(--lg-glass-active);
+}
+
+/* ---- The message box: glass the conversation scrolls under ---- */
+.composer-box {
+  --lg-blur: 14px;
+  --lg-glass: color-mix(in srgb, var(--card) 72%, transparent);
+  --lg-glass-bend: 0.32;
+  --lg-glass-dispersion: 0.25;
+  border-radius: 24px;
+  box-shadow:
+    0 1px 3px var(--lg-drop),
+    var(--shadow-soft);
+  transition: box-shadow 220ms var(--ease-out);
+}
+.composer-box.lg-glass[data-rim] {
+  box-shadow:
+    0 1px 3px var(--lg-drop),
+    var(--shadow-soft);
+}
+.composer-box:focus-within,
+.composer-box.lg-glass[data-rim]:focus-within {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--clay) 45%, transparent),
+    0 0 0 5px color-mix(in srgb, var(--clay) 12%, transparent),
+    var(--shadow-soft);
+}
+.composer-box-dropping,
+.composer-box-dropping.lg-glass[data-rim] {
+  box-shadow:
+    0 0 0 2px var(--ink-muted),
+    var(--shadow-soft);
+}
+/* Docked over the end of a conversation. Only the box itself takes clicks, so the scrollbar
+   beside it and the messages around it stay reachable. */
+.composer-dock {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+  padding-bottom: 16px;
+  pointer-events: none;
+}
+.composer-dock > div {
+  pointer-events: none;
+}
+.composer-dock > div > * {
+  pointer-events: auto;
+}
+.stop-btn {
+  background: var(--lg-glass-active);
+  box-shadow: inset 0 0 0 0.5px var(--lg-edge);
+  transition: background-color 140ms var(--ease-out), transform 160ms var(--ease-out);
+}
+.stop-btn:hover {
+  background: var(--glass-selected);
+}
+.stop-btn:active {
+  transform: scale(0.94);
+}
+
+/* ---- Floating surfaces: menus, palette, dialogs, toasts, pills ---- */
+.menu,
+.palette,
+.toast,
+.pill,
+.jump-latest {
+  border: none;
+  background: var(--lg-surface);
+  -webkit-backdrop-filter: blur(22px) saturate(1.9);
+  backdrop-filter: blur(22px) saturate(1.9);
+  box-shadow:
+    inset 0 0 0 0.5px var(--lg-surface-edge),
+    0 12px 40px var(--lg-shadow);
+}
+.menu-item:hover,
+.menu-item:focus-visible,
+.menu-item[aria-selected='true'] {
+  background: var(--lg-highlight);
+}
+.palette-backdrop {
+  background: color-mix(in srgb, #000 22%, transparent);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+}
+dialog:modal {
+  border-color: transparent;
+  background: var(--lg-surface);
+  -webkit-backdrop-filter: blur(28px) saturate(1.8);
+  backdrop-filter: blur(28px) saturate(1.8);
+  box-shadow:
+    inset 0 0 0 0.5px var(--lg-surface-edge),
+    0 24px 70px var(--lg-shadow),
+    var(--shadow-pop);
+  animation: dm-pop-in 200ms var(--ease-out);
+}
+dialog::backdrop {
+  background: color-mix(in srgb, #000 24%, transparent);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+  animation: dm-fade-in 160ms ease-out;
+}
+
+/* ---- Buttons and controls in the same material ---- */
+.btn-ivory,
+.btn-outline {
+  border: none;
+  background: var(--lg-glass);
+  box-shadow:
+    inset 0 0 0 0.5px var(--lg-edge),
+    inset 0 1px 0 color-mix(in srgb, #fff 22%, transparent),
+    0 1px 3px var(--lg-drop);
+}
+.btn-ivory {
+  padding: 12px 24px;
+}
+.btn-outline {
+  padding: 9px 17px;
+}
+.btn-ivory:hover:not(:disabled),
+.btn-outline:hover:not(:disabled) {
+  background: var(--lg-glass-active);
+}
+.btn-clay {
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 28%, transparent),
+    0 1px 3px color-mix(in srgb, var(--clay-deep) 40%, transparent);
+}
+.btn-icon:hover:not(:disabled),
+.btn-icon[aria-pressed='true'] {
+  background: var(--glass-hover);
+}
+
+/* The app's own small segmented controls, drawn as Glisse's: a tinted track and a lifted thumb. */
+.segmented {
+  border: none;
+  background: var(--lg-segment-track);
+  box-shadow: inset 0 0 0 0.5px var(--lg-edge);
+}
+.segmented-item {
+  transition:
+    background-color 200ms var(--ease-out),
+    color 140ms var(--ease-out),
+    box-shadow 200ms var(--ease-out),
+    transform 160ms var(--ease-out);
+}
+.segmented-item[aria-selected='true'],
+.segmented-item[aria-checked='true'] {
+  background: var(--lg-segment-thumb);
+  color: var(--lg-segment-label);
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.1),
+    0 2px 8px rgb(0 0 0 / 0.06);
+}
+.segmented-item:active {
+  transform: scale(0.97);
+}
+
+.input,
+.textarea,
+.select {
+  background-color: color-mix(in srgb, var(--card) 70%, transparent);
+  transition:
+    border-color 160ms var(--ease-out),
+    box-shadow 200ms var(--ease-out);
+}
+.input:focus,
+.textarea:focus,
+.select:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--clay) 55%, var(--rule));
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--clay) 14%, transparent);
+}
+
+/* A count of lines added and removed, as in a diff summary. */
+.diff-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.diff-added {
+  color: var(--good);
+}
+.diff-removed {
+  color: var(--bad);
+}
+
+/* ---- Phone-sized screens ---- */
+@media (max-width: 699px) {
+  :root {
+    --gutter: 4px;
+    --r-sheet: 14px;
+  }
+  .section-tabs {
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .section-tabs .lg-tab-bar {
+    --lg-tab-width: 56px;
+    font-size: 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-shell::before {
+    animation: none;
+  }
+}

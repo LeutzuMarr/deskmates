@@ -1,4 +1,7 @@
 import { create } from 'zustand'
+import type { BrowserState } from '../../../shared/agent-browser'
+import type { TaskSchedule } from '../../../shared/protocol'
+import type { DuoState } from '../../../shared/duo'
 import { core } from './rpc'
 import type {
   ComputerSession,
@@ -11,6 +14,7 @@ import type {
   CoreEvent,
   DetectedTerminalAgent,
   EngineStatus,
+  EngineStepState,
   FileChange,
   Handoff,
   Memory,
@@ -20,6 +24,7 @@ import type {
   ProviderId,
   Schedule,
   Settings,
+  SessionContextUsage,
   Skill,
   Task,
   TerminalSession,
@@ -28,6 +33,8 @@ import type {
   UsageRow
 } from '../../../shared/protocol'
 import type { InstallWslResult } from '../../../shared/desktop-api'
+import { freebuffModelIds, setFreebuffModels, type FreebuffStatus } from '../../../shared/freebuff'
+import { USES_WSL_ENGINE } from './bots'
 
 export type View =
   | { name: 'home' }
@@ -43,9 +50,10 @@ export type View =
   | { name: 'agents-session'; sessionId: string }
   | { name: 'agents-attach'; sessionId: string }
   | { name: 'extras-home' }
+  | { name: 'duo-home' }
 
 export type ConnectionStatus = 'connecting' | 'open' | 'closed'
-export type Tab = 'work' | 'design' | 'bots' | 'agents' | 'extras'
+export type Tab = 'duo' | 'work' | 'design' | 'bots' | 'agents' | 'extras'
 export interface ToastAction {
   label: string
   onClick: () => void
@@ -58,6 +66,7 @@ export interface ToastState {
 const TAB_STORAGE_KEY = 'deskmates:tab'
 
 const TAB_HOMES: Record<Tab, View> = {
+  duo: { name: 'duo-home' },
   work: { name: 'home' },
   design: { name: 'design-home' },
   bots: { name: 'bots-home' },
@@ -68,7 +77,7 @@ const TAB_HOMES: Record<Tab, View> = {
 function readStoredTab(): Tab {
   try {
     const raw = localStorage.getItem(TAB_STORAGE_KEY)
-    return raw === 'design' || raw === 'bots' || raw === 'agents' || raw === 'extras' ? raw : 'work'
+    return raw === 'duo' || raw === 'design' || raw === 'bots' || raw === 'agents' || raw === 'extras' ? raw : 'work'
   } catch {
     return 'work'
   }
@@ -102,6 +111,9 @@ interface StoreState {
   botsView: View
   agentsView: View
   extrasView: View
+  duoView: View
+  /** Duo: its thread, Outbox, to-dos and Start cards. */
+  duo: DuoState | null
   /** Where Settings was opened from: Settings is a detour, so leaving or reopening the tab goes back there. */
   settingsReturn: View | null
   toast: ToastState | null
@@ -127,8 +139,17 @@ interface StoreState {
   terminalItemsBySession: Record<string, TimelineItem[]>
   attachedTerminalSessions: AttachedTerminalSession[]
   computerSession: ComputerSession | null
+  /** The agent browser: tabs, who is driving, and questions waiting for the user. */
+  browser: BrowserState | null
+  /** Whether the browser panel is open (desktop only). */
+  browserOpen: boolean
+  setBrowserOpen: (open: boolean) => void
+  /** Every project's scheduled tasks. */
+  taskSchedules: TaskSchedule[]
   /** The file each design's preview shows (relative to the design folder); unset means its default page. */
   designFiles: Record<string, string>
+  /** Tasks and agent sessions (by id) that finished while the user was looking at something else. */
+  unread: Record<string, true>
   init: () => void
   navigate: (view: View) => void
   setTab: (tab: Tab) => void
@@ -152,11 +173,21 @@ interface StoreState {
   setupEngine: () => Promise<void>
   installWsl: () => Promise<void>
   refreshDetectedAgents: () => Promise<void>
+  /** Reads the project conversation's context usage for the Work tab's meter. Puts null in state
+   *  when there's nothing to measure, which hides the meter rather than showing a made-up 0%. */
+  loadSessionUsage: (folder: string) => Promise<SessionContextUsage | null>
+  /** What the hidden Freebuff for `folder` shows about its session; null when none runs yet. */
+  loadFreebuffStatus: (folder: string) => Promise<FreebuffStatus | null>
+  /** Folds the project conversation into a summary of itself. Resolves with the usage afterwards, or
+   *  null when the compaction failed and the reason has already been toasted. */
+  compactSession: (folder: string) => Promise<SessionContextUsage | null>
   startTerminalSession: (tool: TerminalTool, folder: string, model?: string) => Promise<TerminalSession | null>
   sendTerminalPrompt: (id: string, text: string) => Promise<void>
   stopTerminalSession: (id: string) => Promise<void>
   openTerminalSession: (id: string) => Promise<void>
   attachTerminal: (tool: TerminalTool, pid: number) => Promise<void>
+  /** Opens a terminal window running an attach-only agent (Freebuff) in `folder`. */
+  launchTerminal: (tool: TerminalTool, folder: string) => Promise<boolean>
   sendAttachedPrompt: (id: string, text: string) => Promise<void>
   retryAttachedPrimer: (id: string) => Promise<void>
   answerAttachedPermission: (id: string, key: string, option: string) => Promise<void>
@@ -197,6 +228,27 @@ function upsertTask(tasks: Task[], task: Task): Task[] {
   return list
 }
 
+/** Whether `view` is showing this task's conversation right now. */
+function isViewingTask(view: View, task: Task): boolean {
+  if (view.name === 'task') return view.taskId === task.id
+  return view.name === 'design' && view.projectId === task.projectId
+}
+
+/** The tasks or agent session a view puts on screen: opening it counts as having seen them. */
+function idsShownBy(view: View, tasksByProject: Record<string, Task[]>): string[] {
+  if (view.name === 'task') return [view.taskId]
+  if (view.name === 'design') return (tasksByProject[view.projectId] ?? []).map((task) => task.id)
+  if (view.name === 'agents-session') return [view.sessionId]
+  return []
+}
+
+function withoutKeys(record: Record<string, true>, keys: string[]): Record<string, true> {
+  if (!keys.some((key) => record[key])) return record
+  const next = { ...record }
+  for (const key of keys) delete next[key]
+  return next
+}
+
 function upsertById<T extends { id: string }>(items: T[], item: T): T[] {
   const index = items.findIndex((existing) => existing.id === item.id)
   if (index >= 0) {
@@ -212,15 +264,19 @@ function upsertById<T extends { id: string }>(items: T[], item: T): T[] {
  *  always has something plain-language to show instead of silently rendering nothing forever.
  *  Never claims virtualization is off; that's a specific diagnosis we have no evidence for here. */
 function engineUnreachableStatus(message: string): EngineStatus {
+  // The error lands on the first step this platform actually shows, so a native install never
+  // reports the failure against WSL — a step its wizard doesn't even draw. Built per platform
+  // rather than by spreading keys over a partial record: the same step name would otherwise be
+  // written twice, and the later value would silently win.
+  const notNeeded: { state: EngineStepState; detail: string } = { state: 'ok', detail: 'Not needed — Docker runs natively on this system.' }
+  const waiting = (what: string): { state: EngineStepState; detail: string } => ({ state: 'missing', detail: `Waiting for ${what} first.` })
+  const failed: { state: EngineStepState; detail: string } = { state: 'error', detail: message }
   return {
     ready: false,
     virtualization: true,
-    steps: {
-      wsl: { state: 'error', detail: message },
-      distro: { state: 'missing', detail: 'Waiting for WSL to be ready first.' },
-      docker: { state: 'missing', detail: 'Waiting for the deskmates-engine distro first.' },
-      image: { state: 'missing', detail: 'Waiting for Docker to be ready first.' }
-    }
+    steps: USES_WSL_ENGINE
+      ? { wsl: failed, distro: waiting('WSL'), docker: waiting('the deskmates-engine distro'), image: waiting('Docker') }
+      : { wsl: notNeeded, distro: notNeeded, docker: failed, image: waiting('Docker') }
   }
 }
 
@@ -238,11 +294,15 @@ export const useStore = create<StoreState>()((set, get) => {
         break
       case 'task.updated': {
         const tasks = state.tasksByProject[event.task.projectId] ?? []
+        const before = tasks.find((t) => t.id === event.task.id)
+        const wasWorking = before?.status === 'running' || before?.status === 'waiting-approval'
+        const finished = wasWorking && event.task.status === 'idle'
         set({
           tasksByProject: {
             ...state.tasksByProject,
             [event.task.projectId]: upsertTask(tasks, event.task)
-          }
+          },
+          unread: finished && !isViewingTask(state.view, event.task) ? { ...state.unread, [event.task.id]: true } : state.unread
         })
         break
       }
@@ -255,15 +315,15 @@ export const useStore = create<StoreState>()((set, get) => {
         set({
           tasksByProject: { ...state.tasksByProject, [event.projectId]: tasks },
           timelines,
-          changes
+          changes,
+          unread: withoutKeys(state.unread, [event.taskId])
         })
         break
       }
-      case 'project.updated': {
-        const projects = state.projects.filter((p) => p.id !== event.project.id)
-        set({ projects: [...projects, event.project] })
+      case 'project.updated':
+        // In place: a rename or a model change must not move the project to the end of the sidebar.
+        set({ projects: upsertById(state.projects, event.project) })
         break
-      }
       case 'project.deleted': {
         const projects = state.projects.filter((p) => p.id !== event.projectId)
         const tasksByProject = { ...state.tasksByProject }
@@ -276,6 +336,10 @@ export const useStore = create<StoreState>()((set, get) => {
         break
       case 'memory.updated':
         set({ memories: { ...state.memories, [event.projectId]: event.memories } })
+        break
+      case 'freebuff.models':
+        setFreebuffModels(event.list.models)
+        set({ models: { ...state.models, freebuff: freebuffModelIds() } })
         break
       case 'settings.updated':
         set({ settings: event.settings })
@@ -342,12 +406,21 @@ export const useStore = create<StoreState>()((set, get) => {
         // Newest first, matching the repo's handoffs.list ordering.
         set({ handoffs: upsertById(state.handoffs, event.handoff).sort((a, b) => b.createdAt - a.createdAt) })
         break
-      case 'terminals.session.updated':
-        set({ terminalSessions: upsertById(state.terminalSessions, event.session) })
+      case 'terminals.session.updated': {
+        const before = state.terminalSessions.find((s) => s.id === event.session.id)
+        const finished = (before?.state === 'busy' || before?.state === 'starting') && event.session.state === 'idle'
+        const viewing = state.view.name === 'agents-session' && state.view.sessionId === event.session.id
+        set({
+          terminalSessions: upsertById(state.terminalSessions, event.session),
+          unread: finished && !viewing ? { ...state.unread, [event.session.id]: true } : state.unread
+        })
         break
+      }
       case 'terminals.session.item': {
+        // Upsert, not append: opening a session reloads its items while events keep arriving, and the
+        // same item can come in both ways.
         const items = state.terminalItemsBySession[event.sessionId] ?? []
-        set({ terminalItemsBySession: { ...state.terminalItemsBySession, [event.sessionId]: [...items, event.item] } })
+        set({ terminalItemsBySession: { ...state.terminalItemsBySession, [event.sessionId]: upsertById(items, event.item) } })
         break
       }
       case 'terminals.attach.updated':
@@ -364,6 +437,18 @@ export const useStore = create<StoreState>()((set, get) => {
         break
       case 'computer.updated':
         set({ computerSession: event.session })
+        break
+      case 'browser.updated':
+        set({ browser: event.state })
+        break
+      case 'taskSchedule.updated':
+        set({ taskSchedules: upsertById(get().taskSchedules, event.schedule) })
+        break
+      case 'duo.updated':
+        set({ duo: event.state })
+        break
+      case 'taskSchedule.deleted':
+        set({ taskSchedules: get().taskSchedules.filter((s) => s.id !== event.scheduleId) })
         break
     }
   }
@@ -485,16 +570,7 @@ export const useStore = create<StoreState>()((set, get) => {
   }
 
   const initialTab = readStoredTab()
-  const initialView: View =
-    initialTab === 'design'
-      ? { name: 'design-home' }
-      : initialTab === 'bots'
-        ? { name: 'bots-home' }
-        : initialTab === 'agents'
-          ? { name: 'agents-home' }
-          : initialTab === 'extras'
-            ? { name: 'extras-home' }
-            : { name: 'home' }
+  const initialView = TAB_HOMES[initialTab]
 
   return {
     started: false,
@@ -515,6 +591,8 @@ export const useStore = create<StoreState>()((set, get) => {
     botsView: { name: 'bots-home' },
     agentsView: { name: 'agents-home' },
     extrasView: { name: 'extras-home' },
+    duoView: { name: 'duo-home' },
+    duo: null,
     settingsReturn: null,
     view: initialView,
     toast: null,
@@ -536,7 +614,12 @@ export const useStore = create<StoreState>()((set, get) => {
     terminalItemsBySession: {},
     attachedTerminalSessions: [],
     computerSession: null,
+    browser: null,
+    browserOpen: false,
+    setBrowserOpen: (open) => set({ browserOpen: open }),
+    taskSchedules: [],
     designFiles: {},
+    unread: {},
 
     init: () => {
       const state = get()
@@ -550,6 +633,9 @@ export const useStore = create<StoreState>()((set, get) => {
           void loadBots()
           void loadTerminals()
           void loadExtras()
+          void core.call('browser.state', {}).then((browser) => set({ browser })).catch(() => undefined)
+          void core.call('duo.state', {}).then((duo) => set({ duo })).catch(() => undefined)
+          void core.call('taskSchedules.list', {}).then((taskSchedules) => set({ taskSchedules })).catch(() => undefined)
         }
       })
       void core.connect()
@@ -559,7 +645,7 @@ export const useStore = create<StoreState>()((set, get) => {
       const current = get().view
       if (view.name === 'settings' && current.name !== 'settings') set({ settingsReturn: current })
       else if (view.name !== 'settings') set({ settingsReturn: null })
-      set({ view })
+      set({ view, unread: withoutKeys(get().unread, idsShownBy(view, get().tasksByProject)) })
       if (view.name === 'task') void get().openTask(view.projectId, view.taskId)
       if (view.name === 'project-settings') void get().openProjectSettings(view.projectId)
       if (view.name === 'design') void get().openDesign(view.projectId)
@@ -582,19 +668,22 @@ export const useStore = create<StoreState>()((set, get) => {
         design: state.designView,
         bots: state.botsView,
         agents: state.agentsView,
-        extras: state.extrasView
+        extras: state.extrasView,
+        duo: state.duoView
       }
       saved[state.tab] = leaving
       const next = saved[tab].name === 'settings' ? TAB_HOMES[tab] : saved[tab]
       set({
         tab,
         view: next,
+        unread: withoutKeys(state.unread, idsShownBy(next, state.tasksByProject)),
         settingsReturn: null,
         workView: saved.work,
         designView: saved.design,
         botsView: saved.bots,
         agentsView: saved.agents,
-        extrasView: saved.extras
+        extrasView: saved.extras,
+        duoView: saved.duo
       })
       storeTab(tab)
     },
@@ -646,6 +735,15 @@ export const useStore = create<StoreState>()((set, get) => {
     },
 
     loadModels: async (provider) => {
+      // Freebuff: the list Deskmates knows (with costs), and a fresh read of Freebuff's own picker
+      // starts in the background; a changed list then arrives as a 'freebuff.models' event.
+      if (provider === 'freebuff') {
+        const list = await core.call('freebuff.models', {})
+        setFreebuffModels(list.models)
+        const ids = freebuffModelIds()
+        set({ models: { ...get().models, freebuff: ids } })
+        return ids
+      }
       const models = await core.call('models.list', { provider })
       set({ models: { ...get().models, [provider]: models } })
       return models
@@ -781,6 +879,35 @@ export const useStore = create<StoreState>()((set, get) => {
       }
     },
 
+    loadSessionUsage: async (folder) => {
+      try {
+        return await core.call('terminals.usage', { folder })
+      } catch (error) {
+        // A meter that can't be read is not worth a toast — it is a background read behind the UI,
+        // and the caller treats null as "don't draw it".
+        console.error('[renderer] terminals.usage failed', error)
+        return null
+      }
+    },
+
+    loadFreebuffStatus: async (folder) => {
+      try {
+        return await core.call('freebuff.status', { folder })
+      } catch (error) {
+        console.error('[renderer] freebuff.status failed', error)
+        return null
+      }
+    },
+
+    compactSession: async (folder) => {
+      try {
+        return await core.call('terminals.compact', { folder })
+      } catch (error) {
+        get().showToast(`Couldn't compact the conversation: ${error instanceof Error ? error.message : String(error)}`)
+        return null
+      }
+    },
+
     startTerminalSession: async (tool, folder, model) => {
       try {
         const session = await core.call('terminals.sessions.start', model ? { tool, folder, model } : { tool, folder })
@@ -825,6 +952,16 @@ export const useStore = create<StoreState>()((set, get) => {
         get().navigate({ name: 'agents-attach', sessionId: session.id })
       } catch (error) {
         get().showToast(`Couldn't attach to the terminal: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    },
+
+    launchTerminal: async (tool, folder) => {
+      try {
+        await core.call('terminals.launch', { tool, folder })
+        return true
+      } catch (error) {
+        get().showToast(`Couldn't start it: ${error instanceof Error ? error.message : String(error)}`)
+        return false
       }
     },
 

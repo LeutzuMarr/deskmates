@@ -1,4 +1,13 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import type { BrowserService } from '../browser/service'
+import { EMPTY_BROWSER_STATE, type SiteAnswer } from '../../shared/agent-browser'
+import { agentBrowserTools } from '../tools/browser'
+import type { TaskScheduler } from '../schedules/task-scheduler'
+import type { DuoService } from '../duo/service'
+import type { RemoteAccess } from '../phone/remote'
+import type { DuoProfile } from '../../shared/duo'
+import { freebuffModels, setFreebuffModels, type FreebuffModelList } from '../../shared/freebuff'
+import type { When } from '../../shared/protocol'
 import { randomInt, randomUUID } from 'node:crypto'
 import { basename, join, resolve, sep } from 'node:path'
 import { designFolder, listDesignFiles, readDesign, starterHtml, writeDesign } from '../designs/files'
@@ -21,8 +30,12 @@ import type {
   PhoneInfo,
   ProviderId,
   RpcMethod,
-  Settings
+  ScreenMark,
+  Settings,
+  TerminalTool
 } from '../../shared/protocol'
+import { MANAGED_TERMINAL_TOOLS } from '../../shared/protocol'
+import type { ScreenGuideService } from '../screen/guide'
 import { generatePairingCode, isValidPairingCode } from '../phone/server'
 import type { PluginsService } from '../extensions/plugins'
 import type { SkillsService } from '../extensions/skills'
@@ -35,12 +48,17 @@ const PC_NOT_SET_UP = "Bot PCs aren't set up on this computer yet."
 const RUNS_NOT_SET_UP = "Bot runs aren't set up on this computer yet."
 /** Shown when a terminals.* call needs detection/managed mode and it isn't wired up yet. */
 const TERMINALS_NOT_SET_UP = "Terminal agents aren't set up on this computer yet."
+
+/** How often Freebuff's picker may be read at most: each read drives Freebuff's /model screen. */
+const FREEBUFF_MODELS_MIN_GAP_MS = 60_000
 /** Shown when a skills/plugins.* call needs the extensions machinery and it isn't wired up yet. */
 const SKILLS_NOT_SET_UP = "Skills and plugins aren't set up on this computer yet."
 /** Shown when a connectors.* call needs the MCP machinery and it isn't wired up yet. */
 const CONNECTORS_NOT_SET_UP = "Connectors aren't set up on this computer yet."
 /** Shown when phone access (spec 5.12) isn't wired up yet. */
 const PHONE_NOT_SET_UP = "Phone access isn't set up on this computer yet."
+/** Shown when a screen.* call needs the screen guide and it isn't wired up. */
+const SCREEN_NOT_SET_UP = "The screen guide isn't available on this computer."
 /** CPU cap given to a bot's PC when creating it; not user-configurable (BotPc has no cpuLimit field). */
 const DEFAULT_PC_CPU_LIMIT = 2
 
@@ -76,11 +94,69 @@ export interface HandlerServices {
   phone?: { info(): PhoneInfo }
   /** Computer use (Agents tab): a model driving the user's own mouse and keyboard. */
   computer?: ComputerUseService
+  /** The screen guide a connected agent uses to see the screen, point at things and talk. */
+  screen?: ScreenGuideService
+  /** The agent browser (the title bar's browser panel). */
+  browser?: BrowserService
+  /** Paired phones over the encrypted relay. */
+  remote?: RemoteAccess
+  setRemoteConfig?: (patch: { relay: string; anon: string; appUrl: string }) => void
+  /** Duo, and its tools for the MCP bridge. */
+  duo?: DuoService
+  duoTools?: () => Record<string, unknown>
+  /** Scheduled tasks of Work and Design projects. */
+  taskSchedules?: TaskScheduler
+  /** Duo's approved Outbox item that may be sent on this site now, if any (the browser's send rule). */
+  duoSendPermit?: (domain: string) => { id: string; summary: string } | null
 }
 
 /** Implements every method of RpcMethods. Handlers emit bus events the UI listens to. */
 export function createHandlers(services: HandlerServices): Handlers {
   const { repos, bus, runner, changes, models, keys, version, dataDir, agentKit, onDesignWritten } = services
+
+  // Freebuff's model list: the last one read off its picker (saved across launches), refreshed in the
+  // background whenever the picker is opened and an idle Freebuff is running.
+  const savedFreebuffModels = repos.settings.getExtra<FreebuffModelList | null>('freebuffModels', null)
+  if (savedFreebuffModels?.models.length) setFreebuffModels(savedFreebuffModels.models)
+  let freebuffModelsAt = savedFreebuffModels?.updatedAt ?? 0
+  let freebuffModelsReading: Promise<void> | null = null
+  const currentFreebuffModels = (): FreebuffModelList => ({ models: freebuffModels(), updatedAt: freebuffModelsAt })
+  const refreshFreebuffModels = (): Promise<void> => {
+    if (freebuffModelsReading || !services.terminals || Date.now() - freebuffModelsAt < FREEBUFF_MODELS_MIN_GAP_MS) return freebuffModelsReading ?? Promise.resolve()
+    const terminals = services.terminals
+    freebuffModelsReading = (async () => {
+      try {
+        const read = await terminals.freebuffModels()
+        if (!read || read.length === 0) return
+        const before = JSON.stringify(freebuffModels())
+        setFreebuffModels(read)
+        freebuffModelsAt = Date.now()
+        const list = currentFreebuffModels()
+        repos.settings.setExtra('freebuffModels', list)
+        if (JSON.stringify(list.models) !== before) bus.emit({ type: 'freebuff.models', list })
+      } catch (error) {
+        console.error("[core] couldn't read Freebuff's models", error)
+      } finally {
+        freebuffModelsReading = null
+      }
+    })()
+    return freebuffModelsReading
+  }
+
+  const requireRemote = (): RemoteAccess => {
+    if (!services.remote) throw new Error('Phone access from anywhere is not available here.')
+    return services.remote
+  }
+
+  const requireDuo = (): DuoService => {
+    if (!services.duo) throw new Error('Duo is not available here.')
+    return services.duo
+  }
+
+  const requireSchedules = (): TaskScheduler => {
+    if (!services.taskSchedules) throw new Error('Scheduled tasks are not available here.')
+    return services.taskSchedules
+  }
 
   const requireDesign = (projectId: string) => {
     const project = repos.projects.require(projectId)
@@ -267,6 +343,8 @@ export function createHandlers(services: HandlerServices): Handlers {
       runner.respond(params.taskId, params.approvalId, params.approved, params.always),
 
     'changes.list': (params: { taskId: string }) => repos.changes.list(params.taskId),
+
+    'changes.stats': (params: { taskId: string }) => changes.stats(params.taskId),
 
     'changes.undo': (params: { id: string }) => {
       const record = changes.undo(params.id)
@@ -629,13 +707,34 @@ export function createHandlers(services: HandlerServices): Handlers {
       return services.terminals.detect()
     },
 
+    'terminals.warm': (params: { folder: string }) => {
+      if (!services.terminals) throw new Error(TERMINALS_NOT_SET_UP)
+      return { warm: services.terminals.warm(params.folder) }
+    },
+
+    // Both of these are keyed by folder in a map the pool owns, so the folder is canonicalised the
+    // same way `sessions.start` canonicalises it — a non-canonical path would miss the server that is
+    // already running and read as "no conversation here".
+    'terminals.usage': async (params: { folder: string }) => {
+      if (!services.terminals) throw new Error(TERMINALS_NOT_SET_UP)
+      return (await services.terminals.usage(realpathSync.native(params.folder))) ?? null
+    },
+
+    'terminals.compact': async (params: { folder: string }) => {
+      if (!services.terminals) throw new Error(TERMINALS_NOT_SET_UP)
+      return (await services.terminals.compact(realpathSync.native(params.folder))) ?? null
+    },
+
     'terminals.sessions.list': () => {
       if (!services.terminals) throw new Error(TERMINALS_NOT_SET_UP)
       return services.terminals.list()
     },
 
-    'terminals.sessions.start': (params: { tool: 'opencode' | 'agy'; folder: string; model?: string }) => {
+    'terminals.sessions.start': (params: { tool: TerminalTool; folder: string; model?: string }) => {
       if (!services.terminals) throw new Error(TERMINALS_NOT_SET_UP)
+      if (!MANAGED_TERMINAL_TOOLS.includes(params.tool)) {
+        throw new Error("That agent has no non-interactive mode, so it can't run as a managed session. Start it in a terminal and attach instead.")
+      }
       if (!existsSync(params.folder) || !statSync(params.folder).isDirectory()) {
         throw new Error("That folder doesn't exist.")
       }
@@ -661,7 +760,7 @@ export function createHandlers(services: HandlerServices): Handlers {
       return services.terminals.items(params.id)
     },
 
-    'terminals.attach': (params: { pid: number; tool: 'opencode' | 'agy' }) => {
+    'terminals.attach': (params: { pid: number; tool: TerminalTool }) => {
       if (!services.terminals) throw new Error(TERMINALS_NOT_SET_UP)
       if (!Number.isInteger(params.pid) || params.pid <= 0) throw new Error('That terminal id is invalid.')
       return services.terminals.attach(params.pid, params.tool)
@@ -696,6 +795,165 @@ export function createHandlers(services: HandlerServices): Handlers {
     'terminals.attach.stop': (params: { id: string }) => {
       if (!services.terminals) throw new Error(TERMINALS_NOT_SET_UP)
       services.terminals.attachStop(params.id)
+      return null
+    },
+
+    'terminals.launch': (params: { tool: TerminalTool; folder: string }) => {
+      if (!services.terminals) throw new Error(TERMINALS_NOT_SET_UP)
+      if (!existsSync(params.folder) || !statSync(params.folder).isDirectory()) {
+        throw new Error("That folder doesn't exist.")
+      }
+      services.terminals.launch(params.tool, realpathSync.native(params.folder))
+      return null
+    },
+
+    'remote.status': () => requireRemote().status(),
+    'remote.pairStart': () => requireRemote().pairStart(),
+    'remote.remove': (params: { id: string }) => requireRemote().remove(params.id),
+    'remote.configure': (params: { relay: string; anon: string; appUrl: string }) => {
+      const remote = requireRemote()
+      if (!/^https:\/\//.test(params.relay) || !/^https:\/\//.test(params.appUrl) || !params.anon.trim()) throw new Error('Give https addresses and the publishable key.')
+      services.setRemoteConfig?.({ relay: params.relay.trim(), anon: params.anon.trim(), appUrl: params.appUrl.trim().replace(/\/+$/, '') })
+      remote.stop()
+      remote.start()
+      return remote.status()
+    },
+    'duo.state': () => requireDuo().state(),
+    'duo.profile.update': (params: { patch: Partial<DuoProfile> }) => requireDuo().updateProfile(params.patch ?? {}),
+    'duo.outbox.decide': (params: { id: string; decision: 'approve' | 'skip' | 'edit'; subject?: string; body?: string; to?: string }) => {
+      const duo = requireDuo()
+      duo.decide(params.id, params.decision, { subject: params.subject, body: params.body, to: params.to })
+      return duo.state()
+    },
+    'duo.outbox.approveAll': () => {
+      const duo = requireDuo()
+      duo.approveAll()
+      return duo.state()
+    },
+    // Runs take minutes: started here, followed through duo.updated events.
+    'duo.sendApproved': () => {
+      const duo = requireDuo()
+      if (!duo.nextApproved()) throw new Error('Nothing approved is waiting to be sent.')
+      void duo.sendApproved().catch((error: unknown) => console.error('[duo] send run failed', error))
+      return duo.state()
+    },
+    'duo.start': (params: { cardId: string }) => {
+      const duo = requireDuo()
+      void duo.startCard(params.cardId).catch((error: unknown) => console.error('[duo] run failed', error))
+      return duo.state()
+    },
+    'duo.dismiss': (params: { cardId: string }) => requireDuo().dismissCard(params.cardId),
+    'duo.ask': (params: { text: string }) => {
+      const duo = requireDuo()
+      // While Duo works the message waits its turn (duo.ask queues it) instead of being refused.
+      void duo.ask(params.text).catch((error: unknown) => console.error('[duo] run failed', error))
+      return duo.state()
+    },
+    'duo.cancel': () => {
+      const duo = requireDuo()
+      duo.cancel()
+      return duo.state()
+    },
+    'duo.queue.remove': (params: { id: string }) => requireDuo().unqueue(params.id),
+    'duo.todo.done': (params: { id: string; done: boolean }) => {
+      const duo = requireDuo()
+      duo.setTodoDone(params.id, params.done)
+      return duo.state()
+    },
+    'duo.todo.remove': (params: { id: string }) => {
+      const duo = requireDuo()
+      duo.removeTodo(params.id)
+      return duo.state()
+    },
+    'duo.tool': async (params: { name: string; input: Record<string, unknown> }) => {
+      const tools = (services.duoTools?.() ?? {}) as Record<string, { inputSchema?: { parse?: (i: unknown) => unknown }; execute?: (i: unknown, o: unknown) => Promise<unknown> }>
+      const chosen = tools[params.name]
+      if (!chosen?.execute) throw new Error(`Unknown Duo tool: ${params.name}`)
+      const input = chosen.inputSchema?.parse ? chosen.inputSchema.parse(params.input ?? {}) : (params.input ?? {})
+      return { text: String(await chosen.execute(input, { toolCallId: 'bridge', messages: [] })) }
+    },
+
+    'taskSchedules.list': (params: { projectId?: string }) => requireSchedules().list(params.projectId),
+    'taskSchedules.create': (params: { projectId: string; name: string; instruction: string; when: When; missed?: 'run-late' | 'skip' }) =>
+      requireSchedules().create(params),
+    'taskSchedules.update': (params: { id: string; name?: string; instruction?: string; when?: When; enabled?: boolean; missed?: 'run-late' | 'skip' }) => {
+      const { id, ...patch } = params
+      return requireSchedules().update(id, patch)
+    },
+    'taskSchedules.delete': async (params: { id: string }) => {
+      await requireSchedules().delete(params.id)
+      return null
+    },
+    'taskSchedules.runNow': (params: { id: string }) => requireSchedules().runNow(params.id),
+    'taskSchedules.start': (params: { id: string }) => requireSchedules().startPending(params.id),
+    'taskSchedules.dismiss': (params: { id: string }) => requireSchedules().dismiss(params.id),
+
+    'freebuff.models': () => {
+      void refreshFreebuffModels()
+      return currentFreebuffModels()
+    },
+
+    'freebuff.status': (params: { folder?: string }) => {
+      if (!services.terminals) throw new Error(TERMINALS_NOT_SET_UP)
+      const folder = params?.folder && existsSync(params.folder) ? realpathSync.native(params.folder) : undefined
+      return services.terminals.freebuffStatus(folder)
+    },
+
+    // ---- Screen guide ----
+
+    'screen.look': async () => {
+      if (!services.screen) throw new Error(SCREEN_NOT_SET_UP)
+      return services.screen.look()
+    },
+
+    'screen.point': (params: { marks: ScreenMark[]; seconds?: number }) => {
+      if (!services.screen) throw new Error(SCREEN_NOT_SET_UP)
+      if (!Array.isArray(params.marks) || params.marks.length === 0) throw new Error('Give at least one mark to draw.')
+      services.screen.point(params.marks, params.seconds)
+      return null
+    },
+
+    'screen.say': async (params: { text: string }) => {
+      if (!services.screen) throw new Error(SCREEN_NOT_SET_UP)
+      const text = typeof params.text === 'string' ? params.text.trim() : ''
+      if (!text) throw new Error('Give some text to say.')
+      await services.screen.say(text)
+      return null
+    },
+
+    'browser.state': () => services.browser?.state() ?? { ...EMPTY_BROWSER_STATE },
+    'browser.asks.respond': (params: { id: string; answer: SiteAnswer }) => {
+      if (!services.browser) throw new Error('The agent browser is not available.')
+      if (!['allow-once', 'always', 'deny'].includes(params.answer)) throw new Error('Unknown answer.')
+      return services.browser.respond(params.id, params.answer)
+    },
+    'browser.sites.list': () => services.browser?.alwaysAllowed() ?? [],
+    'browser.sites.remove': (params: { domain: string }) => {
+      if (!services.browser) throw new Error('The agent browser is not available.')
+      return services.browser.removeSite(params.domain)
+    },
+    'browser.tool': async (params: { name: string; input: Record<string, unknown>; agent?: string }) => {
+      if (!services.browser) throw new Error('The agent browser is not available.')
+      // A Work-tab agent names its project ("--as"), so the browser's questions say who is asking.
+      const named = typeof params.agent === 'string' ? params.agent.trim().slice(0, 60) : ''
+      const agent = params.agent === 'Duo' ? 'Duo' : named || 'Connected agent'
+      const tools = agentBrowserTools({
+        browser: services.browser,
+        agent,
+        runKey: `bridge:${agent}`,
+        sendPermit: agent === 'Duo' ? (domain) => services.duoSendPermit?.(domain) ?? null : undefined,
+        screenshotDir: join(dataDir, 'browser-screenshots')
+      })
+      const chosen = (tools as unknown as Record<string, { inputSchema?: { parse?: (input: unknown) => unknown }; execute?: (input: unknown, options: unknown) => Promise<unknown> }>)[params.name]
+      if (!chosen?.execute) throw new Error(`Unknown browser tool: ${params.name}`)
+      // The same checks and defaults the app's own agents get from the tool's schema.
+      const input = chosen.inputSchema?.parse ? chosen.inputSchema.parse(params.input ?? {}) : (params.input ?? {})
+      const text = await chosen.execute(input, { toolCallId: 'bridge', messages: [] })
+      return { text: String(text) }
+    },
+    'screen.clear': () => {
+      if (!services.screen) throw new Error(SCREEN_NOT_SET_UP)
+      services.screen.clear()
       return null
     },
 

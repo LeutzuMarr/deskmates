@@ -33,7 +33,7 @@ export function handlePreviewProtocol(dataDir: string, editorScriptPath: string,
         const isExport = isRecording || url.searchParams.get('export') === '1'
         let html = await readFile(resolved.path, 'utf8')
         if (isRecording) html = injectClock(html)
-        else if (!isExport && !isDesignComponentPath(resolved.path)) html = injectEditor(html)
+        else if (!isExport && url.host !== 'widget' && !isDesignComponentPath(resolved.path)) html = injectEditor(html)
         return new Response(html, { headers: previewResponseHeaders(resolved.contentType, true) })
       }
 

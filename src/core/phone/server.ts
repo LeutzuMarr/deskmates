@@ -74,6 +74,7 @@ const PHONE_BOOTSTRAP =
   "if(!token){location.replace('/login');return;}" +
   'var port=Number(location.port)||80;' +
   'window.deskmates={' +
+  "platform:'other'," +
   "getCoreConnection:function(){return fetch('/auth',{method:'POST',body:token,cache:'no-store'}).then(function(r){" +
   'if(r.ok)return {port:port,token:token};' +
   "sessionStorage.removeItem(KEY);location.replace('/login?e='+(r.status===429?'locked':'wrong'));" +
@@ -84,6 +85,7 @@ const PHONE_BOOTSTRAP =
   'set:function(){return Promise.resolve([]);}' +
   '},' +
   'pickFolder:function(){return Promise.resolve(null);},' +
+  "pathForFile:function(){return '';}," +
   'openPath:function(){return Promise.resolve();},' +
   'autoStart:{' +
   'get:function(){return Promise.resolve(false);},' +
@@ -93,7 +95,8 @@ const PHONE_BOOTSTRAP =
   'pickImage:function(){return Promise.resolve(null);},' +
   'pickFont:function(){return Promise.resolve(null);},' +
   'pickAnimation:function(){return Promise.resolve(null);},' +
-  'setWindowIcon:function(){return Promise.resolve();}' +
+  'setWindowIcon:function(){return Promise.resolve();},' +
+  'setTheme:function(){return Promise.resolve();}' +
   '},' +
   'design:{' +
   'export:function(){return Promise.resolve(null);},' +

@@ -1,0 +1,257 @@
+/* ==== Sidebar: a glass panel of foldable groups ==== */
+
+.sidebar-shell {
+  display: flex;
+  flex-shrink: 0;
+  width: calc(264px + var(--gutter));
+  padding: 0 0 var(--gutter) var(--gutter);
+  box-sizing: border-box;
+  overflow: hidden;
+  transition:
+    width 260ms var(--ease-out),
+    padding 260ms var(--ease-out),
+    opacity 200ms var(--ease-out);
+}
+.sidebar-shell-collapsed {
+  width: 0;
+  padding-left: 0;
+  opacity: 0;
+}
+
+.sidebar-aside {
+  display: flex;
+  flex-shrink: 0;
+  height: 100%;
+  min-width: 0;
+}
+
+.sidebar {
+  --lg-blur: 20px;
+  --lg-glass-bend: 0.3;
+  --lg-glass-dispersion: 0.2;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  width: 264px;
+  height: 100%;
+  border-radius: var(--r-sheet);
+  overflow: hidden;
+}
+.sidebar-foot {
+  box-shadow: inset 0 0.5px 0 var(--lg-separator);
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* ---- Rows ---- */
+.sidebar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 32px;
+  padding: 6px 10px;
+  text-align: left;
+  font-size: 13.5px;
+  color: var(--ink);
+  background: transparent;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.sidebar-row:hover {
+  background: var(--glass-hover);
+}
+.sidebar-row:active {
+  transform: scale(0.985);
+}
+.sidebar-row-active,
+.sidebar-row-active:hover {
+  background: var(--glass-selected);
+}
+.sidebar-row:focus-visible,
+.sidebar-row-main:focus-visible,
+.sidebar-group-name:focus-visible,
+.sidebar-group-toggle:focus-visible {
+  outline: 2px solid var(--lg-ring);
+  outline-offset: -2px;
+  border-radius: 10px;
+}
+/* The clickable name of a row that also carries a mark and an options button. */
+.sidebar-row-main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-self: stretch;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.sidebar-row-item {
+  position: relative;
+  padding-right: 6px;
+  cursor: default;
+}
+/* The status mark sits where the options button appears; on hover the button takes its place. */
+.sidebar-row-mark {
+  display: inline-flex;
+  flex-shrink: 0;
+  width: 22px;
+  justify-content: center;
+}
+.sidebar-row-more {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  translate: 0 -50%;
+  padding: 5px;
+  opacity: 0;
+  pointer-events: none;
+}
+.sidebar-row-item:hover .sidebar-row-more,
+.sidebar-row-more:focus-visible,
+.sidebar-row-more-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+.sidebar-row-item:hover .sidebar-row-mark-swaps,
+.sidebar-row-item:has(.sidebar-row-more:focus-visible) .sidebar-row-mark-swaps,
+.sidebar-row-mark-hidden {
+  visibility: hidden;
+}
+
+/* ---- Groups ---- */
+.sidebar-group-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 30px;
+  padding: 0 4px 0 2px;
+  border-radius: 10px;
+  color: var(--ink-muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.005em;
+  transition:
+    background-color 140ms var(--ease-out),
+    color 140ms var(--ease-out);
+}
+.sidebar-group-head:hover,
+.sidebar-group-head:focus-within {
+  color: var(--ink);
+}
+.sidebar-group-head:hover {
+  background: var(--glass-hover);
+}
+.sidebar-group-head.sidebar-row-active {
+  color: var(--ink);
+  background: var(--glass-selected);
+}
+.sidebar-group-toggle {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.sidebar-group-toggle:hover {
+  background: var(--glass-hover);
+}
+.sidebar-group-caret {
+  transition: transform 240ms var(--ease-spring);
+}
+.sidebar-group-caret-open {
+  transform: rotate(90deg);
+}
+.sidebar-group-name {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-self: stretch;
+  align-items: center;
+  border: none;
+  background: transparent;
+  padding: 0 4px 0 2px;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.sidebar-group-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  opacity: 0;
+  transition: opacity 140ms var(--ease-out);
+}
+.sidebar-group-actions .btn-icon {
+  padding: 5px;
+}
+.sidebar-group-head:hover .sidebar-group-actions,
+.sidebar-group-head:focus-within .sidebar-group-actions {
+  opacity: 1;
+}
+/* Folding animates the height. The rows only clip while folded or folding: once open they must not,
+   or a row's options menu would be cut off at the group's edge. */
+.sidebar-group-body {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 240ms var(--ease-out);
+}
+.sidebar-group-body-collapsed {
+  grid-template-rows: 0fr;
+}
+.sidebar-group-rows {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 1px;
+  padding-left: 12px;
+  overflow: visible;
+  transition: overflow 0s 240ms allow-discrete, opacity 200ms var(--ease-out);
+}
+.sidebar-group-body-collapsed > .sidebar-group-rows {
+  overflow: hidden;
+  opacity: 0;
+  transition: overflow 0s allow-discrete, opacity 160ms var(--ease-out);
+}
+
+/* ---- Phone-sized screens: the sidebar is a drawer over the page ---- */
+@media (max-width: 699px) {
+  .sidebar-shell {
+    position: fixed;
+    top: calc(40px + env(safe-area-inset-top));
+    bottom: 0;
+    left: 0;
+    z-index: 30;
+    width: min(85vw, 300px);
+    padding: 0 0 var(--gutter) var(--gutter);
+    filter: drop-shadow(0 0 32px rgb(0 0 0 / 0.35));
+  }
+  .sidebar-shell-collapsed {
+    width: 0;
+    padding-left: 0;
+    filter: none;
+  }
+  .sidebar-aside,
+  .sidebar {
+    width: 100%;
+  }
+}

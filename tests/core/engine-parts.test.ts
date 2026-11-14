@@ -159,12 +159,17 @@ describe('the mounted base prompt', () => {
     expect(loadBasePrompt('work')).toBeNull() // nothing written yet
   })
 
-  it('prepends the loaded base prompt to the instructions before the Deskmates overlay', () => {
+  it("gives the Work tab the user's own prompt and ignores claude-cowork.md", () => {
     writeFileSync(basePromptPath('work'), 'WORK BASE PROMPT', 'utf8')
+    mkdirSync(join(promptsDir, 'my-prompt'), { recursive: true })
+    writeFileSync(join(promptsDir, 'my-prompt', 'my-prompt.md'), '# behaviour\nMY OWN RULES\n\n# other\nMore', 'utf8')
     const result = buildInstructions(emptyOverlay('work'))
-    expect(result.startsWith('WORK BASE PROMPT')).toBe(true)
-    expect(result).toContain('Project: MyApp') // overlay still present after it
-    expect(result.indexOf('WORK BASE PROMPT')).toBeLessThan(result.indexOf('Project: MyApp'))
+    expect(result).toContain('MY OWN RULES')
+    expect(result).toContain('- other')
+    expect(result).not.toContain('WORK BASE PROMPT')
+    expect(result).not.toContain('Keeping the user posted')
+    expect(result).toContain('Project: MyApp')
+    expect(result.indexOf('MY OWN RULES')).toBeLessThan(result.indexOf('Project: MyApp'))
   })
 
   it('loads the design base prompt for design projects', () => {
@@ -177,7 +182,8 @@ describe('the mounted base prompt', () => {
   it('drops the Deskmates rules that would contradict a loaded base prompt', () => {
     writeFileSync(basePromptPath('design'), 'DESIGN BASE PROMPT', 'utf8')
     const result = buildInstructions({ ...emptyOverlay('design'), memories: [{ id: 'm1', content: 'Likes teal', createdAt: 0 } as any] })
-    expect(result).toContain('follow it exactly')
+    expect(result).toContain('Everything above is your system prompt')
+    expect(result).not.toContain('Keeping the user posted')
     expect(result).not.toContain('You are Deskmates')
     expect(result).not.toContain('How to design:')
     expect(result).not.toContain('How to write:')

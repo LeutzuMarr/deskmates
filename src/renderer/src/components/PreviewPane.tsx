@@ -28,6 +28,8 @@ interface PreviewPaneProps {
   running: boolean
   /** When the running turn's prompt was sent, for the popup's timer. */
   workingSince?: number | null
+  /** The step the agent is on, for the popup ("Editing index.html…"). */
+  activity?: string | null
   selection: Selection | null
   onSelectionChange: (selection: Selection | null) => void
   onClearSelection: () => void
@@ -41,6 +43,7 @@ export function PreviewPane({
   projectId,
   running,
   workingSince,
+  activity,
   selection,
   onSelectionChange,
   onClearSelection,
@@ -411,7 +414,7 @@ export function PreviewPane({
             }}
           />
         )}
-        {running && <WorkingPill since={workingSince} />}
+        {running && <WorkingPill since={workingSince} label={activity ?? undefined} />}
       </div>
         {pinned && !running && !isDc && (
           <PropertiesPanel

@@ -1,4 +1,10 @@
 import type { RenderRequest, RenderResult, VideoRequest, VideoResult } from '../core/render/types'
+import type { FreebuffModelList, FreebuffStatus } from './freebuff'
+import type { When } from './when'
+import type { DuoProfile, DuoState } from './duo'
+export type { When } from './when'
+import type { BrowserAction, BrowserResult, BrowserState, HostBrowserState, SiteAnswer } from './agent-browser'
+export type { BrowserAction, BrowserResult }
 
 export type ProviderId =
   | 'google'
@@ -15,6 +21,7 @@ export type ProviderId =
   | 'lmstudio'
   | 'opencode'
   | 'agy'
+  | 'freebuff'
 export const PROVIDERS: readonly ProviderId[] = [
   'google',
   'openai',
@@ -29,7 +36,8 @@ export const PROVIDERS: readonly ProviderId[] = [
   'ollama',
   'lmstudio',
   'opencode',
-  'agy'
+  'agy',
+  'freebuff'
 ]
 
 export const PROVIDER_LABELS: Record<ProviderId, string> = {
@@ -46,7 +54,8 @@ export const PROVIDER_LABELS: Record<ProviderId, string> = {
   ollama: 'Ollama',
   lmstudio: 'LM Studio',
   opencode: 'OpenCode',
-  agy: 'Agy'
+  agy: 'Agy',
+  freebuff: 'Freebuff'
 }
 
 /** Providers served by a model server running on this PC: no API key, and the base URL is editable. */
@@ -57,8 +66,9 @@ export function isLocalProvider(provider: ProviderId): boolean {
 }
 
 /** Providers with no API key: the prompt is sent to a connected local CLI session instead (openCode
- *  `run` / agy `-p`), so they work everywhere a model can be picked once the CLI is installed. */
-export const CLI_PROVIDERS: readonly ProviderId[] = ['opencode', 'agy']
+ *  `run` / agy `-p` / a hidden Freebuff), so they work everywhere a model can be picked once the CLI
+ *  is installed. */
+export const CLI_PROVIDERS: readonly ProviderId[] = ['opencode', 'agy', 'freebuff']
 
 export function isCliProvider(provider: ProviderId): boolean {
   return CLI_PROVIDERS.includes(provider)
@@ -134,6 +144,14 @@ export interface PcCloudConnection {
   registryUsername: string
   /** Private-registry password used when pulling the bot image; '' when the image is public. */
   registryPassword: string
+}
+
+/** Phone access from anywhere: whether it's set up, the web app's address and the paired phones. */
+export interface RemoteStatusInfo {
+  configured: boolean
+  appUrl: string
+  devices: Array<{ id: string; name: string; createdAt: number; lastSeenAt: number | null; notifications: boolean }>
+  pairing: { url: string; until: number } | null
 }
 
 /** Live state of phone (LAN) access: whether it's listening, on which port, and the URLs to open. */
@@ -232,6 +250,8 @@ export interface ToolItem {
 export type TimelineItem =
   | { kind: 'user'; id: string; at: number; text: string }
   | { kind: 'assistant'; id: string; at: number; text: string }
+  /** The model's reasoning before it answers or acts, for models that share it (Gemini 2.5+, DeepSeek R1 and the like). */
+  | { kind: 'thinking'; id: string; at: number; text: string }
   | ToolItem
 
 export interface Memory {
@@ -253,6 +273,16 @@ export interface FileChange {
   movedTo: string | null
   undone: boolean
   createdAt: number
+}
+
+/** A task's changes in numbers, for a diff-style summary ("+12 −3"). */
+export interface ChangeStats {
+  /** Lines added across the files the task changed. */
+  added: number
+  /** Lines removed across the files the task changed. */
+  removed: number
+  /** Files the task changed and hasn't undone. */
+  files: number
 }
 
 export interface UsageRow {
@@ -381,6 +411,28 @@ export interface Schedule {
   nextRunAt: number | null
 }
 
+/**
+ * A scheduled task: an instruction a Work or Design project runs on its own at set times ("every
+ * weekday at 07:30"). On a model that is a command-line tool (Freebuff, OpenCode, Antigravity) it
+ * never starts by itself: at its time it waits for the user's Start (`pendingSince`).
+ */
+export interface TaskSchedule {
+  id: string
+  projectId: string
+  name: string
+  instruction: string
+  when: When
+  enabled: boolean
+  missed: 'run-late' | 'skip'
+  lastRunAt: number | null
+  nextRunAt: number | null
+  /** When it became due and started waiting for the user's Start tap; null when not waiting. */
+  pendingSince: number | null
+  /** The task its last run created. */
+  lastTaskId: string | null
+  createdAt: number
+}
+
 /** Lifecycle of a handoff file a sending bot dropped in the shared folder (spec 5.9). */
 export type HandoffState = 'pending' | 'running' | 'done' | 'error'
 
@@ -436,8 +488,30 @@ export interface EngineStatus {
 
 /** The coding-agent CLIs Deskmates can find and drive. Two ways: managed mode (the app runs the
  *  official non-interactive command itself, spec 5.13) and attach mode (the app types into a
- *  terminal window the user already has open and mirrors its screen back, spec 5.14~5.16). */
-export type TerminalTool = 'opencode' | 'agy'
+ *  terminal window the user already has open and mirrors its screen back, spec 5.14~5.16).
+ *  Freebuff is attach-only: its CLI has no non-interactive mode for managed sessions to run. */
+export type TerminalTool = 'opencode' | 'agy' | 'freebuff'
+
+/** The tools managed mode can run (each needs an official non-interactive command). */
+export const MANAGED_TERMINAL_TOOLS: readonly TerminalTool[] = ['opencode', 'agy']
+
+/** A screenshot taken for the screen guide. `data` is base64 JPEG. */
+export interface ScreenLook {
+  data: string
+  width: number
+  height: number
+}
+
+/** One mark the screen guide draws: an arrow pointing at (x, y), a circle or box around a region,
+ *  or a text label at (x, y). Coordinates are pixels of the last `screen.look` image. */
+export interface ScreenMark {
+  kind: 'arrow' | 'circle' | 'box' | 'label'
+  x: number
+  y: number
+  width?: number
+  height?: number
+  text?: string
+}
 
 /** One running OpenCode or agy process found on the machine, independent of whether Deskmates
  *  started it. `folder` is read cheaply off the command line (a `--dir` flag); it's `null` when the
@@ -460,6 +534,15 @@ export type TerminalOnboardingState = 'unknown' | 'primed' | 'confirmed' | 'fail
 export type TerminalSessionState = 'starting' | 'busy' | 'idle' | 'error'
 
 /** A managed-mode conversation the app started and can keep sending prompts to. */
+/** How much of a conversation's context window is in use, as the OpenCode server reports it. `limit`
+ *  is null when the model won't say — the meter is hidden then rather than drawn against a made-up
+ *  ceiling. `summarized` is true when the newest turn is already a compaction summary. */
+export interface SessionContextUsage {
+  used: number
+  limit: number | null
+  summarized: boolean
+}
+
 export interface TerminalSession {
   id: string
   tool: TerminalTool
@@ -571,6 +654,7 @@ export interface RpcMethods {
   'changes.list': { params: { taskId: string }; result: FileChange[] }
   'changes.undo': { params: { id: string }; result: FileChange[] }
   'changes.undoAll': { params: { taskId: string }; result: FileChange[] }
+  'changes.stats': { params: { taskId: string }; result: ChangeStats }
   'memory.list': { params: { projectId: string }; result: Memory[] }
   'memory.add': { params: { projectId: string; content: string }; result: Memory[] }
   'memory.delete': { params: { id: string; projectId: string }; result: Memory[] }
@@ -652,6 +736,15 @@ export interface RpcMethods {
 
   /** Lists OpenCode/agy processes currently running on this machine (attach-mode-style detection). */
   'terminals.detect': { params: NoParams; result: DetectedTerminalAgent[] }
+  /** Whether a warm OpenCode server (and its conversation) already exists for `folder`. Lets the UI
+   *  drop the "Starting OpenCode…" notice on a follow-up turn instead of flashing it every time. */
+  'terminals.warm': { params: { folder: string }; result: { warm: boolean } }
+  /** How much of the model's context window `folder`'s conversation is using, for the Work tab's
+   *  meter. Null when there is no conversation yet or the server reports nothing. */
+  'terminals.usage': { params: { folder: string }; result: SessionContextUsage | null }
+  /** Folds `folder`'s conversation into a summary of itself, on the same session and in the same
+   *  model, and returns the usage afterwards. Throws when there's nothing to compact. */
+  'terminals.compact': { params: { folder: string }; result: SessionContextUsage | null }
   /** Lists managed sessions the app has started (any state, including ones that have finished). */
   'terminals.sessions.list': { params: NoParams; result: TerminalSession[] }
   /** Starts a managed session in `folder`: the app runs the tool's own non-interactive command,
@@ -682,6 +775,71 @@ export interface RpcMethods {
   /** Detaches: tells the helper to stop typing/polling and closes it. The user's terminal itself
    *  keeps running untouched. */
   'terminals.attach.stop': { params: { id: string }; result: null }
+  /** Opens a new terminal window running an attach-only tool (Freebuff) in `folder`. It then shows up
+   *  in `terminals.detect` like any terminal the user opened themselves, ready to attach. */
+  'terminals.launch': { params: { tool: TerminalTool; folder: string }; result: null }
+  /** What the hidden Freebuff behind the Work tab shows about its session (model, minutes left,
+   *  hours left today, context use) for `folder`, or for any running one. Null when none runs yet. */
+  'freebuff.status': { params: { folder?: string }; result: FreebuffStatus | null }
+  /** The Freebuff models Deskmates knows, cheapest first, with their cost. Also starts a fresh read
+   *  of Freebuff's picker when an idle Freebuff runs; a changed list arrives as 'freebuff.models'. */
+  'freebuff.models': { params: Record<string, never>; result: FreebuffModelList }
+
+  // ---- Screen guide: lets a connected agent see the screen, point at things and talk ----
+  /** A screenshot of the primary screen. Marks sent to `screen.point` use this image's pixels. */
+  'screen.look': { params: NoParams; result: ScreenLook }
+  /** Draws marks over the user's screen (click-through, hidden from screenshots) for `seconds`. */
+  'screen.point': { params: { marks: ScreenMark[]; seconds?: number }; result: null }
+  /** Says `text` aloud with the system voice. Resolves once it has finished speaking. */
+  'screen.say': { params: { text: string }; result: null }
+  /** Removes every mark from the screen. */
+  'screen.clear': { params: NoParams; result: null }
+  'taskSchedules.list': { params: { projectId?: string }; result: TaskSchedule[] }
+  'taskSchedules.create': { params: { projectId: string; name: string; instruction: string; when: When; missed?: 'run-late' | 'skip' }; result: TaskSchedule }
+  'taskSchedules.update': {
+    params: { id: string; name?: string; instruction?: string; when?: When; enabled?: boolean; missed?: 'run-late' | 'skip' }
+    result: TaskSchedule
+  }
+  'taskSchedules.delete': { params: { id: string }; result: null }
+  /** Runs it now (the user's own tap, so it works on every model). Returns the new task's id. */
+  'taskSchedules.runNow': { params: { id: string }; result: { taskId: string } }
+  /** Starts a run that is waiting for the user's Start tap. */
+  'taskSchedules.start': { params: { id: string }; result: { taskId: string } | null }
+  /** Drops a waiting Start card without running it. */
+  'taskSchedules.dismiss': { params: { id: string }; result: TaskSchedule }
+  'duo.state': { params: NoParams; result: DuoState }
+  'duo.profile.update': { params: { patch: Partial<DuoProfile> }; result: DuoState }
+  'duo.outbox.decide': { params: { id: string; decision: 'approve' | 'skip' | 'edit'; subject?: string; body?: string; to?: string }; result: DuoState }
+  'duo.outbox.approveAll': { params: NoParams; result: DuoState }
+  /** The user's tap: Duo sends what they approved (starts a run). */
+  'duo.sendApproved': { params: NoParams; result: DuoState }
+  /** The user's tap on a Start card (starts a run; a second tap does nothing). */
+  'duo.start': { params: { cardId: string }; result: DuoState }
+  'duo.dismiss': { params: { cardId: string }; result: DuoState }
+  /** The user's own message to Duo: starts a run, or waits its turn while one is going. */
+  'duo.ask': { params: { text: string }; result: DuoState }
+  /** Takes a waiting message back out before Duo gets to it. */
+  'duo.queue.remove': { params: { id: string }; result: DuoState }
+  'duo.cancel': { params: NoParams; result: DuoState }
+  'duo.todo.done': { params: { id: string; done: boolean }; result: DuoState }
+  'duo.todo.remove': { params: { id: string }; result: DuoState }
+  /** One Duo tool, for Duo's Freebuff through the MCP bridge. */
+  'duo.tool': { params: { name: string; input: Record<string, unknown> }; result: { text: string } }
+  /** Deskmates from anywhere: paired phones over the encrypted relay. */
+  'remote.status': { params: NoParams; result: RemoteStatusInfo }
+  'remote.pairStart': { params: NoParams; result: { url: string; until: number } }
+  'remote.remove': { params: { id: string }; result: RemoteStatusInfo }
+  /** The relay (Supabase project URL and publishable key) and the web app's address. */
+  'remote.configure': { params: { relay: string; anon: string; appUrl: string }; result: RemoteStatusInfo }
+  /** The agent browser as everyone sees it: tabs, who is driving, and questions waiting for the user. */
+  'browser.state': { params: NoParams; result: BrowserState }
+  'browser.asks.respond': { params: { id: string; answer: SiteAnswer }; result: BrowserState }
+  /** Sites every agent may act on without asking again ("Always allow"). */
+  'browser.sites.list': { params: NoParams; result: string[] }
+  'browser.sites.remove': { params: { domain: string }; result: string[] }
+  /** Runs one agent-browser tool (browser_open, browser_click…) for a connected agent, with the same
+   *  rules the app's own agents follow. `agent` is "Duo" for Duo's own runs. */
+  'browser.tool': { params: { name: string; input: Record<string, unknown>; agent?: string }; result: { text: string } }
 
   // ---- Skills and plugins (spec 5.5) ----
   'skills.list': { params: NoParams; result: Skill[] }
@@ -746,6 +904,7 @@ export type CoreEvent =
   | { type: 'task.timeline'; taskId: string; timeline: TimelineItem[] }
   | { type: 'changes.updated'; taskId: string; changes: FileChange[] }
   | { type: 'memory.updated'; projectId: string; memories: Memory[] }
+  | { type: 'freebuff.models'; list: FreebuffModelList }
   | { type: 'settings.updated'; settings: Settings }
   | { type: 'usage.updated'; usage: UsageRow[] }
   | { type: 'notify'; title: string; body: string }
@@ -768,6 +927,10 @@ export type CoreEvent =
   | { type: 'plugins.updated'; plugins: Plugin[] }
   | { type: 'connectors.updated'; connectors: Connector[] }
   | { type: 'computer.updated'; session: ComputerSession }
+  | { type: 'browser.updated'; state: BrowserState }
+  | { type: 'taskSchedule.updated'; schedule: TaskSchedule }
+  | { type: 'taskSchedule.deleted'; scheduleId: string; projectId: string }
+  | { type: 'duo.updated'; state: DuoState }
 
 export type ClientMessage = { type: 'req'; id: number; method: RpcMethod; params: unknown }
 
@@ -787,6 +950,10 @@ export type HostToCore =
   | { type: 'render-result'; id: number; result: RenderResult }
   /** The answer to a `video-request` with the same id: the result, or why it failed. */
   | { type: 'video-result'; id: number; result?: VideoResult; error?: string }
+  /** The answer to a `browser-request` with the same id. */
+  | { type: 'browser-result'; id: number; result: BrowserResult }
+  /** The agent browser's tabs, control and panel changed (or the user's idle time moved on). */
+  | { type: 'browser-state'; state: HostBrowserState }
 
 /** Messages from the core to the Electron main process. */
 export type CoreToHost =
@@ -798,3 +965,8 @@ export type CoreToHost =
   | { type: 'render-request'; id: number; request: RenderRequest }
   /** Asks the host to record a design page to a video file; answered by `video-result`. */
   | { type: 'video-request'; id: number; request: VideoRequest & { out: string } }
+  /** Draws the screen guide's marks over the primary screen for `seconds`; coordinates are physical
+   *  screen pixels. An empty list clears the overlay. */
+  | { type: 'overlay'; marks: ScreenMark[]; seconds: number }
+  /** Asks the host to act in the agent browser; answered by `browser-result`. */
+  | { type: 'browser-request'; id: number; action: BrowserAction }

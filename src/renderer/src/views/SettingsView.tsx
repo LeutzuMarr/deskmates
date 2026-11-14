@@ -1,11 +1,15 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import { Check } from 'lucide-react'
+import { RemotePhones } from '../components/RemotePhones'
+import { Check, Monitor, Moon, Sun } from 'lucide-react'
 import type { KeyboardEvent, ReactNode } from 'react'
 import { useStore } from '../lib/store'
 import { core } from '../lib/rpc'
 import { concentricVars } from '../lib/design'
 import { isValidWhatsAppNumber } from '../lib/bots'
+import { setPrefs, usePrefs } from '../lib/prefs'
 import { DEFAULT_SETTINGS, PROVIDERS, PROVIDER_LABELS, isCliProvider, isLocalProvider } from '../../../shared/protocol'
+import { freebuffModelLabel } from '../../../shared/freebuff'
+import type { ThemeChoice } from '../../../shared/desktop-api'
 import type { Appearance, PcCloudConnection, PcHostKind, PhoneInfo, ProviderId } from '../../../shared/protocol'
 
 type LocalUrlField = 'ollamaBaseUrl' | 'lmstudioBaseUrl'
@@ -406,7 +410,7 @@ export function SettingsView() {
                   {PROVIDERS.map((provider) => (
                     <option key={provider} value={provider}>
                       {PROVIDER_LABELS[provider]}
-                      {provider === 'opencode' || provider === 'agy' ? ' (CLI)' : ''}
+                      {isCliProvider(provider) ? ' (CLI)' : ''}
                       {isLocalProvider(provider) ? ' (local)' : ''}
                     </option>
                   ))}
@@ -425,7 +429,7 @@ export function SettingsView() {
                   <option value="">Choose a model</option>
                   {(models[modelProvider as ProviderId] ?? []).map((model) => (
                     <option key={model} value={model}>
-                      {model}
+                      {modelProvider === 'freebuff' ? freebuffModelLabel(model) : model}
                     </option>
                   ))}
                 </select>
@@ -549,6 +553,7 @@ export function SettingsView() {
                 )}
               </div>
             )}
+            <RemotePhones />
           </div>
         </section>
 
@@ -748,6 +753,7 @@ function AppearanceSection() {
     <section className="mt-8">
       <h2 className="caption">Appearance</h2>
       <div className="mt-3 rounded-3xl border border-rule bg-card p-4">
+        <ThemeRow />
         <AppearanceRow
           label="Logo"
           value={appearance?.logo ? 'Custom image' : 'Mate'}
@@ -798,6 +804,39 @@ function AppearanceSection() {
   )
 }
 
+const THEMES: { id: ThemeChoice; label: string; Icon: typeof Monitor }[] = [
+  { id: 'system', label: 'System', Icon: Monitor },
+  { id: 'light', label: 'Light', Icon: Sun },
+  { id: 'dark', label: 'Dark', Icon: Moon }
+]
+
+function ThemeRow() {
+  const { theme } = usePrefs()
+  return (
+    <div className="flex items-center justify-between gap-3 border-b border-rule py-3 last:border-b-0">
+      <div className="min-w-0">
+        <div className="text-[14px] font-medium">Theme</div>
+        <div className="text-[12px] text-ink-muted">System follows your Windows setting.</div>
+      </div>
+      <div className="segmented shrink-0" role="radiogroup" aria-label="Theme">
+        {THEMES.map(({ id, label, Icon }) => (
+          <button
+            key={id}
+            type="button"
+            role="radio"
+            aria-checked={theme === id}
+            className="segmented-item"
+            onClick={() => setPrefs({ theme: id })}
+          >
+            <Icon size={13} aria-hidden="true" />
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function AppearanceRow({
   label,
   value,
@@ -834,7 +873,7 @@ function AppearanceRow({
   )
 }
 
-type AgentToolId = 'opencode' | 'cline' | 'antigravity'
+type AgentToolId = 'opencode' | 'cline' | 'antigravity' | 'freebuff'
 
 interface AgentToolConfig {
   label: string
@@ -874,7 +913,7 @@ function mcpServersSnippet(commandPath: string): string {
 }`
 }
 
-const AGENT_TOOL_ORDER: AgentToolId[] = ['opencode', 'cline', 'antigravity']
+const AGENT_TOOL_ORDER: AgentToolId[] = ['opencode', 'cline', 'antigravity', 'freebuff']
 
 const AGENT_TOOLS: Record<AgentToolId, AgentToolConfig> = {
   opencode: {
@@ -890,6 +929,11 @@ const AGENT_TOOLS: Record<AgentToolId, AgentToolConfig> = {
   antigravity: {
     label: 'Antigravity',
     location: '%USERPROFILE%\\.gemini\\antigravity\\mcp_config.json',
+    snippet: mcpServersSnippet
+  },
+  freebuff: {
+    label: 'Freebuff',
+    location: '.agents\\mcp.json in the project, or %USERPROFILE%\\.agents\\mcp.json for every project',
     snippet: mcpServersSnippet
   }
 }

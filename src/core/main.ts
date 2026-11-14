@@ -3,12 +3,12 @@ import { mkdirSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { CoreToHost, HostToCore, Settings } from '../shared/protocol'
-import { agentKitDir, writeAgentGuide } from './agents/guide'
+import { agentCommandFileName, agentKitDir, writeAgentGuide } from './agents/guide'
 import { ExecCommandRunner } from './bots/command-runner'
 import { EngineManager } from './bots/engine'
 import { BotRunner } from './bots/runner'
 import { HandoffService } from './bots/handoffs'
-import { LocalWslHost } from './bots/local-wsl-host'
+import { LocalDockerHost } from './bots/local-docker-host'
 import { reconcilePcs, resolveBotHost, UnavailableHost, wrapEngineService } from './bots/wiring'
 import { Scheduler } from './scheduler'
 import { DesignWatcher } from './designs/watcher'
@@ -29,10 +29,29 @@ import { McpConnectorManager, createMcpTransport } from './connectors'
 import { createSubagentRunner } from './engine/subagents'
 import { ChildProcessSpawner } from './terminals/process'
 import { PsAttachHelperSpawner } from './terminals/attach'
+import { LinuxAttachHelperSpawner } from './terminals/attach-linux'
 import { TerminalsManager } from './terminals/service'
 import { ComputerUseService } from './computer/service'
 import { WindowsDesktop } from './computer/desktop'
+import { LinuxDesktop } from './computer/linux-desktop'
+import { ScreenGuideService } from './screen/guide'
 import { ParentPortRenderClient } from './render/client'
+import { BrowserService } from './browser/service'
+import { TaskScheduler } from './schedules/task-scheduler'
+import { ScreenControl } from './tools/screen-control'
+import { DuoStore } from './duo/store'
+import { RemoteAccess, type RemoteConfig } from './phone/remote'
+import { DuoService } from './duo/service'
+import { prepareDuoWorkspace } from './duo/workspace'
+import { duoTools } from './tools/duo'
+import { agentBrowserTools } from './tools/browser'
+import { webFetchText, webSearchResults } from './tools/web'
+import { myPromptBrief, myPromptPath, promptSectionTool } from './engine/my-prompt'
+import { DEFAULT_DUO_PROFILE, type DuoProfile } from '../shared/duo'
+import { tool as aiTool } from 'ai'
+import { z } from 'zod'
+import { WakeTimerManager } from './scheduler/wake-timers'
+import { isCliProvider } from '../shared/protocol'
 
 // Electron's utilityProcess.parentPort, typed locally so this imports nothing from 'electron'.
 type ParentPort = {
@@ -85,7 +104,8 @@ async function main(): Promise<void> {
   const keys = new KeyStore(keysFromEnv())
   const models = new ModelService(keys, () => repos.settings.get())
   const changes = new ChangeLog(repos.changes, join(dataDir, 'snapshots'))
-  const skills = new SkillsService({ repos, dataDir })
+  // Skills installed for Claude Code (~/.claude/skills) are used in place, so Deskmates sees new ones without an import.
+  const skills = new SkillsService({ repos, dataDir, linkedDirs: [join(homedir(), '.claude', 'skills')] })
   const connectors = new McpConnectorManager({ repos, createTransport: createMcpTransport })
   void connectors.refresh().catch((error) => {
     console.error('[core] connector startup failed', error)
@@ -95,9 +115,31 @@ async function main(): Promise<void> {
   const plugins = new PluginsService({ repos, dataDir, runner: commandRunner, skills })
   const subagents = createSubagentRunner({ models })
   const render = parentPort ? new ParentPortRenderClient(parentPort) : undefined
+  const browser = new BrowserService({
+    bus,
+    port: parentPort,
+    sites: { get: () => repos.settings.getExtra<string[]>('browserSites', []), set: (sites) => repos.settings.setExtra('browserSites', sites) },
+    notify: (title, body) => bus.emit({ type: 'notify', title, body })
+  })
+  // The Work and Design agents' own mouse and keyboard (screen_look / screen_act), with the same
+  // "controlling this computer" bar and Stop as the Agents tab's computer use.
+  const screenControl = new ScreenControl({
+    createDesktop: () =>
+      process.platform === 'win32'
+        ? new WindowsDesktop()
+        : new LinuxDesktop({
+            runner: commandRunner,
+            readFile: (path) => readFileSync(path),
+            removeFile: (path) => rmSync(path, { force: true })
+          }),
+    onActiveChange: (active) => parentPort?.postMessage({ type: 'computer-use', active } satisfies CoreToHost)
+  })
   const runner = new TaskRunner({
     repos,
+    dataDir,
     bus,
+    // Read only when a task runs, by which time the agent kit below exists.
+    agentCommand: () => commandPath,
     models,
     changes,
     skills,
@@ -106,7 +148,11 @@ async function main(): Promise<void> {
     subagents,
     createTools: buildTools,
     getTerminals: () => terminals,
-    render
+    render,
+    browser,
+    screen: screenControl,
+    getSchedules: () => taskSchedules,
+    agentNameFor: (taskId) => repos.taskSchedules.list().find((s) => s.lastTaskId === taskId)?.name
   })
 
   const engineManager = new EngineManager({ runner: commandRunner, dataDir })
@@ -124,9 +170,23 @@ async function main(): Promise<void> {
   const botHost = host ?? new UnavailableHost()
   const botRunner = new BotRunner({ repos, bus, host: botHost, models, dataDir, skills, connectors })
   const scheduler = new Scheduler({ repos, bus, runner: commandRunner, dataDir, run: botRunner })
+  const taskWakeTimers = new WakeTimerManager({ runner: commandRunner, dataDir })
+  const taskSchedules = new TaskScheduler({
+    repos,
+    bus,
+    send: (taskId, text) => runner.send(taskId, text),
+    whenIdle: (taskId) => runner.whenIdle(taskId),
+    isRunning: (taskId) => runner.isRunning(taskId),
+    isCliProject: (project) => {
+      const model = project.model ?? repos.settings.get().defaultModel
+      return model !== null && isCliProvider(model.provider)
+    },
+    wake: process.platform === 'win32' ? { upsert: (id, nextMs) => taskWakeTimers.upsert(id, 'task', nextMs), remove: (id) => taskWakeTimers.remove(id) } : undefined,
+    notify: (title, body) => bus.emit({ type: 'notify', title, body })
+  })
   const handoffs = new HandoffService({ repos, bus, dataDir, run: botRunner })
 
-  // LocalWslHost/CloudHost checkIdle() does the actual idle check but owns no timer of its own;
+  // LocalDockerHost/CloudHost checkIdle() does the actual idle check but owns no timer of its own;
   // this is that timer. Only meaningful once a host exists, so it's skipped when there's none.
   // Unref'd so it can never by itself keep the process alive, and cleared in shutdown().
   let idleCheckTimer: NodeJS.Timeout | undefined
@@ -149,12 +209,17 @@ async function main(): Promise<void> {
     isBusy: (projectId) => repos.tasks.list(projectId).some((task) => runner.isRunning(task.id))
   })
 
-  const commandPath = join(kitDir, 'deskmates.cmd')
+  const commandPath = join(kitDir, agentCommandFileName())
   // The mounted prompt directories (DESKMATES_PROMPTS_DIR set by the host; falls back to a local
-  // ./prompts for standalone runs). The guide and the primer point agents at the claude-code
-  // operating prompt — only when the file is actually there.
+  // ./prompts for standalone runs). Connected terminal agents get the user's own prompt: its first
+  // section in full plus an index of the rest (with line numbers in the real file), written next to
+  // the agent kit, so they never have to read the whole 470 KB file.
   const promptRoot = process.env.DESKMATES_PROMPTS_DIR ?? join(process.cwd(), 'prompts')
-  const codePromptPath = join(promptRoot, 'claude-code', 'claude-code-opus-5.5.md')
+  const terminalBrief = myPromptBrief('file', myPromptPath(promptRoot))
+  const codePromptPath = join(kitDir, 'operating-prompt.md')
+  mkdirSync(kitDir, { recursive: true })
+  if (terminalBrief) writeFileSync(codePromptPath, `${terminalBrief}\n`, 'utf8')
+  else rmSync(codePromptPath, { force: true })
   const guide = writeAgentGuide({
     dataDir,
     commandPath,
@@ -166,7 +231,7 @@ async function main(): Promise<void> {
   const terminals = new TerminalsManager({
     runner: commandRunner,
     spawner: new ChildProcessSpawner(),
-    attachSpawner: new PsAttachHelperSpawner(),
+    attachSpawner: process.platform === 'win32' ? new PsAttachHelperSpawner() : new LinuxAttachHelperSpawner(commandRunner),
     bus,
     guidePath: guide.path,
     guideVersion: guide.version,
@@ -177,8 +242,28 @@ async function main(): Promise<void> {
   const computer = new ComputerUseService({
     bus,
     models,
-    createDesktop: () => new WindowsDesktop(),
+    createDesktop: () =>
+      process.platform === 'win32'
+        ? new WindowsDesktop()
+        : new LinuxDesktop({
+            runner: commandRunner,
+            readFile: (path) => readFileSync(path),
+            removeFile: (path) => rmSync(path, { force: true })
+          }),
     onActiveChange: (active) => parentPort?.postMessage({ type: 'computer-use', active } satisfies CoreToHost)
+  })
+
+  const screenGuide = new ScreenGuideService({
+    runner: commandRunner,
+    createDesktop: () =>
+      process.platform === 'win32'
+        ? new WindowsDesktop()
+        : new LinuxDesktop({
+            runner: commandRunner,
+            readFile: (path) => readFileSync(path),
+            removeFile: (path) => rmSync(path, { force: true })
+          }),
+    showOverlay: (marks, seconds) => parentPort?.postMessage({ type: 'overlay', marks, seconds } satisfies CoreToHost)
   })
 
   const agentToken = randomBytes(24).toString('hex')
@@ -190,6 +275,58 @@ async function main(): Promise<void> {
     handlers: () => handlers,
     bus,
     port: Number(process.env.DESKMATES_PHONE_PORT ?? '') || DEFAULT_PHONE_PORT
+  })
+
+  // Duo: its workspace, store and service. Freebuff runs start only from the user's taps.
+  const duoFolder = DuoService.folder(dataDir)
+  const duoPlaybook = join(duoFolder, 'playbook.md')
+  const duo: DuoService = new DuoService({
+    store: new DuoStore(db),
+    bus,
+    getProfile: () => repos.settings.getExtra<DuoProfile>('duo', DEFAULT_DUO_PROFILE),
+    setProfile: (profile) => repos.settings.setExtra('duo', profile),
+    workspace: (profile) => {
+      prepareDuoWorkspace({ dir: duoFolder, agentCommand: commandPath, profile, myPromptPath: myPromptPath(promptRoot) })
+      return duoFolder
+    },
+    runCli: (provider, folder, prompt, modelId, signal, onItem) => {
+      if (provider !== 'freebuff' && provider !== 'opencode' && provider !== 'agy') return Promise.resolve({ text: '', error: 'Not a command-line model.' })
+      return terminals.execute(provider, folder, prompt, modelId, { signal, trustAgents: true, onItem })
+    },
+    defaultModel: () => repos.settings.get().defaultModel,
+    resolveModel: (ref) => models.resolve(ref),
+    apiTools: () => ({
+      ...agentBrowserTools({ browser, agent: 'Duo', runKey: 'duo', sendPermit: (domain) => duo.sendPermit(domain), screenshotDir: join(duoFolder, 'screenshots') }),
+      ...duoTools(duo, duoPlaybook),
+      ...promptSectionTool(myPromptPath(promptRoot)),
+      web_search: aiTool({
+        description: 'Search the web (company research). Returns titles, links and snippets.',
+        inputSchema: z.object({ query: z.string().min(1) }),
+        execute: async ({ query }, { abortSignal }) => webSearchResults(query, abortSignal)
+      }),
+      web_fetch: aiTool({
+        description: "Read a public page as text (a company's site or contact page).",
+        inputSchema: z.object({ url: z.string().url() }),
+        execute: async ({ url }, { abortSignal }) => webFetchText(url, abortSignal)
+      })
+    }),
+    operatingPrompt: () => myPromptBrief('tool', myPromptPath(promptRoot)),
+    notify: (title, body) => bus.emit({ type: 'notify', title, body })
+  })
+  try {
+    prepareDuoWorkspace({ dir: duoFolder, agentCommand: commandPath, profile: duo.profile(), myPromptPath: myPromptPath(promptRoot) })
+  } catch (error) {
+    console.error('[duo] could not prepare its workspace', error)
+  }
+
+  // Deskmates from anywhere: paired phones over the encrypted relay, joined to this RPC server.
+  const EMPTY_REMOTE: RemoteConfig = { relay: '', anon: '', appUrl: '', vapid: null, devices: [] }
+  let rpcAddress: { port: number; token: string } | null = null
+  const remote = new RemoteAccess({
+    bus,
+    getConfig: () => ({ ...EMPTY_REMOTE, ...repos.settings.getExtra<RemoteConfig>('remote', EMPTY_REMOTE) }),
+    setConfig: (config) => repos.settings.setExtra('remote', config),
+    core: () => rpcAddress
   })
 
   const handlers = createHandlers({
@@ -214,7 +351,15 @@ async function main(): Promise<void> {
     plugins,
     connectors,
     phone: { info: () => phone.info() },
-    computer
+    computer,
+    screen: screenGuide,
+    browser,
+    taskSchedules,
+    duo,
+    duoTools: () => duoTools(duo, duoPlaybook),
+    duoSendPermit: (domain) => duo.sendPermit(domain),
+    remote,
+    setRemoteConfig: (patch) => repos.settings.setExtra('remote', { ...EMPTY_REMOTE, ...repos.settings.getExtra<RemoteConfig>('remote', EMPTY_REMOTE), ...patch })
   })
 
   // Follows the settings toggle and code changes: on/off, and restarting when the code changes.
@@ -237,14 +382,26 @@ async function main(): Promise<void> {
     port: Number(process.env.DESKMATES_PORT ?? 0),
     agent: {
       token: agentToken,
-      methods: ['app.info', 'projects.list', 'designs.read', 'designs.save', 'designs.create'],
+      methods: ['app.info', 'projects.list', 'designs.read', 'designs.save', 'designs.create', 'screen.look', 'screen.point', 'screen.say', 'screen.clear', 'browser.state', 'browser.tool', 'duo.tool'],
       events: ['design.updated', 'project.updated']
     }
   })
 
   writeBridgeInfo(kitDir, { port: server.port, token: agentToken, pid: process.pid })
+  rpcAddress = { port: server.port, token: server.token }
+  try {
+    remote.start()
+  } catch (error) {
+    console.error('[remote] could not start', error)
+  }
+  // Every notification also reaches paired phones, as a short push.
+  bus.on((event) => {
+    if (event.type === 'notify') void remote.push(event.title, event.body).catch(() => undefined)
+  })
   watcher.start()
   scheduler.start()
+  taskSchedules.start()
+  duo.start()
   handoffs.start()
 
   // A bot PC left running (or gone, or unreachable) from a previous session must not block startup
@@ -264,13 +421,21 @@ async function main(): Promise<void> {
     void (async () => {
       try {
         computer.stop()
+        screenGuide.dispose()
+        screenControl.dispose()
         watcher.stop()
         scheduler.stop()
+        taskSchedules.stop()
+        duo.stop()
+        remote.stop()
         handoffs.stop()
         if (idleCheckTimer) clearInterval(idleCheckTimer)
         await runner.stopAll()
         await botRunner.stopAll()
-        if (host instanceof LocalWslHost) host.dispose()
+        // After the runners, so no turn is mid-flight on a server that is being shut down underneath
+        // it; these outlive the app otherwise, holding their port and their 175KB session.
+        terminals.dispose()
+        if (host instanceof LocalDockerHost) host.dispose()
         await connectors.closeAll()
         await phone.stop()
         await server.close()
@@ -287,7 +452,10 @@ async function main(): Promise<void> {
       if (message?.type === 'keys') keys.set(message.keys)
       // Windows has no real signals, so the host asks for a clean exit instead of killing us.
       if (message?.type === 'shutdown') shutdown()
-      if (message?.type === 'computer-stop') computer.stop()
+      if (message?.type === 'computer-stop') {
+        computer.stop()
+        screenControl.stop()
+      }
     })
     bus.on((event) => {
       if (event.type === 'notify') parentPort.postMessage({ type: 'notify', title: event.title, body: event.body })

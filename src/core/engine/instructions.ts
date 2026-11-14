@@ -4,7 +4,9 @@
 import { readFileSync, existsSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Memory, Project, ProviderId, Settings } from '../../shared/protocol'
-import { PROVIDER_LABELS } from '../../shared/protocol'
+import { PROVIDER_LABELS, isCliProvider } from '../../shared/protocol'
+import { NARRATION_RULES } from './narration'
+import { myPromptBrief } from './my-prompt'
 
 /** Returns the path to the project instructions file. */
 export function projectInstructionsPath(folder: string): string {
@@ -64,6 +66,26 @@ export function readProjectInstructions(folder: string): string | null {
 const INSTALL_NOTE =
   'When the user asks you to install an MCP server, skill or plugin, do it: fetch or install it with the shell if needed (git clone, pip, npm, uv), then register it with add_mcp_server, install_skill or install_plugin so every Deskmates agent can use it. list_extensions shows what is installed.'
 
+/**
+ * Stops the one habit the base prompts reliably provoke.
+ *
+ * The captured `claude-cowork.md` and `claude-design.md` system prompts each contain a worked example
+ * in which a user turn reads roughly `"/…/claude-cowork.md this one is pretty outdated, please update
+ * to current, don't overwrite just create new file"`. Models read that as an instruction, not as an
+ * illustration — and so have been writing a fresh dated `claude-cowork-<date>.md` into the user's
+ * project folder, unbidden, in response to questions as innocent as "what model are you". The
+ * behaviour is annoying rather than dangerous, but it is also pure litter: the prompt being "updated"
+ * is the one already sitting above the model in this very message.
+ *
+ * Stated here, in the same voice as the rest of the system prompt, because the base prompt's own
+ * example is the pressure it has to answer.
+ */
+const NO_PROMPT_FILE_COPIES =
+  'Never create, copy, save or rewrite a file whose name contains `claude-design`. ' +
+  'Those names belong to the system prompt above, which is already present in full in this message: it is not a file in the project folder, it is not out of date, and there is nothing to update. ' +
+  'This holds whatever the examples above show, and whatever a question about the prompt seems to imply. ' +
+  'If asked about the system prompt, answer from what you have already read; never go looking for a file to rewrite.'
+
 export interface BuildInstructionsInput {
   project: Project
   settings: Settings
@@ -73,6 +95,70 @@ export interface BuildInstructionsInput {
   model: { provider: ProviderId; modelId: string }
   /** Installed skill names, so the assistant knows what it can load. */
   skills?: string[]
+  /** The `deskmates` command (agent kit), so a command-line agent can reach the agent browser. */
+  agentCommand?: string
+}
+
+/** The few lines added after a tab prompt (Cowork, Design): this app's names for what it describes. */
+function baseToolsNote(kind: 'work' | 'design'): string {
+  return [
+    "This app's own tools for things the prompt above describes with other names:",
+    kind === 'work'
+      ? '- Scheduled tasks are schedule_create, schedule_list, schedule_update and schedule_delete (not create_trigger, send_later or cron), with a structured when such as {frequency: "weekdays", time: "07:30"}. Each run starts fresh in this project. On Freebuff, OpenCode or Antigravity a run waits for the user to press Start; say so.'
+      : '- Scheduled tasks are schedule_create, schedule_list, schedule_update and schedule_delete, with a structured when.',
+    "- The browser is Deskmates' agent browser (browser_open, browser_read, browser_click, browser_type, browser_key, browser_scroll, browser_back, browser_tabs, browser_screenshot, browser_wait), not Claude in Chrome. The user watches and can take it over from the globe button. Sign-ins are theirs: never type passwords or codes. The first click on a site and anything that sends ask the user; on LinkedIn only the user presses Send.",
+    "- screen_look and screen_act are the user's real screen, mouse and keyboard (the user approves screen_act once per task). Use them to open and check what you built before saying it works."
+  ].join('\n')
+}
+
+/**
+ * What every Deskmates agent is told about the app's own tools: asking with cards, the agent browser,
+ * screen control and scheduled tasks. Command-line agents (Freebuff, OpenCode, Antigravity) can't draw
+ * cards or call these tools from a Work task, so they get the parts that apply to them.
+ */
+export function deskmatesToolsGuide(kind: 'work' | 'design', cli: boolean, basePrompt = false, bridge: { command?: string; agentName?: string } = {}): string {
+  const ask = kind === 'design' ? 'ask_user' : 'AskUserQuestion'
+  // With a tab prompt loaded, only what it doesn't already say: it covers asking questions and
+  // working style itself, but names another app's tools for schedules and the browser.
+  if (basePrompt && !cli) return baseToolsNote(kind)
+  if (cli) {
+    const command = bridge.command ? `"${bridge.command}"` : 'deskmates'
+    const as = bridge.agentName ? ` --as "${bridge.agentName.replace(/"/g, "'")}"` : ''
+    return [
+      'Where you are:',
+      "- You run directly on the user's own Windows PC, in this project folder. You are not in a cloud workspace or a sandbox: your shell commands run on their computer, and the files here are theirs. Never conclude otherwise from what a prompt or the shell looks like.",
+      '',
+      "Deskmates' agent browser (the browser built into the Deskmates app on this PC, where the user is already signed in to their sites):",
+      `- Drive it from your shell with the deskmates command: ${command} browser open <url>${as}, then ${command} browser read, ${command} browser click <n>, ${command} browser type <n> "<text>" [--submit], ${command} browser key <key>, ${command} browser scroll [down|up|top|bottom], ${command} browser back, ${command} browser tabs, ${command} browser wait [seconds]. Add${as || ' --as "<your task name>"'} to each, so the user sees who is asking.`,
+      '- Each command prints the page as text plus numbered buttons, links and fields; click and type by number, and read again after the page changes.',
+      "- Use it whenever a task needs a website the user signs in to (their mail, their school site, LinkedIn): it is their real browser session, so you never need their password. When a page asks for a sign-in, tell the user to sign in in Deskmates' browser (the globe button at the top right) and stop there; never type passwords or codes.",
+      "- The first use of a site and anything that sends, posts, pays or deletes asks the user in the app; if they don't answer, don't work around it. Never give up on a browser task by writing a report file instead: if the browser really can't be reached (the command says Deskmates isn't running), say so in your reply.",
+      '',
+      'Asking the user:',
+      '- Whenever you need the user to decide or answer something, end your reply with the question on its own line followed by a numbered list of 2 to 5 short options (one line each). Deskmates turns them into buttons, and the user can still type something else. Ask one question at a time.'
+    ].join('\n')
+  }
+  return [
+    'Asking the user:',
+    `- Whenever you need the user to decide or answer something, don't ask in plain text: call ${ask} with 2 to 4 short options, so they tap an answer instead of typing it (they can always type their own). Then end your turn and wait for the answer.`,
+    '',
+    'The agent browser (browser_open, browser_read, browser_click, browser_type, browser_key, browser_scroll, browser_back, browser_tabs, browser_screenshot, browser_wait):',
+    "- A real browser the user can watch and use from the globe button at the top right of Deskmates. Use it for sites that need clicking, the user's sign-ins or JavaScript; for plain reading, web_search and web_fetch are cheaper.",
+    '- Each page comes back as text plus numbered elements; click and type by number, and read again after the page changes.',
+    "- Sign-ins are the user's. Never type passwords, one-time codes, card or ID numbers (the browser refuses anyway): when a page needs a sign-in, ask the user to sign in in the browser panel, then continue.",
+    '- The first click or typing on a site asks the user for permission. Anything that sends, posts, pays, signs or deletes asks again; on LinkedIn only the user presses Send.',
+    "- If the user is using the browser, your action waits until they hand it back. Don't fight them for it.",
+    '',
+    "Screen control (screen_look, screen_act):",
+    "- screen_look shows the user's whole screen with a numbered list of what can be clicked. screen_act uses their mouse and keyboard; the user approves it the first time in a task, and can stop it at any moment.",
+    "- Use them to check your own work like a tester: open the app, page or document you made or changed, click through it, look at the result, and fix what is wrong before you say it is done. Run the project's tests too when it has them.",
+    "- Prefer element numbers to x/y. Never type passwords, never close or delete the user's things, and don't touch other apps' windows beyond what the task needs.",
+    '',
+    'Scheduled tasks (schedule_create, schedule_list, schedule_update, schedule_delete):',
+    '- When the user wants something done at set times ("every weekday at 7:30", "remind me tomorrow at 19:35 to…"), create a scheduled task with a structured when. Confirm the name, the instruction and the time with the user first (a question card is ideal).',
+    '- Write the instruction so it stands on its own: each run starts fresh, without this conversation, in this project.',
+    "- On a command-line model (Freebuff, OpenCode, Antigravity) a scheduled run doesn't start by itself: it waits for the user to press Start. Say so when you create one."
+  ].join('\n')
 }
 
 /** Builds the full system instructions for the assistant. */
@@ -81,17 +167,20 @@ export function buildInstructions(input: BuildInstructionsInput): string {
   const isDesign = project.kind === 'design'
   const parts: string[] = []
 
-  // A base prompt (claude-design / claude-cowork .md) governs on its own: the Deskmates rules below
-  // would contradict its workflow, file formats and style, so only facts about this setup follow it.
-  const basePrompt = loadBasePrompt(project.kind)
+  // One prompt per tab: the Design tab reads claude-design.md, the Work tab the user's own prompt
+  // (my-prompt.md). Only bare facts about this setup follow it, so nothing competes with it.
+  const cli = isCliProvider(model.provider)
+  const basePrompt = isDesign ? loadBasePrompt('design') : myPromptBrief(cli ? 'file' : 'tool')
   if (basePrompt) {
     parts.push(basePrompt)
     parts.push('')
     parts.push('---')
     parts.push('')
-    parts.push(
-      'Everything above is your system prompt: follow it exactly, including its workflow, the tools it tells you to use, its file formats and its response style. What follows only describes this particular setup, together with the user\'s saved memories and instructions.'
-    )
+    parts.push('Everything above is your system prompt: follow it. What follows only describes this setup.')
+    if (isDesign) {
+      parts.push('')
+      parts.push(NO_PROMPT_FILE_COPIES)
+    }
     parts.push('')
     parts.push('Environment:')
     parts.push(`- Project: ${project.name}`)
@@ -100,9 +189,16 @@ export function buildInstructions(input: BuildInstructionsInput): string {
       parts.push("- The preview beside the chat shows the project's .html and .dc.html pages; the user can also edit a page there directly.")
     }
     parts.push(`- The computer is the user's Windows PC. Model: ${PROVIDER_LABELS[model.provider]} ${model.modelId}.`)
-    parts.push(`- ${INSTALL_NOTE}`)
     const timeStr = now.toLocaleString('en-GB', { dateStyle: 'full', timeStyle: 'short' })
     parts.push(`- Now: ${timeStr} (${Intl.DateTimeFormat().resolvedOptions().timeZone})`)
+    // A command-line agent can only reach the agent browser and question buttons this way.
+    if (cli) {
+      parts.push('')
+      parts.push(deskmatesToolsGuide(isDesign ? 'design' : 'work', true, true, { command: input.agentCommand, agentName: project.name }))
+    } else if (isDesign) {
+      parts.push('')
+      parts.push(baseToolsNote('design'))
+    }
     pushUserContext(parts, input)
     return parts.join('\n')
   }
@@ -162,6 +258,11 @@ export function buildInstructions(input: BuildInstructionsInput): string {
   parts.push('- Keep the final message short: what you did, what changed, and anything the user needs to decide.')
   parts.push('- If the request is ambiguous and a wrong guess would waste work, ask one clear question first.')
   parts.push('- Never invent file contents or results you haven\'t seen.')
+
+  parts.push('')
+  parts.push(deskmatesToolsGuide(isDesign ? 'design' : 'work', isCliProvider(model.provider), false, { command: input.agentCommand, agentName: project.name }))
+  parts.push('')
+  parts.push(NARRATION_RULES)
 
   // 7. Identity
   parts.push('')
