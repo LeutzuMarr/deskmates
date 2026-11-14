@@ -40,12 +40,15 @@ export function ModelPicker({ projectId }: { projectId: string }) {
     setFilter('')
     setLoadError(null)
     requestAnimationFrame(() => filterRef.current?.focus())
-    if (!provider || list) return
-    setLoading(true)
+    if (!provider) return
+    // Freebuff's models change with its updates, so its list is re-read every time the picker opens.
+    const known = useStore.getState().models[provider]
+    if (known && provider !== 'freebuff') return
+    setLoading(!known)
     loadModels(provider)
       .catch((error: unknown) => setLoadError(error instanceof Error ? error.message : String(error)))
       .finally(() => setLoading(false))
-  }, [open, provider, list, loadModels])
+  }, [open, provider, loadModels])
 
   const shown = useMemo(() => {
     const needle = filter.trim().toLowerCase()

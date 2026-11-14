@@ -136,6 +136,7 @@ async function main(): Promise<void> {
   })
   const runner = new TaskRunner({
     repos,
+    dataDir,
     bus,
     // Read only when a task runs, by which time the agent kit below exists.
     agentCommand: () => commandPath,
@@ -210,10 +211,15 @@ async function main(): Promise<void> {
 
   const commandPath = join(kitDir, agentCommandFileName())
   // The mounted prompt directories (DESKMATES_PROMPTS_DIR set by the host; falls back to a local
-  // ./prompts for standalone runs). The guide and the primer point agents at the claude-code
-  // operating prompt — only when the file is actually there.
+  // ./prompts for standalone runs). Connected terminal agents get the user's own prompt: its first
+  // section in full plus an index of the rest (with line numbers in the real file), written next to
+  // the agent kit, so they never have to read the whole 470 KB file.
   const promptRoot = process.env.DESKMATES_PROMPTS_DIR ?? join(process.cwd(), 'prompts')
-  const codePromptPath = join(promptRoot, 'claude-code', 'claude-code-opus-5.5.md')
+  const terminalBrief = myPromptBrief('file', myPromptPath(promptRoot))
+  const codePromptPath = join(kitDir, 'operating-prompt.md')
+  mkdirSync(kitDir, { recursive: true })
+  if (terminalBrief) writeFileSync(codePromptPath, `${terminalBrief}\n`, 'utf8')
+  else rmSync(codePromptPath, { force: true })
   const guide = writeAgentGuide({
     dataDir,
     commandPath,

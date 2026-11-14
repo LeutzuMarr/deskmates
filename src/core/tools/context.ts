@@ -10,6 +10,21 @@ import type { BrowserService } from '../browser/service'
 import type { TaskScheduler } from '../schedules/task-scheduler'
 import type { ScreenControl } from './screen-control'
 
+/** A past chat (a task) as the chat-history tools see it. */
+export interface ChatSummary {
+  id: string
+  title: string
+  project: string
+  updatedAt: number
+}
+
+/** Read access to the user's past chats across all projects. */
+export interface ChatHistory {
+  list(): ChatSummary[]
+  /** The chat's turns as plain text, oldest first. */
+  turns(id: string): Array<{ role: 'user' | 'assistant'; text: string }>
+}
+
 /** Everything a tool needs to act for one task. Built fresh for every run. */
 export interface ToolContext {
   taskId: string
@@ -48,6 +63,10 @@ export interface ToolContext {
   schedules?: TaskScheduler
   /** Whether this project's model is a command-line tool (its scheduled runs wait for a Start tap). */
   cliModel?: boolean
+  /** Deskmates' data folder, where shared memory documents and chat widgets are kept. */
+  dataDir?: string
+  /** Past chats in Deskmates, for conversation_search, recent_chats and read_conversation. */
+  chats?: ChatHistory
   /** Stops the run (so a browser wait doesn't outlive it). */
   signal?: AbortSignal
   onPlan(items: PlanItem[]): void

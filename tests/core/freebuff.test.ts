@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import {
   countEchoes,
   currentActivity,
+  workItems,
   extractReply,
   hasRetry,
   hasSurvey,
@@ -13,7 +14,7 @@ import {
   readStatus,
   withoutCursor
 } from '../../src/core/terminals/freebuff-host'
-import { FREEBUFF_CURRENT_MODEL, FREEBUFF_MODEL_IDS, freebuffModelLabel } from '../../src/shared/freebuff'
+import { FREEBUFF_CURRENT_MODEL, FREEBUFF_MODELS, freebuffModelIds, freebuffModelLabel, parsePickerCards, setFreebuffModels } from '../../src/shared/freebuff'
 
 // Real Freebuff 0.2.35 screens, captured from a hidden console.
 const DONE = `   [06:29 PM]
@@ -74,6 +75,7 @@ describe('Freebuff screen reading', () => {
     expect(isIdle(WORKING)).toBe(false)
     expect(hasSurvey(WORKING)).toBe(true)
     expect(currentActivity(WORKING, prompt)).toBe('$ dir')
+    expect(workItems(WORKING, prompt)).toEqual(['• Read AGENTS.md', '$ dir'])
   })
 
   it('ignores the chat title in the status bar, and earlier copies of the same request', () => {
@@ -166,16 +168,43 @@ describe('Freebuff reply after the request scrolled away', () => {
 })
 
 describe('Freebuff model list', () => {
-  it("offers Freebuff's current model first, then the picker's models", () => {
-    expect(FREEBUFF_MODEL_IDS[0]).toBe(FREEBUFF_CURRENT_MODEL)
-    expect(FREEBUFF_MODEL_IDS).toContain('Solar Pro 4')
+  afterEach(() => setFreebuffModels(FREEBUFF_MODELS))
+
+  it("offers Freebuff's current model first, then the models cheapest first", () => {
+    const ids = freebuffModelIds()
+    expect(ids[0]).toBe(FREEBUFF_CURRENT_MODEL)
+    expect(ids).toContain('Solar Pro 4')
+    // Free models first, then 1x, 2x…, paid plan last.
+    expect(ids.indexOf('Solar Pro 4')).toBeLessThan(ids.indexOf('MiMo v2.6 Flash Slow'))
+    expect(ids.indexOf('MiMo v2.6 Flash Slow')).toBeLessThan(ids.indexOf('DeepSeek V4.1 Flash Fast'))
+    expect(ids.indexOf('GPT-6.1 Terra')).toBeLessThan(ids.indexOf('GPT-6.1 Sol'))
+    expect(ids[ids.length - 1]).toBe('GPT-6.1 Sol')
   })
 
-  it('labels each model with its Freebucks cost, or as unlimited', () => {
+  it('labels each model with its cost: Freebucks, free, or paid plan', () => {
     expect(freebuffModelLabel('MiMo v2.6 Flash Slow')).toBe('MiMo v2.6 Flash Slow · 1x Freebucks · slow, cheapest')
-    expect(freebuffModelLabel('Solar Pro 4')).toBe('Solar Pro 4 · unlimited · promotional')
+    expect(freebuffModelLabel('Solar Pro 4')).toBe('Solar Pro 4 · free (unlimited) · promotional')
     expect(freebuffModelLabel('GPT-6.1 Sol')).toBe('GPT-6.1 Sol · paid plan · 1 session a day')
     expect(freebuffModelLabel(FREEBUFF_CURRENT_MODEL)).toBe("Freebuff's current model")
     expect(freebuffModelLabel('Some New Model')).toBe('Some New Model')
+  })
+
+  it("reads the model cards and their cost off Freebuff's picker", () => {
+    expect(parsePickerCards(PICKER)).toEqual([
+      { name: 'MiMo v2.6 Flash Slow', cost: '1x', note: 'Slow · cheapest · Images' },
+      { name: 'Solar Pro 4', cost: null, note: 'Upstage flagship · Promotional' }
+    ])
+  })
+
+  it('replaces the list with a fresh read, dropping models Freebuff no longer offers', () => {
+    setFreebuffModels([
+      { name: 'New Paid', cost: 'Paid plan' },
+      { name: 'New Pricey', cost: '5x' },
+      { name: 'New Free', cost: null }
+    ])
+    expect(freebuffModelIds()).toEqual([FREEBUFF_CURRENT_MODEL, 'New Free', 'New Pricey', 'New Paid'])
+    expect(freebuffModelLabel('New Pricey')).toBe('New Pricey · 5x Freebucks')
+    setFreebuffModels([])
+    expect(freebuffModelIds()).toContain('New Free') // an empty read never wipes the list
   })
 })

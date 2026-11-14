@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useStore } from '../lib/store'
-import { FREEBUFF_CURRENT_MODEL, FREEBUFF_GROUP_LABELS, FREEBUFF_MODELS, type FreebuffStatus } from '../../../shared/freebuff'
+import { FREEBUFF_CURRENT_MODEL, freebuffCostLabel, freebuffModels, type FreebuffStatus } from '../../../shared/freebuff'
 
 /** Often enough that the minutes-left count moves while you watch; the read is a cheap screen parse. */
 const POLL_MS = 10_000
@@ -28,10 +28,10 @@ export function FreebuffStatusLine({ folder, modelId }: { folder: string; modelI
   }, [folder, loadFreebuffStatus])
 
   const name = status?.model ?? (modelId && modelId !== FREEBUFF_CURRENT_MODEL ? modelId : null)
-  const model = FREEBUFF_MODELS.find((m) => m.name === name)
+  const model = freebuffModels().find((m) => m.name === name)
   const parts: string[] = []
   if (name) parts.push(name)
-  if (model) parts.push(model.cost && model.cost !== 'Paid plan' ? `${model.cost} Freebucks` : FREEBUFF_GROUP_LABELS[model.group].split(' · ')[0])
+  if (model) parts.push(freebuffCostLabel(model.cost))
   if (status?.sessionMinutesLeft != null) parts.push(`${status.sessionMinutesLeft} min left in session`)
   if (status?.hoursLeftToday != null) parts.push(`${status.hoursLeftToday}${status.hoursPerDay != null ? `/${status.hoursPerDay}` : ''} h left today`)
   if (status?.context) parts.push(`context ${status.context}`)

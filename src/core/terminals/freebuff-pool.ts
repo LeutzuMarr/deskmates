@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { FREEBUFF_CURRENT_MODEL, type FreebuffStatus } from '../../shared/freebuff'
+import { FREEBUFF_CURRENT_MODEL, type FreebuffModel, type FreebuffStatus } from '../../shared/freebuff'
 import type { TimelineItem } from '../../shared/protocol'
 import { FreebuffHost, StoppedError } from './freebuff-host'
 import type { CliRunOptions, CliRunResult } from './managed'
@@ -49,7 +49,7 @@ export class FreebuffPool {
       }
 
       const steps = new ActivitySteps(activityId, (item) => runOptions.onItem?.(item))
-      const reply = await host.ask(request, (activity) => steps.report(activity))
+      const reply = await host.ask(request, (items) => steps.reportAll(items))
       this.instructed.add(host)
       steps.finish()
       if (reply) runOptions.onItem?.({ kind: 'assistant', id: randomUUID(), at: Date.now(), text: reply })
@@ -68,6 +68,14 @@ export class FreebuffPool {
     const key = folder ?? this.lastFolder
     const host = key ? this.hosts.get(key) : undefined
     return host && host.current !== 'stopped' && host.current !== 'error' ? host.status() : null
+  }
+
+  /** Freebuff's current model list, read off an idle running Freebuff (the one used last first).
+   *  Null when none is running idle: Deskmates never starts a Freebuff session just to read it. */
+  async listModels(): Promise<FreebuffModel[] | null> {
+    const last = this.lastFolder ? this.hosts.get(this.lastFolder) : undefined
+    const host = [last, ...this.hosts.values()].find((h) => h?.current === 'idle')
+    return host ? host.listModels() : null
   }
 
   dispose(): void {
@@ -134,6 +142,48 @@ export class ActivitySteps {
     if (current) this.emit(activityItem(current.id, current.text, 'done', current.at))
     this.current = { id: current ? randomUUID() : this.firstId, text, at: Date.now() }
     this.emit(activityItem(this.current.id, text, 'running', this.current.at))
+  }
+
+  /** Every step shown so far this turn, oldest first. */
+  private readonly shown: Array<{ id: string; text: string; at: number }> = []
+
+  /**
+   * Reports everything Freebuff has written so far (`workItems`), so no line is lost between two reads
+   * of its screen. Items are matched to steps already shown by content, in order: an item still being
+   * written grows its step, a new one becomes a new step. Matching by content rather than position
+   * keeps steps from repeating when the start of the turn scrolls off Freebuff's window.
+   */
+  reportAll(items: string[]): void {
+    let from = 0
+    for (const raw of items) {
+      const text = raw.trim()
+      if (!text) continue
+      let match = -1
+      for (let i = from; i < this.shown.length; i++) {
+        const seen = this.shown[i]!.text
+        if (text === seen || text.startsWith(seen) || seen.startsWith(text)) {
+          match = i
+          break
+        }
+      }
+      if (match >= 0) {
+        const step = this.shown[match]!
+        if (text.length > step.text.length) {
+          step.text = text
+          this.emit(activityItem(step.id, text, this.current === step ? 'running' : 'done', step.at))
+        }
+        from = match + 1
+        continue
+      }
+      // A new step: the one before it is finished.
+      const current = this.current
+      if (current) this.emit(activityItem(current.id, current.text, 'done', current.at))
+      const step = { id: this.shown.length === 0 && !current ? this.firstId : randomUUID(), text, at: Date.now() }
+      this.shown.push(step)
+      this.current = step
+      this.emit(activityItem(step.id, text, 'running', step.at))
+      from = this.shown.length
+    }
   }
 
   finish(): void {

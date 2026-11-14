@@ -1,5 +1,5 @@
 import type { RenderRequest, RenderResult, VideoRequest, VideoResult } from '../core/render/types'
-import type { FreebuffStatus } from './freebuff'
+import type { FreebuffModelList, FreebuffStatus } from './freebuff'
 import type { When } from './when'
 import type { DuoProfile, DuoState } from './duo'
 export type { When } from './when'
@@ -781,6 +781,9 @@ export interface RpcMethods {
   /** What the hidden Freebuff behind the Work tab shows about its session (model, minutes left,
    *  hours left today, context use) for `folder`, or for any running one. Null when none runs yet. */
   'freebuff.status': { params: { folder?: string }; result: FreebuffStatus | null }
+  /** The Freebuff models Deskmates knows, cheapest first, with their cost. Also starts a fresh read
+   *  of Freebuff's picker when an idle Freebuff runs; a changed list arrives as 'freebuff.models'. */
+  'freebuff.models': { params: Record<string, never>; result: FreebuffModelList }
 
   // ---- Screen guide: lets a connected agent see the screen, point at things and talk ----
   /** A screenshot of the primary screen. Marks sent to `screen.point` use this image's pixels. */
@@ -901,6 +904,7 @@ export type CoreEvent =
   | { type: 'task.timeline'; taskId: string; timeline: TimelineItem[] }
   | { type: 'changes.updated'; taskId: string; changes: FileChange[] }
   | { type: 'memory.updated'; projectId: string; memories: Memory[] }
+  | { type: 'freebuff.models'; list: FreebuffModelList }
   | { type: 'settings.updated'; settings: Settings }
   | { type: 'usage.updated'; usage: UsageRow[] }
   | { type: 'notify'; title: string; body: string }

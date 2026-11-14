@@ -177,6 +177,43 @@ export class McpConnectorManager {
     return this.list()
   }
 
+  /** The live client of the enabled connector named `source` (case-insensitive). */
+  private clientByName(source: string): { connector: Connector; client: Client } {
+    const wanted = source.trim().toLowerCase()
+    const connector = this.list().find((c) => c.enabled && c.name.toLowerCase() === wanted)
+    if (!connector) {
+      const names = this.list().filter((c) => c.enabled).map((c) => c.name)
+      throw new Error(`No connector named "${source}". Connected: ${names.join(', ') || 'none'}.`)
+    }
+    const client = this.clients.get(connector.id)
+    if (!client) throw new Error(`Connector "${connector.name}" isn't connected right now.`)
+    return { connector, client }
+  }
+
+  /** The resources a connector offers (MCP resources/list). */
+  async listResources(source: string): Promise<Array<{ uri: string; name?: string; description?: string; mimeType?: string }>> {
+    const { connector, client } = this.clientByName(source)
+    try {
+      const { resources } = await client.listResources()
+      return resources.map((r) => ({ uri: r.uri, name: r.name, description: r.description, mimeType: r.mimeType }))
+    } catch (error) {
+      throw new Error(`${connector.name} couldn't list its resources: ${errorMessage(error)}`)
+    }
+  }
+
+  /** One resource's content as text (MCP resources/read); binary parts are described, not inlined. */
+  async readResource(source: string, uri: string): Promise<string> {
+    const { connector, client } = this.clientByName(source)
+    try {
+      const { contents } = await client.readResource({ uri })
+      return contents
+        .map((part) => ('text' in part && typeof part.text === 'string' ? part.text : `[${part.mimeType ?? 'binary'} content, ${'blob' in part ? String(part.blob).length : 0} base64 characters]`))
+        .join('\n\n')
+    } catch (error) {
+      throw new Error(`${connector.name} couldn't read ${uri}: ${errorMessage(error)}`)
+    }
+  }
+
   /** The current tool set for enabled connectors — spread into a run's tools. Synchronous; stale until the next refresh lands. */
   tools(): ToolSet {
     return this.toolsCache

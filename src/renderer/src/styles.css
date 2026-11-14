@@ -33,6 +33,14 @@
   --clay-deep: #c6613f;
   --brick: #a8412d;
   --olive: #5f7249;
+  /* Step and diff colours: done / added, failed / removed, and the tints the step icons use. */
+  --good: #23864a;
+  --bad: #c8372d;
+  --tint-file: #3b74d1;
+  --tint-shell: #8a4fc9;
+  --tint-web: #138a8a;
+  --tint-memory: #c27a0e;
+  --tint-visual: #d14f86;
 
   /* ---- Corner concentricity (Apple HIG) ----
      Inner radius = outer radius - inset, never below --r-min.
@@ -76,6 +84,13 @@
     --clay-deep: #e08a6a;
     --brick: #e07a62;
     --olive: #9bb07f;
+    --good: #5fcf8a;
+    --bad: #f07a6a;
+    --tint-file: #7aa7f0;
+    --tint-shell: #b88cf0;
+    --tint-web: #5cc8c8;
+    --tint-memory: #f0b04a;
+    --tint-visual: #f08cb6;
   }
 }
 
@@ -1164,4 +1179,38 @@ dialog:modal {
   .btn-clay:hover:not(:disabled) {
     transform: none;
   }
+}
+
+/* ---- Steps, the way the user watches the work ---- */
+.step-mark-done {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--good) 16%, transparent);
+  color: var(--good);
+}
+.step-failed {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--bad);
+  font-family: var(--font-sans, inherit);
+  font-size: 12px;
+  font-weight: 600;
+}
+.step-row-failed .step-label {
+  color: var(--bad);
+}
+.step-diff {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: 8px;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+.step-spinner {
+  color: var(--clay);
 }

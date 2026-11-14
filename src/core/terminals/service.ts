@@ -8,7 +8,7 @@ import type { OpenCodeUsage } from './opencode-server'
 import type { ProcessSpawner } from './process'
 import { AttachTerminalRunner } from './attach'
 import { FreebuffPool } from './freebuff-pool'
-import type { FreebuffStatus } from '../../shared/freebuff'
+import type { FreebuffModel, FreebuffStatus } from '../../shared/freebuff'
 import type { AttachHelperSpawner } from './attach'
 import type {
   AttachedTerminalSession,
@@ -81,6 +81,9 @@ export interface TerminalsService {
 
   /** What the hidden Freebuff behind the Work tab shows about its session; null when none runs. */
   freebuffStatus(folder?: string): FreebuffStatus | null
+
+  /** Freebuff's model list read off an idle running Freebuff; null when none is running idle. */
+  freebuffModels(): Promise<FreebuffModel[] | null>
 }
 
 const TOOL_NAMES: Record<TerminalTool, string> = { opencode: 'OpenCode', agy: 'Antigravity', freebuff: 'Freebuff' }
@@ -181,6 +184,10 @@ export class TerminalsManager implements TerminalsService {
 
   freebuffStatus(folder?: string): FreebuffStatus | null {
     return this.freebuff.status(folder)
+  }
+
+  freebuffModels(): Promise<FreebuffModel[] | null> {
+    return this.freebuff.listModels()
   }
 
   /** Releases the background processes this service owns: the per-folder `opencode serve` and hidden

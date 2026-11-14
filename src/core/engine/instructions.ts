@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import type { Memory, Project, ProviderId, Settings } from '../../shared/protocol'
 import { PROVIDER_LABELS, isCliProvider } from '../../shared/protocol'
 import { NARRATION_RULES } from './narration'
+import { myPromptBrief } from './my-prompt'
 
 /** Returns the path to the project instructions file. */
 export function projectInstructionsPath(folder: string): string {
@@ -80,7 +81,7 @@ const INSTALL_NOTE =
  * example is the pressure it has to answer.
  */
 const NO_PROMPT_FILE_COPIES =
-  'Never create, copy, save or rewrite a file whose name contains `claude-cowork` or `claude-design`. ' +
+  'Never create, copy, save or rewrite a file whose name contains `claude-design`. ' +
   'Those names belong to the system prompt above, which is already present in full in this message: it is not a file in the project folder, it is not out of date, and there is nothing to update. ' +
   'This holds whatever the examples above show, and whatever a question about the prompt seems to imply. ' +
   'If asked about the system prompt, answer from what you have already read; never go looking for a file to rewrite.'
@@ -166,19 +167,20 @@ export function buildInstructions(input: BuildInstructionsInput): string {
   const isDesign = project.kind === 'design'
   const parts: string[] = []
 
-  // A base prompt (claude-design / claude-cowork .md) governs on its own: the Deskmates rules below
-  // would contradict its workflow, file formats and style, so only facts about this setup follow it.
-  const basePrompt = loadBasePrompt(project.kind)
+  // One prompt per tab: the Design tab reads claude-design.md, the Work tab the user's own prompt
+  // (my-prompt.md). Only bare facts about this setup follow it, so nothing competes with it.
+  const cli = isCliProvider(model.provider)
+  const basePrompt = isDesign ? loadBasePrompt('design') : myPromptBrief(cli ? 'file' : 'tool')
   if (basePrompt) {
     parts.push(basePrompt)
     parts.push('')
     parts.push('---')
     parts.push('')
-    parts.push(
-      'Everything above is your system prompt: follow it exactly, including its workflow, the tools it tells you to use, its file formats and its response style. What follows only describes this particular setup, together with the user\'s saved memories and instructions.'
-    )
-    parts.push('')
-    parts.push(NO_PROMPT_FILE_COPIES)
+    parts.push('Everything above is your system prompt: follow it. What follows only describes this setup.')
+    if (isDesign) {
+      parts.push('')
+      parts.push(NO_PROMPT_FILE_COPIES)
+    }
     parts.push('')
     parts.push('Environment:')
     parts.push(`- Project: ${project.name}`)
@@ -187,13 +189,16 @@ export function buildInstructions(input: BuildInstructionsInput): string {
       parts.push("- The preview beside the chat shows the project's .html and .dc.html pages; the user can also edit a page there directly.")
     }
     parts.push(`- The computer is the user's Windows PC. Model: ${PROVIDER_LABELS[model.provider]} ${model.modelId}.`)
-    parts.push(`- ${INSTALL_NOTE}`)
     const timeStr = now.toLocaleString('en-GB', { dateStyle: 'full', timeStyle: 'short' })
     parts.push(`- Now: ${timeStr} (${Intl.DateTimeFormat().resolvedOptions().timeZone})`)
-    parts.push('')
-    parts.push(deskmatesToolsGuide(isDesign ? 'design' : 'work', isCliProvider(model.provider), true, { command: input.agentCommand, agentName: project.name }))
-    parts.push('')
-    parts.push(NARRATION_RULES)
+    // A command-line agent can only reach the agent browser and question buttons this way.
+    if (cli) {
+      parts.push('')
+      parts.push(deskmatesToolsGuide(isDesign ? 'design' : 'work', true, true, { command: input.agentCommand, agentName: project.name }))
+    } else if (isDesign) {
+      parts.push('')
+      parts.push(baseToolsNote('design'))
+    }
     pushUserContext(parts, input)
     return parts.join('\n')
   }

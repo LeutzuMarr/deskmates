@@ -4,7 +4,7 @@ import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { APICallError, generateText } from 'ai'
 import type { LanguageModel } from 'ai'
 import { DEFAULT_SETTINGS, PROVIDER_LABELS, type ModelCheck, type ModelRef, type ProviderId, type Settings } from '../../shared/protocol'
-import { FREEBUFF_MODEL_IDS } from '../../shared/freebuff'
+import { freebuffModelIds } from '../../shared/freebuff'
 import { OPENCODE_DEFAULT_MODEL } from '../terminals/managed'
 import type { KeyStore } from './keys'
 import { hasNoQuota, NO_QUOTA_MESSAGE } from './quota'
@@ -278,7 +278,7 @@ export class ModelService implements ModelResolver {
   async listModels(provider: ProviderId): Promise<string[]> {
     if (provider === 'opencode') return [OPENCODE_DEFAULT_MODEL]
     if (provider === 'agy') return ['default']
-    if (provider === 'freebuff') return [...FREEBUFF_MODEL_IDS]
+    if (provider === 'freebuff') return freebuffModelIds()
 
     if (provider === 'google') {
       const apiKey = this.keys.get('google')

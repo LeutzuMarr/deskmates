@@ -4,7 +4,7 @@
 import { isMcpToolName, SAFE_MCP_TOOLS } from '../connectors/naming'
 
 /** Tools that always need explicit user approval. */
-export const RISKY_TOOLS: ReadonlySet<string> = new Set(['delete_path', 'run_command', 'Bash', 'Workflow', 'delete_file', 'run_script', 'add_mcp_server', 'install_skill', 'install_plugin', 'screen_act'])
+export const RISKY_TOOLS: ReadonlySet<string> = new Set(['delete_path', 'run_command', 'Bash', 'Workflow', 'delete_file', 'run_script', 'add_mcp_server', 'install_skill', 'install_plugin', 'screen_act', 'bash_tool', 'memory_delete'])
 
 /**
  * Determines the approval status for a tool call.

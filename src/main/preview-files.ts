@@ -78,6 +78,19 @@ export function resolvePreviewRequest(
     return notFound()
   }
 
+  // Chat widgets an agent drew (see core/tools/widgets.ts): <dataDir>/widgets/<uuid>.html only.
+  if (parsed.host === 'widget') {
+    const name = parsed.pathname.replace(/^\/+/, '')
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.html$/i.test(name)) return notFound()
+    const path = resolve(dataDir, 'widgets', name)
+    try {
+      if (!statSync(path).isFile()) return notFound()
+    } catch {
+      return notFound()
+    }
+    return { kind: 'file', path, contentType: 'text/html', isHtml: true }
+  }
+
   if (parsed.host !== 'design') return notFound()
 
   const segments = parsed.pathname.split('/').filter((s) => s.length > 0)

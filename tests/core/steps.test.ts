@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { currentActivity, shortUrl, stepLabel, stepWords } from '../../src/renderer/src/lib/steps'
 import { ActivitySteps } from '../../src/core/terminals/freebuff-pool'
+import { groupWork } from '../../src/core/terminals/freebuff-host'
 import type { TimelineItem, ToolItem } from '../../src/shared/protocol'
 
 const tool = (toolName: string, input: unknown, state: ToolItem['state'] = 'running'): ToolItem => ({ kind: 'tool', id: toolName, at: 0, toolName, input, state })
@@ -53,5 +54,51 @@ describe("Freebuff's steps", () => {
       ['Ho letto i compiti', 'done']
     ])
     expect(final[0]!.id).toBe('first')
+  })
+})
+
+describe("Freebuff's full output as steps", () => {
+  const run = (reads: string[][]) => {
+    const items: ToolItem[] = []
+    const steps = new ActivitySteps('first', (item) => items.push(item as ToolItem))
+    for (const read of reads) steps.reportAll(read)
+    steps.finish()
+    const byId = new Map<string, ToolItem>()
+    for (const item of items) byId.set(item.id, item)
+    return [...byId.values()].map((i) => [(i.input as { activity: string }).activity, i.state])
+  }
+
+  it('shows every line, even ones printed between two reads of the screen', () => {
+    expect(
+      run([
+        ['• Read AGENTS.md'],
+        ['• Read AGENTS.md', 'Found that the', '• Read a.ts', '$ npm test'],
+        ['• Read AGENTS.md', 'Found that the deadline moved.', '• Read a.ts', '$ npm test', 'All tests pass.']
+      ])
+    ).toEqual([
+      ['• Read AGENTS.md', 'done'],
+      ['Found that the deadline moved.', 'done'],
+      ['• Read a.ts', 'done'],
+      ['$ npm test', 'done'],
+      ['All tests pass.', 'done']
+    ])
+  })
+
+  it('does not repeat steps when the start of the turn scrolls off the screen', () => {
+    expect(run([['• Read one.ts', '• Read two.ts'], ['• Read two.ts', '• Read three.ts']])).toEqual([
+      ['• Read one.ts', 'done'],
+      ['• Read two.ts', 'done'],
+      ['• Read three.ts', 'done']
+    ])
+  })
+})
+
+describe('grouping Freebuff output lines', () => {
+  it('joins a wrapped paragraph and keeps tool lines apart', () => {
+    expect(groupWork(['I will read the file', 'and then run the tests.', '• Read a.ts', '', 'thinking...', 'Done.'])).toEqual([
+      'I will read the file and then run the tests.',
+      '• Read a.ts',
+      'Done.'
+    ])
   })
 })

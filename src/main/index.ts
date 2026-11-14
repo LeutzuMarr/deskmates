@@ -216,7 +216,8 @@ function main(): void {
     window.on('unmaximize', announceMaximize)
 
     window.webContents.setWindowOpenHandler(({ url }) => {
-      if (/^https?:\/\//i.test(url)) void shell.openExternal(url)
+      // Web links open in the browser; a mailto: link (a widget's "Open in mail") in the mail app.
+      if (/^https?:\/\//i.test(url) || /^mailto:/i.test(url)) void shell.openExternal(url)
       return { action: 'deny' }
     })
 

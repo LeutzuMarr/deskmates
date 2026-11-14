@@ -33,7 +33,7 @@ import type {
   UsageRow
 } from '../../../shared/protocol'
 import type { InstallWslResult } from '../../../shared/desktop-api'
-import type { FreebuffStatus } from '../../../shared/freebuff'
+import { freebuffModelIds, setFreebuffModels, type FreebuffStatus } from '../../../shared/freebuff'
 import { USES_WSL_ENGINE } from './bots'
 
 export type View =
@@ -336,6 +336,10 @@ export const useStore = create<StoreState>()((set, get) => {
         break
       case 'memory.updated':
         set({ memories: { ...state.memories, [event.projectId]: event.memories } })
+        break
+      case 'freebuff.models':
+        setFreebuffModels(event.list.models)
+        set({ models: { ...state.models, freebuff: freebuffModelIds() } })
         break
       case 'settings.updated':
         set({ settings: event.settings })
@@ -731,6 +735,15 @@ export const useStore = create<StoreState>()((set, get) => {
     },
 
     loadModels: async (provider) => {
+      // Freebuff: the list Deskmates knows (with costs), and a fresh read of Freebuff's own picker
+      // starts in the background; a changed list then arrives as a 'freebuff.models' event.
+      if (provider === 'freebuff') {
+        const list = await core.call('freebuff.models', {})
+        setFreebuffModels(list.models)
+        const ids = freebuffModelIds()
+        set({ models: { ...get().models, freebuff: ids } })
+        return ids
+      }
       const models = await core.call('models.list', { provider })
       set({ models: { ...get().models, [provider]: models } })
       return models

@@ -89,10 +89,6 @@ export function TaskView({ projectId, taskId }: { projectId: string; taskId: str
     }
   }, [taskId, changeKey, running])
 
-  useEffect(() => {
-    if (task && task.plan.length > 0) setPanelOpen(true)
-  }, [task?.plan.length])
-
   const startRename = (): void => {
     if (!task) return
     setDraft(task.title)
@@ -176,6 +172,15 @@ export function TaskView({ projectId, taskId }: { projectId: string; taskId: str
               {task?.status === 'error' && task.error && (
                 <div className="error-bar mb-3" role="alert">
                   {task.error}
+                </div>
+              )}
+              {task && task.plan.length > 0 && !task.plan.every((item) => item.status === 'done') && (
+                <div className="mb-3 rounded-2xl border border-rule bg-card px-4 py-3" aria-label="Task list">
+                  <ul className="flex flex-col gap-2">
+                    {task.plan.map((item, index) => (
+                      <PlanRow key={`${item.text}-${index}`} item={item} />
+                    ))}
+                  </ul>
                 </div>
               )}
               <Composer projectId={projectId} taskId={taskId} />

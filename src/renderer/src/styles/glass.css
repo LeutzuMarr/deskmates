@@ -307,10 +307,10 @@ dialog::backdrop {
   line-height: 1;
 }
 .diff-added {
-  color: var(--olive);
+  color: var(--good);
 }
 .diff-removed {
-  color: var(--brick);
+  color: var(--bad);
 }
 
 /* ---- Phone-sized screens ---- */

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { FileText } from 'lucide-react'
 import { core } from '../lib/rpc'
 import { useStore } from '../lib/store'
@@ -6,9 +6,10 @@ import { concentricVars } from '../lib/design'
 import { AssistantText } from './Markdown'
 import type { ToolItem } from '../../../shared/protocol'
 import type { QuickReplies } from '../../../shared/quick-replies'
+import { WIDGET_TOOL_NAMES } from '../../../shared/widgets'
 
 /** Tools shown as their own card in the conversation instead of inside the gray activity summary. */
-export const CARD_TOOLS = new Set(['AskUserQuestion', 'ask_user', 'SendUserMessage', 'SendUserFile'])
+export const CARD_TOOLS = new Set(['AskUserQuestion', 'ask_user', 'ask_user_input_v0', 'SendUserMessage', 'SendUserFile', 'present_files', ...WIDGET_TOOL_NAMES])
 
 /** Opening these runs them, so a file card only shows where they are. */
 const RUNNABLE = /\.(exe|bat|cmd|com|ps1|psm1|vbs|vbe|js|jse|wsf|wsh|msi|msp|lnk|scr|hta|jar|reg|cpl|pif|url|appref-ms)$/i
@@ -33,6 +34,20 @@ interface QuestionField {
 function questionFields(item: ToolItem): { title: string | null; prompt: string | null; fields: QuestionField[] } {
   const input = (item.input ?? {}) as Record<string, unknown>
   const list = Array.isArray(input.questions) ? (input.questions as Array<Record<string, unknown>>) : []
+  if (item.toolName === 'ask_user_input_v0') {
+    // The operating prompt's format: options are plain labels, type says single or multi select.
+    return {
+      title: null,
+      prompt: null,
+      fields: list.map((q, i) => ({
+        id: String(i),
+        kind: 'choice',
+        title: String(q.question ?? ''),
+        options: (Array.isArray(q.options) ? q.options : []).map((o: unknown) => ({ label: String(o ?? '') })),
+        multi: q.type === 'multi_select' || q.type === 'rank_priorities'
+      }))
+    }
+  }
   if (item.toolName === 'AskUserQuestion') {
     return {
       title: null,
@@ -248,7 +263,8 @@ export function AgentCard({ taskId, item, answered, running }: { taskId: string;
     const message = String(((item.input ?? {}) as { message?: unknown }).message ?? '')
     return message ? <AssistantText text={message} /> : null
   }
-  if (item.toolName === 'SendUserFile') return item.state === 'done' ? <FileCards item={item} /> : null
+  if (item.toolName === 'SendUserFile' || item.toolName === 'present_files') return item.state === 'done' ? <FileCards item={item} /> : null
+  if (WIDGET_TOOL_NAMES.includes(item.toolName)) return <WidgetCard item={item} />
   return <QuestionCard taskId={taskId} item={item} answered={answered} running={running} />
 }
 
@@ -304,5 +320,41 @@ export function QuickReplyCard({ taskId, replies, running }: { taskId: string; r
         </button>
       </form>
     </div>
+  )
+}
+
+/**
+ * A widget an agent drew (a chart, cards, a quiz, a map…): its page in a sandboxed frame that grows
+ * to the height the page reports. While the tool runs, a placeholder line; if it failed, the error.
+ */
+function WidgetCard({ item }: { item: ToolItem }) {
+  const frameRef = useRef<HTMLIFrameElement>(null)
+  const [height, setHeight] = useState(160)
+  const output = (item.output ?? {}) as { widget?: unknown; title?: unknown }
+  const src = typeof output.widget === 'string' && output.widget.startsWith('deskmates-preview://widget/') ? output.widget : null
+  useEffect(() => {
+    const onMessage = (event: MessageEvent): void => {
+      if (event.source !== frameRef.current?.contentWindow) return
+      const data = event.data as { type?: unknown; height?: unknown }
+      if (data?.type === 'deskmates-widget-height' && typeof data.height === 'number') setHeight(Math.min(Math.max(data.height, 40), 2400))
+    }
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [])
+  if (item.state === 'error') {
+    return <div className="msg-in rounded-2xl border border-[color:var(--danger,#b3412f)]/40 px-4 py-3 text-[13px] text-[color:var(--danger,#b3412f)]">Couldn't show this: {typeof item.output === 'string' ? item.output : 'the widget failed.'}</div>
+  }
+  if (!src) {
+    return item.state === 'running' ? <div className="msg-in shimmer-txt text-[13px] text-ink-muted">Drawing…</div> : null
+  }
+  return (
+    <iframe
+      ref={frameRef}
+      title={typeof output.title === 'string' ? output.title : 'Widget'}
+      src={src}
+      sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
+      className="msg-in w-full rounded-2xl border-0 bg-transparent"
+      style={{ height }}
+    />
   )
 }

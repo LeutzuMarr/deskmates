@@ -1,6 +1,6 @@
 import { execFile, execFileSync } from 'node:child_process'
 import { ConsoleHelper } from './freebuff-console'
-import type { FreebuffStatus } from '../../shared/freebuff'
+import { parsePickerCards, type FreebuffModel, type FreebuffStatus } from '../../shared/freebuff'
 
 /** Box-drawing and block characters Freebuff's TUI draws borders with. */
 const BORDER = /[─-▟]/g
@@ -204,6 +204,56 @@ export function currentActivity(screen: string, prompt: string, skipEchoes = 0):
   return last ? last.slice(0, 120) : null
 }
 
+/** A line that starts a new piece of work in Freebuff's output: a tool or command line. */
+const WORK_MARKER = /^(\$ |• |▸ |✓ |✗ |✔ |✘ |→ )/
+/** Freebuff's window is 110 columns; a cleaned line this long was most likely wrapped onto the next. */
+const WRAP_LENGTH = 95
+
+/**
+ * Freebuff's output lines turned into whole items, in order: each tool or command line is its own
+ * item, and a paragraph of prose (which the window wraps over several lines) is joined back into one.
+ * Freebuff's own "thinking…" status is left out.
+ */
+export function groupWork(lines: string[]): string[] {
+  const items: string[] = []
+  let joinable = false
+  for (const raw of lines) {
+    const line = raw.trim()
+    if (!line || BUSY.test(line)) {
+      joinable = false
+      continue
+    }
+    const marker = WORK_MARKER.test(line)
+    if (!marker && joinable && items.length > 0) {
+      items[items.length - 1] += ` ${line}`
+    } else {
+      items.push(line)
+    }
+    // Prose continues onto the next line; a tool line only when it filled the width (it wrapped).
+    joinable = !marker || line.length >= WRAP_LENGTH
+  }
+  return items
+}
+
+/** Every chat line on screen above the input box, without boxes, cards, footers or the status bar. */
+function chatLines(screen: string): string[] {
+  return screen
+    .split('\n')
+    .filter((line) => !/^\s*[╭┌╰└│]/.test(line) && !REPLY_FOOTER.test(line) && !line.includes('⎘') && !/ left · /.test(line) && !/\/model to change/.test(line))
+    .map(clean)
+}
+
+/**
+ * Everything Freebuff has written for `prompt` so far, as whole items (see `groupWork`). When the
+ * request has scrolled off the top of the window, every chat line still on screen is this turn's.
+ */
+export function workItems(screen: string, prompt: string, skipEchoes = 0): string[] {
+  const reply = extractReply(screen, prompt, skipEchoes)
+  if (reply) return groupWork(reply.text.split('\n'))
+  // The top line may be the tail of a paragraph cut by the window's edge: it was reported whole earlier.
+  return groupWork(chatLines(screen)).slice(1)
+}
+
 export type FreebuffState = 'starting' | 'idle' | 'busy' | 'stopped' | 'error'
 
 export interface FreebuffHostOptions {
@@ -245,8 +295,8 @@ export class FreebuffHost {
   /** Freebuff and the processes above it, up to and including its hidden console. */
   private processes = new Set<number>()
   private lastHours: { left: number; total: number | null } | null = null
-  /** Progress callback for the turn in flight, alongside the host-wide `options.onActivity`. */
-  private turnActivity: ((activity: string) => void) | null = null
+  /** Progress callback for the turn in flight: everything Freebuff has written so far, in order. */
+  private turnWork: ((items: string[]) => void) | null = null
 
   constructor(private readonly options: FreebuffHostOptions) {}
 
@@ -303,11 +353,11 @@ export class FreebuffHost {
 
   /** Sends one request and resolves with Freebuff's reply once the turn is over. Rejects with
    *  `StoppedError` when `cancel()` ends the turn first. */
-  async ask(prompt: string, onActivity?: (activity: string) => void): Promise<string> {
+  async ask(prompt: string, onWork?: (items: string[]) => void): Promise<string> {
     await this.start()
     if (this.state === 'busy') throw new Error('Freebuff is still working on the last request.')
     this.stopRequested = false
-    this.turnActivity = onActivity ?? null
+    this.turnWork = onWork ?? null
     this.setState('busy')
     try {
       // Type, then check the request really started; if the letters were dropped, try once more.
@@ -397,6 +447,55 @@ export class FreebuffHost {
       this.press(['escape'])
       throw new Error(`Freebuff doesn't list "${name}" any more. Pick another Freebuff model in Deskmates.`)
     } finally {
+      if (this.current === 'busy') this.setState('idle')
+    }
+  }
+
+  /**
+   * Reads every model Freebuff's /model picker offers, with its cost: opens the picker, walks to the
+   * top, then down to the bottom collecting the cards on each screen, and closes it with Esc, so the
+   * selected model stays as it was. Only runs on an idle, already started Freebuff; returns null
+   * otherwise, or when the picker didn't open.
+   */
+  async listModels(): Promise<FreebuffModel[] | null> {
+    if (this.state !== 'idle') return null
+    this.setState('busy')
+    let opened = false
+    try {
+      await this.prepareInput()
+      this.typeText('/model')
+      if (!(await this.waitFor((screen) => PICKER.test(screen), 8000))) return null
+      opened = true
+      const found = new Map<string, FreebuffModel>()
+      const collect = (): void => {
+        for (const card of parsePickerCards(this.screen)) if (!found.has(card.name)) found.set(card.name, card)
+      }
+      let previous: string | null = null
+      for (let i = 0; i < 60; i++) {
+        this.press(['up'])
+        await delay(250)
+        await this.nextScreen()
+        const highlighted = highlightedModel(this.screen)
+        if (highlighted === previous) break
+        previous = highlighted
+      }
+      // Order is the picker's, top to bottom: collect from the top screen first, then each step down.
+      found.clear()
+      collect()
+      for (let i = 0; i < 60; i++) {
+        const highlighted = highlightedModel(this.screen)
+        this.press(['down'])
+        await delay(250)
+        await this.nextScreen()
+        collect()
+        if (highlightedModel(this.screen) === highlighted) break
+      }
+      return [...found.values()]
+    } finally {
+      if (opened) {
+        this.press(['escape'])
+        await this.waitFor((screen) => !PICKER.test(screen), 5000)
+      }
       if (this.current === 'busy') this.setState('idle')
     }
   }
@@ -533,13 +632,15 @@ export class FreebuffHost {
       if (hasSurvey(screen)) this.press(['escape'])
       if (started && isBusy(screen)) {
         const activity = currentActivity(screen, prompt, this.echoesBefore)
-        if (activity) {
-          this.options.onActivity?.(activity)
-          this.turnActivity?.(activity)
-        }
+        if (activity) this.options.onActivity?.(activity)
+        this.turnWork?.(workItems(screen, prompt, this.echoesBefore))
       }
       const settled = Date.now() - this.screenAt > SETTLE_MS
-      if (started && reply?.done && isIdle(screen) && settled) return reply.text
+      if (started && reply?.done && isIdle(screen) && settled) {
+        // The last lines can land between two polls of a busy screen: report the finished reply too.
+        this.turnWork?.(workItems(screen, prompt, this.echoesBefore))
+        return reply.text
+      }
       // A long turn (browsing, reading a site) prints more than Freebuff's window holds, and the
       // request scrolls off the top: `extractReply` then has nothing to anchor on and would wait for
       // the full timeout while the answer sits right there. Freebuff idle again after working means

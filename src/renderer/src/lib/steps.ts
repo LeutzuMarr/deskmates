@@ -62,7 +62,8 @@ export function stepWords(toolName: string, rawInput: unknown): StepWords {
 
   // Freebuff reports the line of work it is on rather than a tool call.
   if (name === 'freebuff') {
-    const activity = clip(str(input.activity).replace(/^[•·*\-\s]+/, ''), 100)
+    // Freebuff's own lines are shown whole (the step wraps): the user follows its work from them.
+    const activity = clip(str(input.activity).replace(/^[•·*\-\s]+/, ''), 2000)
     return { live: activity || 'Working', done: activity || 'Worked' }
   }
 
@@ -78,6 +79,45 @@ export function stepWords(toolName: string, rawInput: unknown): StepWords {
   }
 
   switch (name) {
+    // The operating prompt's own tools
+    case 'memory_read':
+      return words('Checking', 'Checked', 'memory')
+    case 'memory_list':
+      return words('Looking through', 'Looked through', 'memory')
+    case 'memory_write':
+    case 'memory_append':
+    case 'memory_str_replace':
+      return words('Saving to', 'Saved to', `memory${path ? ` (${path})` : ''}`)
+    case 'memory_delete':
+      return words('Deleting', 'Deleted', `${path || 'a document'} from memory`)
+    case 'conversation_search':
+      return words('Searching past chats for', 'Searched past chats for', query ? `"${query}"` : '')
+    case 'recent_chats':
+      return words('Looking at', 'Looked at', 'recent chats')
+    case 'read_conversation':
+      return words('Reading', 'Read', 'a past chat')
+    case 'image_search':
+      return words('Finding images of', 'Found images of', query ? `"${query}"` : '')
+    case 'weather_fetch':
+      return words('Checking the weather in', 'Checked the weather in', str(input.location_name) || 'that place')
+    case 'places_search':
+      return words('Searching for', 'Searched for', 'places')
+    case 'fetch_sports_data':
+      return words('Getting', 'Got', `${str(input.league).toUpperCase()} ${str(input.data_type) || 'scores'}`)
+    case 'present_files':
+      return words('Sharing', 'Shared', 'files')
+    case 'search_mcp_registry':
+      return words('Searching', 'Searched', 'for connectors')
+    case 'ask_user_input_v0':
+      return words('Asking', 'Asked', 'you')
+    case 'mcp__visualize__read_me':
+      return words('Reading', 'Read', 'the widget guide')
+    case 'mcp__visualize__show_widget':
+    case 'chart_display_v0':
+      return words('Drawing', 'Drew', str(input.title) || 'a visual')
+    case 'artifact':
+      return words('Showing', 'Showed', path || 'a page')
+
     // Files
     case 'write_file':
     case 'write':
@@ -86,6 +126,7 @@ export function stepWords(toolName: string, rawInput: unknown): StepWords {
       return words('Writing', 'Wrote', path)
     case 'edit_file':
     case 'edit':
+    case 'str_replace':
     case 'str_replace_edit':
     case 'dc_html_str_replace':
     case 'dc_js_str_replace':
@@ -94,6 +135,7 @@ export function stepWords(toolName: string, rawInput: unknown): StepWords {
       return words('Editing', 'Edited', path)
     case 'read_file':
     case 'read':
+    case 'view':
     case 'read_pc_file':
     case 'local_read':
     case 'fig_read':
@@ -130,6 +172,7 @@ export function stepWords(toolName: string, rawInput: unknown): StepWords {
     // Commands
     case 'run_command':
     case 'bash':
+    case 'bash_tool':
     case 'shell':
     case 'run_shell_command':
     case 'run_script': {
@@ -139,6 +182,7 @@ export function stepWords(toolName: string, rawInput: unknown): StepWords {
 
     // The web
     case 'web_search':
+    case 'web_search_fast':
     case 'websearch':
     case 'google_web_search':
       return words('Searching the web for', 'Searched the web for', query ? `"${query}"` : '')
@@ -294,6 +338,28 @@ export function currentActivity(timeline: TimelineItem[]): string | null {
     }
     if (item.kind === 'thinking') return 'Thinking…'
     if (item.kind === 'assistant') return k === timeline.length - 1 ? 'Writing the reply…' : null
+  }
+  return null
+}
+
+/** Lines added and removed by a file-writing step, worked out from its input; null for other steps. */
+export function stepDiff(item: Pick<ToolItem, 'toolName' | 'input' | 'state'>): { added: number; removed: number } | null {
+  if (item.state === 'error' || item.state === 'denied') return null
+  const input = (item.input && typeof item.input === 'object' ? item.input : {}) as Input
+  const lines = (value: unknown): number => {
+    const text = typeof value === 'string' ? value : ''
+    return text ? text.replace(/\n$/, '').split('\n').length : 0
+  }
+  const name = item.toolName.toLowerCase()
+  if (['edit_file', 'edit', 'str_replace', 'str_replace_edit', 'memory_str_replace'].includes(name)) {
+    const before = input.old_text ?? input.old_string ?? input.old_str
+    const after = input.new_text ?? input.new_string ?? input.new_str
+    if (typeof before !== 'string') return null
+    return { added: lines(after), removed: lines(before) }
+  }
+  if (['write_file', 'write', 'create_file', 'memory_write', 'dc_write'].includes(name)) {
+    const content = input.content ?? input.file_text
+    return typeof content === 'string' ? { added: lines(content), removed: 0 } : null
   }
   return null
 }

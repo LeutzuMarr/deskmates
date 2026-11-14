@@ -6,6 +6,7 @@ import type { TaskScheduler } from '../schedules/task-scheduler'
 import type { DuoService } from '../duo/service'
 import type { RemoteAccess } from '../phone/remote'
 import type { DuoProfile } from '../../shared/duo'
+import { freebuffModels, setFreebuffModels, type FreebuffModelList } from '../../shared/freebuff'
 import type { When } from '../../shared/protocol'
 import { randomInt, randomUUID } from 'node:crypto'
 import { basename, join, resolve, sep } from 'node:path'
@@ -47,6 +48,9 @@ const PC_NOT_SET_UP = "Bot PCs aren't set up on this computer yet."
 const RUNS_NOT_SET_UP = "Bot runs aren't set up on this computer yet."
 /** Shown when a terminals.* call needs detection/managed mode and it isn't wired up yet. */
 const TERMINALS_NOT_SET_UP = "Terminal agents aren't set up on this computer yet."
+
+/** How often Freebuff's picker may be read at most: each read drives Freebuff's /model screen. */
+const FREEBUFF_MODELS_MIN_GAP_MS = 60_000
 /** Shown when a skills/plugins.* call needs the extensions machinery and it isn't wired up yet. */
 const SKILLS_NOT_SET_UP = "Skills and plugins aren't set up on this computer yet."
 /** Shown when a connectors.* call needs the MCP machinery and it isn't wired up yet. */
@@ -109,6 +113,35 @@ export interface HandlerServices {
 /** Implements every method of RpcMethods. Handlers emit bus events the UI listens to. */
 export function createHandlers(services: HandlerServices): Handlers {
   const { repos, bus, runner, changes, models, keys, version, dataDir, agentKit, onDesignWritten } = services
+
+  // Freebuff's model list: the last one read off its picker (saved across launches), refreshed in the
+  // background whenever the picker is opened and an idle Freebuff is running.
+  const savedFreebuffModels = repos.settings.getExtra<FreebuffModelList | null>('freebuffModels', null)
+  if (savedFreebuffModels?.models.length) setFreebuffModels(savedFreebuffModels.models)
+  let freebuffModelsAt = savedFreebuffModels?.updatedAt ?? 0
+  let freebuffModelsReading: Promise<void> | null = null
+  const currentFreebuffModels = (): FreebuffModelList => ({ models: freebuffModels(), updatedAt: freebuffModelsAt })
+  const refreshFreebuffModels = (): Promise<void> => {
+    if (freebuffModelsReading || !services.terminals || Date.now() - freebuffModelsAt < FREEBUFF_MODELS_MIN_GAP_MS) return freebuffModelsReading ?? Promise.resolve()
+    const terminals = services.terminals
+    freebuffModelsReading = (async () => {
+      try {
+        const read = await terminals.freebuffModels()
+        if (!read || read.length === 0) return
+        const before = JSON.stringify(freebuffModels())
+        setFreebuffModels(read)
+        freebuffModelsAt = Date.now()
+        const list = currentFreebuffModels()
+        repos.settings.setExtra('freebuffModels', list)
+        if (JSON.stringify(list.models) !== before) bus.emit({ type: 'freebuff.models', list })
+      } catch (error) {
+        console.error("[core] couldn't read Freebuff's models", error)
+      } finally {
+        freebuffModelsReading = null
+      }
+    })()
+    return freebuffModelsReading
+  }
 
   const requireRemote = (): RemoteAccess => {
     if (!services.remote) throw new Error('Phone access from anywhere is not available here.')
@@ -854,6 +887,11 @@ export function createHandlers(services: HandlerServices): Handlers {
     'taskSchedules.runNow': (params: { id: string }) => requireSchedules().runNow(params.id),
     'taskSchedules.start': (params: { id: string }) => requireSchedules().startPending(params.id),
     'taskSchedules.dismiss': (params: { id: string }) => requireSchedules().dismiss(params.id),
+
+    'freebuff.models': () => {
+      void refreshFreebuffModels()
+      return currentFreebuffModels()
+    },
 
     'freebuff.status': (params: { folder?: string }) => {
       if (!services.terminals) throw new Error(TERMINALS_NOT_SET_UP)

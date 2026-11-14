@@ -6,6 +6,8 @@ import { fileTools } from './files'
 import { officeTools } from './office'
 import { shellTools } from './shell'
 import { coworkTools, type ToolListing } from './cowork'
+import { promptSectionTool } from '../engine/my-prompt'
+import { promptTools } from './prompt-tools'
 import { designTools } from './design'
 import { designComponentTools } from './design-components'
 import { designVisualTools } from './design-visual'
@@ -45,7 +47,9 @@ export function buildTools(ctx: ToolContext): ToolSet {
     all,
     ctx.projectKind === 'design'
       ? { ...designTools(ctx, listTools), ...designComponentTools(ctx), ...designVisualTools(ctx) }
-      : coworkTools(ctx, listTools)
+      : { ...coworkTools(ctx, listTools), ...promptSectionTool() }
   )
+  // The Work tab's agent reads the user's own prompt: give it the tools that prompt names.
+  if (ctx.projectKind !== 'design') Object.assign(all, promptTools(ctx, all))
   return all
 }

@@ -36,7 +36,7 @@ export function agentTools(ctx: ToolContext) {
 
     update_plan: tool({
       description:
-        'Show your step-by-step plan for this task and keep it current. Send the whole list every time. Mark the step you are working on as in_progress and finished steps as done.',
+        "The task list the user watches under the chat. For any request with more than one step, call it as your very first tool call with the whole plan (short steps, the one you start in_progress, the rest pending), and again each time a step finishes (that step done, the next in_progress) or the plan changes. Send the whole list every time. Between steps, write one short sentence saying what you are doing now, and say what you found as soon as you find it, so the user always knows where you are.",
       inputSchema: z.object({
         items: z
           .array(

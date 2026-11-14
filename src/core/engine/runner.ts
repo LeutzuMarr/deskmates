@@ -31,6 +31,8 @@ export interface ModelResolver {
 
 export interface RunnerDeps {
   repos: Repos
+  /** Deskmates' data folder (shared memory documents, chat widgets). */
+  dataDir?: string
   bus: EventBus
   models: ModelResolver
   changes: ChangeLog
@@ -320,6 +322,8 @@ export class TaskRunner {
         ...(deps.getSchedules?.() ? { schedules: deps.getSchedules() } : {}),
         ...(deps.agentNameFor?.(taskId) ? { agentName: deps.agentNameFor(taskId) } : {}),
         cliModel: resolved.cli === true,
+        ...(deps.dataDir ? { dataDir: deps.dataDir } : {}),
+        chats: chatHistory(repos),
         signal: controller.signal,
         projectKind: project.kind === 'design' ? 'design' : 'work',
         renameProject: (title) => {
@@ -398,7 +402,7 @@ export class TaskRunner {
         toolApproval: ({ toolCall }: { toolCall: { toolName: string } }) =>
           approvalFor(toolCall.toolName, repos.tasks.require(taskId).autoApprove),
         // A question to the user ends the turn: the answers come back as the next message.
-        stopWhen: [isStepCount(settings.maxSteps), hasToolCall('AskUserQuestion'), hasToolCall('ask_user')]
+        stopWhen: [isStepCount(settings.maxSteps), hasToolCall('AskUserQuestion'), hasToolCall('ask_user'), hasToolCall('ask_user_input_v0'), hasToolCall('end_conversation')]
       })
 
       // Stream
@@ -571,4 +575,31 @@ export function sharesThoughts(provider: string, modelId: string): boolean {
   if (provider !== 'google') return false
   // Image, speech and embedding variants share the family name but don't think.
   return /gemini-(2\.5|[3-9])/i.test(modelId) && !/image|tts|embedding|live|audio/i.test(modelId)
+}
+
+/** The text of a stored message: its text parts, joined. */
+function messageText(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  return content
+    .map((part) => (part && typeof part === 'object' && (part as { type?: string }).type === 'text' ? String((part as { text?: unknown }).text ?? '') : ''))
+    .filter(Boolean)
+    .join('\n')
+}
+
+/** Every project's chats, for the chat-history tools. */
+export function chatHistory(repos: Repos): NonNullable<ToolContext['chats']> {
+  return {
+    list: () =>
+      repos.projects
+        .list()
+        .flatMap((project) => repos.tasks.list(project.id).map((task) => ({ id: task.id, title: task.title, project: project.name, updatedAt: task.updatedAt })))
+        .sort((a, b) => b.updatedAt - a.updatedAt),
+    turns: (id) =>
+      repos.tasks
+        .messages(id)
+        .filter((stored) => stored.message.role === 'user' || stored.message.role === 'assistant')
+        .map((stored) => ({ role: stored.message.role as 'user' | 'assistant', text: messageText(stored.message.content) }))
+        .filter((turn) => turn.text.trim())
+  }
 }
