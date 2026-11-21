@@ -7,6 +7,7 @@ import type { SubagentRunner } from '../engine/subagents'
 import type { MemoriesRepo } from '../store/repos'
 import type { RenderClient } from '../render/types'
 import type { BrowserService } from '../browser/service'
+import type { ChromeDriver } from '../chrome/service'
 import type { TaskScheduler } from '../schedules/task-scheduler'
 import type { ScreenControl } from './screen-control'
 import type { GoogleAuth } from '../google/auth'
@@ -56,6 +57,8 @@ export interface ToolContext {
   render?: RenderClient
   /** The agent browser the user can watch from the title bar. Absent without the app. */
   browser?: BrowserService
+  /** The user's own Chrome; the core's one shared connection when absent. */
+  chrome?: ChromeDriver
   /** Who is acting, as the user reads it in browser questions: "Work", "Design", or a scheduled task's name. */
   agentName?: string
   /** Screen control (screen_look / screen_act); absent without a desktop. */
