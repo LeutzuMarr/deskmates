@@ -39,8 +39,9 @@ const UPDATE_PLAN_INFO: PromptToolInfo = {
 export function promptToolInfos(): PromptToolInfo[] {
   const out: PromptToolInfo[] = [UPDATE_PLAN_INFO]
   for (const [name, spec] of promptToolSpecs()) {
-    if (!spec.schema || typeof spec.schema !== 'object') continue
-    const schema = spec.schema as Record<string, unknown>
+    // A tool whose schema in the prompt isn't valid JSON is still listed, taking any arguments: the
+    // prompt itself shows the agent what to send.
+    const schema = spec.schema && typeof spec.schema === 'object' ? (spec.schema as Record<string, unknown>) : { properties: {}, additionalProperties: true }
     out.push({ name, description: spec.description || `The ${name} tool from the operating prompt.`, inputSchema: { type: 'object', ...schema } })
   }
   return out

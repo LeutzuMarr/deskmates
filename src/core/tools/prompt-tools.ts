@@ -424,7 +424,7 @@ export function promptTools(ctx: ToolContext, base: ToolSet): ToolSet {
   // Every tool the prompt describes exists in the run, so the model never has to imagine one. A tool
   // whose service isn't set up (Google before sign-in) answers with what to do, instead of being absent.
   for (const [name, spec] of specs) {
-    if (impl[name] || name in base || !spec.schema) continue
+    if (impl[name] || name in base) continue
     impl[name] = async () => {
       throw new Error(unavailableReason(name))
     }

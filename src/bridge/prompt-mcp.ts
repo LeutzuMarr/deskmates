@@ -28,10 +28,11 @@ export interface PromptServerOptions {
 
 const text = (value: string, isError = false): CallToolResult => ({ content: [{ type: 'text', text: value }], ...(isError ? { isError: true } : {}) })
 
-/** The zod shape the MCP SDK wants, from a JSON schema. */
-function shapeOf(schema: Record<string, unknown>): Record<string, z.ZodTypeAny> {
+/** The input schema for the MCP SDK, from a JSON schema. A whole loose object, not a shape: a shape
+ *  would drop every argument the schema doesn't list (all of them, for a tool listed without one). */
+function inputSchemaOf(schema: Record<string, unknown>): z.ZodTypeAny {
   const parsed = jsonSchemaToZod(schema)
-  return parsed instanceof z.ZodObject ? (parsed.shape as Record<string, z.ZodTypeAny>) : {}
+  return parsed instanceof z.ZodObject ? parsed : z.looseObject({})
 }
 
 export async function createPromptServer(options: PromptServerOptions): Promise<McpServer> {
@@ -57,7 +58,8 @@ export async function createPromptServer(options: PromptServerOptions): Promise<
     return server
   }
   for (const info of tools) {
-    server.registerTool(info.name, { description: info.description, inputSchema: shapeOf(info.inputSchema) }, async (args: Record<string, unknown>) => {
+    server.registerTool(info.name, { description: info.description, inputSchema: inputSchemaOf(info.inputSchema) }, async (raw: unknown) => {
+      const args = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
       try {
         const result = await options.call('promptTools.call', { folder: options.folder, agent: options.agent, name: info.name, input: args ?? {} })
         return text(result.text)
