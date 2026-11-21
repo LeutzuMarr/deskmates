@@ -424,7 +424,7 @@ async function main(): Promise<void> {
     port: Number(process.env.DESKMATES_PORT ?? 0),
     agent: {
       token: agentToken,
-      methods: ['app.info', 'projects.list', 'designs.read', 'designs.save', 'designs.create', 'screen.look', 'screen.point', 'screen.say', 'screen.clear', 'browser.state', 'browser.tool', 'duo.tool'],
+      methods: ['app.info', 'projects.list', 'designs.read', 'designs.save', 'designs.create', 'screen.look', 'screen.point', 'screen.say', 'screen.clear', 'browser.state', 'browser.tool', 'duo.tool', 'promptTools.list', 'promptTools.call'],
       events: ['design.updated', 'project.updated']
     }
   })
