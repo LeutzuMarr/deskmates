@@ -8,6 +8,7 @@ import { shellTools } from './shell'
 import { coworkTools, type ToolListing } from './cowork'
 import { promptSectionTool } from '../engine/my-prompt'
 import { promptTools } from './prompt-tools'
+import { googleTools } from './google-tools'
 import { designTools } from './design'
 import { designComponentTools } from './design-components'
 import { designVisualTools } from './design-visual'
@@ -15,6 +16,8 @@ import { extensionTools } from './extensions'
 import { agentBrowserTools } from './browser'
 import { scheduleTools } from './schedules'
 import { screenControlTools } from './screen-control'
+import { chromeTools } from './chrome'
+import { sharedChrome } from '../chrome/service'
 import { join } from 'node:path'
 
 /** Merges every tool group into one ToolSet for a run. Built fresh per run via TaskRunner. */
@@ -50,6 +53,26 @@ export function buildTools(ctx: ToolContext): ToolSet {
       : { ...coworkTools(ctx, listTools), ...promptSectionTool() }
   )
   // The Work tab's agent reads the user's own prompt: give it the tools that prompt names.
-  if (ctx.projectKind !== 'design') Object.assign(all, promptTools(ctx, all))
+  if (ctx.projectKind !== 'design') {
+    // Gmail, Calendar and Drive once the user has connected Google, under the prompt's names.
+    if (ctx.google?.isConnected()) Object.assign(all, googleTools(ctx.google))
+    // The user's own Chrome, under Claude in Chrome's tool names. It asks the user through the
+    // agent browser's question cards, so it needs that service.
+    if (ctx.browser) {
+      Object.assign(
+        all,
+        chromeTools({
+          chrome: ctx.chrome ?? sharedChrome(),
+          asker: ctx.browser,
+          agent: ctx.agentName ?? 'Work',
+          runKey: ctx.taskId,
+          screenshotDir: join(ctx.root, '.deskmates', 'screenshots'),
+          withImages: ['google', 'openai'].includes(ctx.modelRef.provider),
+          ...(ctx.signal ? { signal: ctx.signal } : {})
+        })
+      )
+    }
+    Object.assign(all, promptTools(ctx, all))
+  }
   return all
 }

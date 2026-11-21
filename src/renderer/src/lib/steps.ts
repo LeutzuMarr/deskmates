@@ -52,10 +52,74 @@ function humanize(toolName: string): string {
   return parts.map((part, i) => (i === 0 ? part.charAt(0).toUpperCase() + part.slice(1) : part.toLowerCase())).join(' ')
 }
 
+/** The Chrome tools' steps; null for other tools. `navigate` and `read_page` with a URL fall through. */
+function chromeStep(name: string, input: Input, url: string, query: string): StepWords | null {
+  switch (name) {
+    case 'tabs_context':
+      return words('Checking', 'Checked', 'the Chrome tabs')
+    case 'tabs_create':
+      return words('Opening', 'Opened', url ? `${url} in Chrome` : 'a Chrome tab')
+    case 'tabs_close':
+      return words('Closing', 'Closed', 'a Chrome tab')
+    case 'navigate': {
+      const where = str(input.url).trim().toLowerCase()
+      if (where === 'back') return words('Going back', 'Went back', '')
+      if (where === 'forward') return words('Going forward', 'Went forward', '')
+      return null
+    }
+    case 'find':
+      // Other agents' own find tools search files by pattern; the Chrome one takes a query.
+      return typeof input.query === 'string' ? words('Looking for', 'Looked for', query ? `"${query}" on the page` : 'something on the page') : null
+    case 'form_input':
+      return words('Filling in', 'Filled in', 'a field')
+    case 'get_page_text':
+      return words('Reading', 'Read', 'the page')
+    case 'javascript_tool':
+      return words('Running', 'Ran', 'a script on the page')
+    case 'read_console_messages':
+      return words('Checking', 'Checked', 'the console')
+    case 'read_network_requests':
+      return words('Checking', 'Checked', 'network requests')
+    case 'computer': {
+      const action = str(input.action)
+      const key = str(input.text)
+      switch (action) {
+        case 'screenshot':
+          return words('Taking', 'Took', 'a screenshot')
+        case 'zoom':
+          return words('Zooming into', 'Zoomed into', 'the page')
+        case 'left_click':
+        case 'right_click':
+        case 'double_click':
+        case 'triple_click':
+          return words('Clicking', 'Clicked', 'on the page')
+        case 'hover':
+          return words('Pointing at', 'Pointed at', 'the page')
+        case 'left_click_drag':
+          return words('Dragging', 'Dragged', 'on the page')
+        case 'type':
+          return words('Typing', 'Typed', 'into the page')
+        case 'key':
+          return words('Pressing', 'Pressed', clip(key, 30) || 'a key')
+        case 'scroll':
+        case 'scroll_to':
+          return words('Scrolling', 'Scrolled', 'the page')
+        case 'wait':
+          return words('Waiting', 'Waited', 'for the page')
+        default:
+          return words('Using', 'Used', 'Chrome')
+      }
+    }
+    default:
+      return null
+  }
+}
+
 /** The words for one step. */
 export function stepWords(toolName: string, rawInput: unknown): StepWords {
   const input = (rawInput && typeof rawInput === 'object' ? rawInput : {}) as Input
-  const name = toolName.toLowerCase()
+  // Command-line agents show the deskmates-prompt server's tools with its name in front.
+  const name = toolName.toLowerCase().replace(/^(mcp__deskmates[-_]prompt__|deskmates[-_]prompt[_:.])/, '')
   const path = pathOf(input)
   const url = shortUrl(input.url ?? input.href)
   const query = clip(str(input.query ?? input.q ?? input.pattern ?? input.regex), 60)
@@ -72,6 +136,10 @@ export function stepWords(toolName: string, rawInput: unknown): StepWords {
     const said = clip(str(input.text), 160)
     return { live: said, done: said }
   }
+
+  // The user's own Chrome (core/tools/chrome.ts), under Claude in Chrome's tool names.
+  const chrome = chromeStep(name, input, url, query)
+  if (chrome) return chrome
 
   if (name.startsWith('create_')) {
     const kind = name.slice('create_'.length).replace(/_/g, ' ')

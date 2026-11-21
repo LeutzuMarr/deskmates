@@ -223,6 +223,23 @@ export class TasksRepo {
     return rows.map((row) => ({ message: JSON.parse(row.body) as ModelMessage, at: row.created_at }))
   }
 
+  /**
+   * Drops the task's last user message and everything after it (for Edit and Retry), and returns
+   * that message's text, or null when there is no user message.
+   */
+  dropFromLastUserMessage(id: string): string | null {
+    const rows = this.db.prepare('SELECT seq, body FROM messages WHERE task_id = ? ORDER BY seq').all(id) as Array<{ seq: number; body: string }>
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const message = JSON.parse(rows[i]!.body) as ModelMessage
+      if (message.role !== 'user') continue
+      const content = message.content as unknown
+      const text = typeof content === 'string' ? content : Array.isArray(content) ? content.map((part) => (part && typeof part === 'object' && 'text' in part ? String((part as { text: unknown }).text) : '')).join('\n') : ''
+      this.db.prepare('DELETE FROM messages WHERE task_id = ? AND seq >= ?').run(id, rows[i]!.seq)
+      return text
+    }
+    return null
+  }
+
   appendMessages(id: string, messages: ModelMessage[], at = Date.now()): void {
     const { last } = this.db
       .prepare('SELECT COALESCE(MAX(seq), -1) AS last FROM messages WHERE task_id = ?')

@@ -167,7 +167,9 @@ describe('the mounted base prompt', () => {
     expect(result).toContain('MY OWN RULES')
     expect(result).toContain('- other')
     expect(result).not.toContain('WORK BASE PROMPT')
-    expect(result).not.toContain('Keeping the user posted')
+    // How the app shows the work goes with every prompt, the user's own included.
+    expect(result).toContain('Keeping the user posted')
+    expect(result).toContain('Your final message')
     expect(result).toContain('Project: MyApp')
     expect(result.indexOf('MY OWN RULES')).toBeLessThan(result.indexOf('Project: MyApp'))
   })
@@ -183,7 +185,9 @@ describe('the mounted base prompt', () => {
     writeFileSync(basePromptPath('design'), 'DESIGN BASE PROMPT', 'utf8')
     const result = buildInstructions({ ...emptyOverlay('design'), memories: [{ id: 'm1', content: 'Likes teal', createdAt: 0 } as any] })
     expect(result).toContain('Everything above is your system prompt')
-    expect(result).not.toContain('Keeping the user posted')
+    // How the app shows the work goes with every prompt, the user's own included.
+    expect(result).toContain('Keeping the user posted')
+    expect(result).toContain('Your final message')
     expect(result).not.toContain('You are Deskmates')
     expect(result).not.toContain('How to design:')
     expect(result).not.toContain('How to write:')

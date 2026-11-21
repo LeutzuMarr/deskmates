@@ -27,6 +27,9 @@ import { isStepCount, ToolLoopAgent, type ModelMessage, type TextStreamPart, typ
 import type { Bot, BotRun, ProviderId, RunState, TimelineItem, ToolItem } from '../../shared/protocol'
 import { PROVIDER_LABELS } from '../../shared/protocol'
 import { compactHistory } from '../engine/history'
+import { approvalFor } from '../engine/approvals'
+import { presentationRules } from '../engine/presentation'
+import { historyBudgetChars, toolsChars } from '../models/context'
 import { friendlyError, type ModelResolver } from '../engine/runner'
 import type { EventBus } from '../events'
 import type { SkillsService } from '../extensions/skills'
@@ -43,6 +46,9 @@ import { PcUnreachableError, type SaveScreenshot } from './tools/types'
 
 export interface BotRunnerDeps {
   repos: Repos
+  /** The operating prompt's tools for a run folder (TaskRunner.promptToolsFor), unguarded: a bot's
+   *  own approval cards ask before the risky ones. Absent in tests. */
+  promptToolsFor?: (folder: string, agent: string, options: { guard?: boolean }) => ToolSet
   bus: EventBus
   /** Reaches each bot's PC: start it, and get the agent/CDP endpoints to build tool clients from. */
   host: BotHost
@@ -101,11 +107,12 @@ function buildBotInstructions(
   bot: Bot,
   now: Date,
   model: { provider: ProviderId; modelId: string },
-  skills?: SkillsService
+  skills?: SkillsService,
+  promptTools = false
 ): string {
   const parts: string[] = []
   // The user's own operating prompt first (bots have no tab prompt), then this bot's job.
-  const operating = myPromptBrief('tool')
+  const operating = myPromptBrief('tool', undefined, { promptTools })
   if (operating) parts.push(operating, '', '---', '')
   parts.push(
     `You are ${bot.name}, a Deskmates bot with your own Linux computer, working on the task below without anyone watching unless they choose to.`
@@ -123,7 +130,8 @@ function buildBotInstructions(
     "- You never type a password, anywhere. If a site or app needs a login you don't already have, stop and say so plainly, so the user can open Take Over and sign in themselves — don't try to work around it."
   )
   parts.push('- handoff gives another bot a task; reference files under "shared/...", since "data/..." is private to you.')
-  parts.push('- Finish with a short, plain summary of what you did and what you found.')
+  parts.push('')
+  parts.push(presentationRules({ plan: 'none', cards: false }))
   parts.push('')
   parts.push(`You are running on ${PROVIDER_LABELS[model.provider]} model ${model.modelId}.`)
   const installed = skills?.list().filter((s) => s.enabled).map((s) => s.name).sort() ?? []
@@ -354,7 +362,7 @@ export class BotRunner implements RunService {
           `${PROVIDER_LABELS[provider]} runs through a local CLI session, which can't drive this bot's PC. Pick an API-backed model for this bot instead.`
         )
       }
-      const instructions = buildBotInstructions(bot, new Date(now()), { provider, modelId }, this.deps.skills)
+      const instructions = buildBotInstructions(bot, new Date(now()), { provider, modelId }, this.deps.skills, Boolean(this.deps.promptToolsFor))
 
       const pc = await this.deps.host.start(bot.id)
       if (pc.state !== 'running') throw new Error("This bot's PC didn't start.")
@@ -383,6 +391,10 @@ export class BotRunner implements RunService {
         whatsappTo: this.deps.repos.settings.get().whatsappTo
       })
       Object.assign(tools, promptSectionTool())
+      // The operating prompt's tools too, under their own names, wherever the bot has none by that name.
+      const fromPrompt = this.deps.promptToolsFor?.(run.folder, bot.name, { guard: false }) ?? {}
+      for (const [name, t] of Object.entries(fromPrompt)) if (!(name in tools)) (tools as ToolSet)[name] = t
+      const promptToolNames = new Set(Object.keys(fromPrompt))
       // Shared, so parallel tool calls that all hit a stopped PC restart it once, not once each.
       let recovering: Promise<void> | null = null
       const recoverPc = (): Promise<void> =>
@@ -400,11 +412,12 @@ export class BotRunner implements RunService {
         model: patientModel(model),
         instructions,
         tools: guardedTools,
-        toolApproval: ({ toolCall }: { toolCall: { toolName: string } }) => approvalForBotTool(toolCall.toolName, bot.autoApprove),
+        toolApproval: ({ toolCall }: { toolCall: { toolName: string } }) =>
+          promptToolNames.has(toolCall.toolName) ? approvalFor(toolCall.toolName, bot.autoApprove) : approvalForBotTool(toolCall.toolName, bot.autoApprove),
         stopWhen: isStepCount(this.deps.maxSteps ?? 40)
       })
 
-      const result = await agent.stream({ messages: compactHistory(state.messages), abortSignal: controller.signal })
+      const result = await agent.stream({ messages: compactHistory(state.messages, { maxTotalChars: historyBudgetChars({ provider, modelId, instructionsChars: instructions.length, toolsChars: toolsChars(guardedTools) }) }), abortSignal: controller.signal })
 
       let firstError: unknown = null
       for await (const part of result.stream) {
