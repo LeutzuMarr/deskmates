@@ -137,9 +137,9 @@ export function TaskView({ projectId, taskId }: { projectId: string; taskId: str
               {task?.title.trim() === '' ? 'Untitled task' : task?.title}
             </h1>
           )}
-          <div className="mt-0.5 flex items-center gap-2">
-            <span className="truncate font-mono text-[12px] text-ink-muted">{project?.name}</span>
-            <span className="text-[12px] text-ink-faint">
+          <div className="mt-0.5 flex min-w-0 items-center gap-2">
+            <span className="max-w-[50%] shrink-0 truncate font-mono text-[12px] text-ink-muted">{project?.name}</span>
+            <span className="min-w-0 truncate whitespace-nowrap text-[12px] text-ink-faint">
               • {task ? statusLabel(task.status) : 'missing'} • Updated {formatDay(task?.updatedAt ?? 0)} at{' '}
               {formatClock(task?.updatedAt ?? 0)}
             </span>
@@ -163,6 +163,7 @@ export function TaskView({ projectId, taskId }: { projectId: string; taskId: str
 
       <div className="flex min-h-0 flex-1">
         <Conversation
+          editable
           taskId={taskId}
           timeline={timeline}
           running={task?.status === 'running'}

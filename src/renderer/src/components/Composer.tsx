@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useId, useImperativeHandle, useRef, useState } from 'react'
+import { forwardRef, useEffect, useId, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
 import type { ClipboardEvent, DragEvent, KeyboardEvent } from 'react'
 import { ArrowUp, Square, X } from 'lucide-react'
 import { Glass } from 'glisse'
@@ -79,6 +79,74 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       .map((item) => (item as { text: string }).text)
       .reverse()
   const historyAt = useRef(-1)
+
+  // "/" at the start lists installed skills; "@" anywhere lists project files, as in Claude.
+  const [caret, setCaret] = useState(0)
+  const token = /(?:^|\s)([@/])([^\s@]*)$/.exec(text.slice(0, caret))
+  const mention = token && (token[1] === '@' || token.index === 0 && text.slice(0, caret).trimStart().startsWith('/'))
+    ? { kind: token[1] === '@' ? ('file' as const) : ('skill' as const), query: token[2] ?? '', start: caret - (token[2]?.length ?? 0) - 1 }
+    : null
+  const [menuItems, setMenuItems] = useState<string[]>([])
+  const [menuAt, setMenuAt] = useState(0)
+  const [menuClosed, setMenuClosed] = useState<string | null>(null)
+  const menuKey = mention ? `${mention.kind}:${mention.start}` : null
+  const menuOpen = Boolean(mention) && menuItems.length > 0 && menuClosed !== menuKey
+  useEffect(() => {
+    if (!mention) {
+      setMenuItems([])
+      return
+    }
+    let cancelled = false
+    const timer = setTimeout(async () => {
+      try {
+        const found =
+          mention.kind === 'skill'
+            ? (await core.call('skills.list', {}))
+                .filter((skill) => skill.enabled && skill.name.toLowerCase().includes(mention.query.toLowerCase()))
+                .map((skill) => skill.name)
+                .slice(0, 30)
+            : await core.call('projects.findFiles', { projectId, query: mention.query })
+        if (!cancelled) {
+          setMenuItems(found)
+          setMenuAt(0)
+        }
+      } catch {
+        if (!cancelled) setMenuItems([])
+      }
+    }, mention.kind === 'file' ? 120 : 0)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mention?.kind, mention?.query, projectId])
+  // Up from the box when there is room above it; down (this far below the menu's anchor, past the
+  // box) when the box sits near the top of the window, where an upward menu would be cut off.
+  const [menuBelow, setMenuBelow] = useState<number | null>(null)
+  useLayoutEffect(() => {
+    if (!menuOpen) return
+    const box = textareaRef.current?.closest('.composer-box') as HTMLElement | null
+    if (!box) return
+    const rect = box.getBoundingClientRect()
+    setMenuBelow(rect.top < 320 ? box.offsetHeight + 6 : null)
+  }, [menuOpen])
+
+  /** Replaces the typed "/name" or "@path" with the picked one. */
+  const pick = (choice: string): void => {
+    if (!mention) return
+    const mark = mention.kind === 'skill' ? '/' : '@'
+    const insert = `${mark}${/\s/.test(choice) ? `"${choice}"` : choice} `
+    const next = text.slice(0, mention.start) + insert + text.slice(caret)
+    const at = mention.start + insert.length
+    setText(next)
+    setMenuItems([])
+    requestAnimationFrame(() => {
+      const el = textareaRef.current
+      el?.focus()
+      el?.setSelectionRange(at, at)
+      setCaret(at)
+    })
+  }
   useEffect(() => {
     const focus = (): void => textareaRef.current?.focus()
     window.addEventListener(FOCUS_COMPOSER_EVENT, focus)
@@ -193,6 +261,25 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   }
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
+    // The / and @ menu takes the arrows, Enter, Tab and Esc while it is open.
+    if (menuOpen) {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault()
+        const step = event.key === 'ArrowDown' ? 1 : -1
+        setMenuAt((at) => (at + step + menuItems.length) % menuItems.length)
+        return
+      }
+      if ((event.key === 'Enter' && !event.shiftKey) || event.key === 'Tab') {
+        event.preventDefault()
+        pick(menuItems[menuAt] ?? menuItems[0]!)
+        return
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setMenuClosed(menuKey)
+        return
+      }
+    }
     // Tab takes the suggested next message.
     if (event.key === 'Tab' && !event.shiftKey && showSuggestion && suggestion) {
       event.preventDefault()
@@ -258,6 +345,38 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           ))}
         </div>
       )}
+      {menuOpen && mention && (
+        <div className="relative">
+          <div
+            className={`menu left-0 right-0 ${menuBelow === null ? 'bottom-1' : ''}`}
+            style={menuBelow === null ? undefined : { top: menuBelow }}
+            role="listbox" aria-label={mention.kind === 'skill' ? 'Skills' : 'Files'}>
+            <div className="px-2.5 pb-1 pt-1.5 text-[11px] uppercase tracking-wide text-ink-faint">{mention.kind === 'skill' ? 'Skills' : 'Files in this project'}</div>
+            <div className="scroll-area max-h-[240px] overflow-y-auto">
+              {menuItems.map((choice, index) => (
+                <button
+                  key={choice}
+                  type="button"
+                  role="option"
+                  aria-selected={index === menuAt}
+                  className="menu-item font-mono text-[12px]"
+                  onMouseEnter={() => setMenuAt(index)}
+                  onMouseDown={(event) => {
+                    // Keep the focus in the box; the click picks.
+                    event.preventDefault()
+                    pick(choice)
+                  }}
+                >
+                  <span className="truncate">
+                    {mention.kind === 'skill' ? '/' : '@'}
+                    {choice}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
       <Glass
         className={`composer-box p-2 ${dragging ? 'composer-box-dropping' : ''}`}
         onDragOver={(event) => {
@@ -291,7 +410,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                     ? suggestion
                     : (placeholder ?? 'What should we work on?')
           }
-          onChange={(event) => setText(event.target.value)}
+          onChange={(event) => {
+            setText(event.target.value)
+            setCaret(event.target.selectionStart ?? event.target.value.length)
+          }}
+          onSelect={(event) => setCaret(event.currentTarget.selectionStart ?? 0)}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
           rows={1}

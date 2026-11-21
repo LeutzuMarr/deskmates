@@ -239,6 +239,20 @@ export class TaskRunner {
     this.startRun(taskId)
   }
 
+  /**
+   * Replaces the task's last message with `text` (Edit) or sends it again as it was (Retry, with
+   * no text): the message and the reply after it are removed, then the message goes out fresh.
+   * File changes the old reply made stay, as in Claude; the user can undo them from the changes list.
+   */
+  async resend(taskId: string, text?: string): Promise<void> {
+    if (this.runs.has(taskId)) throw new Error('Stop the task first, then edit or retry.')
+    const previous = this.deps.repos.tasks.dropFromLastUserMessage(taskId)
+    if (previous === null) throw new Error('There is no message to edit or retry yet.')
+    const next = text?.trim() || previous
+    this.deps.repos.tasks.update(taskId, { status: 'idle', error: null })
+    await this.send(taskId, next)
+  }
+
   /** The likely next message for a task whose reply just ended, or null (see suggest.ts). */
   suggestion(taskId: string): string | null {
     return this.suggestions.get(taskId) ?? null

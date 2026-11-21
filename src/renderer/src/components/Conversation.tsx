@@ -8,7 +8,9 @@ import { quickReplies } from '../../../shared/quick-replies'
 import { BrandMark } from './Mascot'
 import { CopyButton } from './CopyButton'
 import { Thinking } from './Thinking'
-import { ArrowDown } from 'lucide-react'
+import { ArrowDown, Pencil, RotateCcw } from 'lucide-react'
+import { core } from '../lib/rpc'
+import { useStore } from '../lib/store'
 import { formatElapsed, awaitingFirstOutput } from '../lib/format'
 import { WorkingLine, WorkingPill } from './Working'
 import { currentActivity } from '../lib/steps'
@@ -35,6 +37,56 @@ interface ConversationProps {
   /** The message box (and anything shown with it), floated over the bottom of the conversation so
    *  messages scroll underneath its glass. The conversation leaves room for it at the end. */
   dock?: ReactNode
+  /** Offer Edit on the last message and Retry on the last reply (Work and Design tasks). */
+  editable?: boolean
+}
+
+/** The last message, edited in place: Enter sends the new text in its place, Esc cancels. */
+function EditBubble({ taskId, text, onDone }: { taskId: string; text: string; onDone: () => void }) {
+  const [draft, setDraft] = useState(text)
+  const showToast = useStore((st) => st.showToast)
+  const save = async (): Promise<void> => {
+    const next = draft.trim()
+    if (!next) return
+    try {
+      await core.call('tasks.resend', { id: taskId, text: next })
+      onDone()
+    } catch (error) {
+      showToast(`Couldn't send the edited message: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  return (
+    <div className="user-bubble w-[75%] max-w-[75%]">
+      <label className="sr-only" htmlFor={`edit-${taskId}`}>
+        Edit your message
+      </label>
+      <textarea
+        id={`edit-${taskId}`}
+        autoFocus
+        value={draft}
+        rows={Math.min(8, Math.max(2, draft.split('\n').length))}
+        onChange={(event) => setDraft(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+            event.preventDefault()
+            void save()
+          } else if (event.key === 'Escape') {
+            event.preventDefault()
+            onDone()
+          }
+        }}
+        className="w-full resize-none bg-transparent text-[15px] leading-normal text-ink outline-none"
+      />
+      <div className="mt-2 flex justify-end gap-2">
+        <button type="button" className="btn btn-text px-2 text-[13px]" onClick={onDone}>
+          Cancel
+        </button>
+        <button type="button" className="btn btn-ivory px-3 text-[13px]" disabled={!draft.trim()} onClick={() => void save()}>
+          Send
+        </button>
+      </div>
+    </div>
+  )
 }
 
 /** The user item that started the turn an assistant item belongs to. */
@@ -70,7 +122,16 @@ function turnText(timeline: TimelineItem[], i: number): string {
 }
 
 /** Renders a task's (or bot run's) timeline: user bubbles, assistant replies, collapsed tool activity and approval cards. */
-export function Conversation({ taskId, mode = 'task', timeline, running, emptyHint, contentClassName, pill = true, starting = null, dock }: ConversationProps) {
+export function Conversation({ taskId, mode = 'task', timeline, running, emptyHint, contentClassName, pill = true, starting = null, dock, editable = false }: ConversationProps) {
+  const [editing, setEditing] = useState<string | null>(null)
+  const showToast = useStore((st) => st.showToast)
+  const retry = async (): Promise<void> => {
+    try {
+      await core.call('tasks.resend', { id: taskId })
+    } catch (error) {
+      showToast(`Couldn't retry: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
   const scrollRef = useRef<HTMLDivElement>(null)
   const dockRef = useRef<HTMLDivElement>(null)
   const [dockHeight, setDockHeight] = useState(0)
@@ -140,10 +201,23 @@ export function Conversation({ taskId, mode = 'task', timeline, running, emptyHi
   while (i < timeline.length) {
     const item = timeline[i]
     if (item.kind === 'user') {
+      // Only the latest message can be edited, and only between replies, as in Claude.
+      const canEdit = editable && !running && i === lastUserIdx
       nodes.push(
         <div key={item.id} className="msg-row flex items-start justify-end gap-1">
-          <CopyButton text={item.text} label="Copy message" className="msg-action mt-2.5" />
-          <div className="user-bubble max-w-[75%] whitespace-pre-wrap">{item.text}</div>
+          {editing === item.id ? (
+            <EditBubble taskId={taskId} text={item.text} onDone={() => setEditing(null)} />
+          ) : (
+            <>
+              {canEdit && (
+                <button type="button" className="copy-btn msg-action mt-2.5" aria-label="Edit message" title="Edit message" onClick={() => setEditing(item.id)}>
+                  <Pencil size={13} aria-hidden="true" />
+                </button>
+              )}
+              <CopyButton text={item.text} label="Copy message" className="msg-action mt-2.5" />
+              <div className="user-bubble max-w-[75%] whitespace-pre-wrap">{item.text}</div>
+            </>
+          )}
         </div>
       )
       i++
@@ -188,6 +262,12 @@ export function Conversation({ taskId, mode = 'task', timeline, running, emptyHi
             {finished && (
               <div className={`mt-1.5 flex items-center gap-1 ${isLast ? '' : 'msg-action'}`}>
                 <CopyButton text={() => turnText(timeline, at)} label="Copy reply" showLabel />
+                {isLast && editable && !running && (
+                  <button type="button" className="copy-btn" aria-label="Retry this reply" title="Retry" onClick={() => void retry()}>
+                    <RotateCcw size={12} aria-hidden="true" />
+                    Retry
+                  </button>
+                )}
               </div>
             )}
           </div>

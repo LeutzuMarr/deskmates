@@ -152,6 +152,7 @@ export function DesignView({ projectId }: { projectId: string }) {
       <div ref={containerRef} className="flex min-h-0 flex-1">
         <div className="flex min-w-0 shrink-0 flex-col" style={{ width: clampedChatWidth }}>
           <Conversation
+            editable
             taskId={task?.id ?? ''}
             timeline={timeline}
             running={running}

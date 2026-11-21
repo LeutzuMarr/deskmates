@@ -659,6 +659,8 @@ export interface RpcMethods {
   'tasks.stop': { params: { id: string }; result: null }
   /** Messages sent while the task works, waiting to go out when its reply ends. */
   'tasks.queued': { params: { id: string }; result: string[] }
+  /** Edit (with text) or Retry (without): replaces the last message and its reply, then sends again. */
+  'tasks.resend': { params: { id: string; text?: string }; result: null }
   /** The likely next message for the task, when its last reply ended (Tab accepts it). */
   'tasks.suggestion': { params: { id: string }; result: string | null }
   /** Takes the queued messages back (to edit them in the box); returns them. */
@@ -686,6 +688,8 @@ export interface RpcMethods {
   'designs.save': { params: { projectId: string; html: string; reason: string; path?: string }; result: { updatedAt: number } }
   /** Lists the design's viewable pages (.html and .dc.html), newest first. */
   'designs.files': { params: { projectId: string }; result: DesignFile[] }
+  /** Project files matching what follows @ in the message box, relative to the project folder. */
+  'projects.findFiles': { params: { projectId: string; query: string }; result: string[] }
 
   'bots.list': { params: NoParams; result: Bot[] }
   'bots.create': { params: { name: string; instructions?: string; model?: ModelRef | null }; result: Bot }

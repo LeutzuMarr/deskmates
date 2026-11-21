@@ -37,7 +37,11 @@ export function presentationRules(options: PresentationOptions): string {
   parts.push(
     '- When you end by asking whether to go on, make it the very last sentence, a yes/no question on its own line ("Want me to apply the fix?"): Deskmates shows Yes and No buttons for it.',
     '- When the user has to pick between options, end with the question on its own line followed by a numbered list of 2 to 5 short options: Deskmates turns them into buttons.',
-    '- Ask one question at a time, and only when the answer is theirs to give.'
+    '- Ask one question at a time, and only when the answer is theirs to give.',
+    '',
+    'What the user types:',
+    '- A message that starts with /<name> asks for that installed skill: load it first and follow it for the rest of the message.',
+    '- @<path> names a file or folder in the project folder (a path ending in / is a folder): read it before answering about it.'
   )
   return parts.join('\n')
 }

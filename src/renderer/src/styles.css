@@ -711,6 +711,19 @@ select {
   margin: 0 0 12px;
   padding-left: 24px;
 }
+/* Tailwind's reset takes list markers away; replies need their bullets and numbers. */
+.markdown ul {
+  list-style: disc;
+}
+.markdown ul ul {
+  list-style: circle;
+}
+.markdown ol {
+  list-style: decimal;
+}
+.markdown li::marker {
+  color: var(--ink-muted);
+}
 .markdown li + li {
   margin-top: 4px;
 }
@@ -1138,8 +1151,15 @@ dialog:modal {
   transform-origin: 50% 90%;
   animation: dm-wave 1.6s var(--ease-out) 200ms 1;
 }
+/* `backwards`, not `both`: a fill that outlives the animation keeps a transform on the section,
+   which makes it its own stacking layer, and the sections after it then paint over any menu
+   opened inside it (the project picker under the Home box did exactly that). */
 .greet-in {
-  animation: dm-rise 520ms var(--ease-out) both;
+  position: relative;
+  animation: dm-rise 520ms var(--ease-out) backwards;
+}
+.greet-in:has(.menu) {
+  z-index: 40;
 }
 .greet-in-1 {
   animation-delay: 60ms;

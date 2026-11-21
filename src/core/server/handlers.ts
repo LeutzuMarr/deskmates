@@ -9,6 +9,7 @@ import type { DuoProfile } from '../../shared/duo'
 import { freebuffModels, setFreebuffModels, type FreebuffModelList } from '../../shared/freebuff'
 import { removeWidgetsOf } from '../tools/widgets'
 import { promptToolInfos, runTool } from '../tools/shared-prompt-tools'
+import { findFiles } from '../fs/find-files'
 import type { ToolSet } from 'ai'
 import { parseClientFile, type GoogleAuth } from '../google/auth'
 import type { When } from '../../shared/protocol'
@@ -345,6 +346,10 @@ export function createHandlers(services: HandlerServices): Handlers {
     'tasks.send': (params: { id: string; text: string }) => runner.send(params.id, params.text),
 
     'tasks.queued': (params: { id: string }) => runner.queuedMessages(params.id),
+    'tasks.resend': async (params: { id: string; text?: string }) => {
+      await runner.resend(params.id, params.text)
+      return null
+    },
     'tasks.suggestion': (params: { id: string }) => runner.suggestion(params.id),
     'tasks.unqueue': (params: { id: string }) => runner.unqueue(params.id),
     'tasks.stop': (params: { id: string }) => {
@@ -417,6 +422,7 @@ export function createHandlers(services: HandlerServices): Handlers {
       return readDesign(project.folder)
     },
 
+    'projects.findFiles': (params: { projectId: string; query: string }) => findFiles(repos.projects.require(params.projectId).folder, params.query ?? ''),
     'designs.files': (params: { projectId: string }) => listDesignFiles(requireDesign(params.projectId).folder),
 
     'designs.save': (
