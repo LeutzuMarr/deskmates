@@ -8,7 +8,6 @@
 import { tool, type Tool, type ToolSet } from 'ai'
 import { approvalFor } from '../engine/approvals'
 import { promptToolSpecs } from '../engine/my-prompt'
-import { CHROME_TOOL_NAMES, chromeToolInfos } from './chrome'
 
 /** One prompt tool as an MCP server lists it: the prompt's own description and JSON schema. */
 export interface PromptToolInfo {
@@ -44,8 +43,6 @@ export function promptToolInfos(): PromptToolInfo[] {
     const schema = spec.schema as Record<string, unknown>
     out.push({ name, description: spec.description || `The ${name} tool from the operating prompt.`, inputSchema: { type: 'object', ...schema } })
   }
-  // The user's own Chrome, under Claude in Chrome's names (core/tools/chrome.ts).
-  out.push(...chromeToolInfos())
   return out
 }
 
@@ -86,7 +83,7 @@ export function guardRiskyTools(tools: ToolSet, ask: AskToRun): ToolSet {
 
 /** Only the tools the prompt names, out of a run's full tool set. */
 export function pickPromptTools(all: ToolSet): ToolSet {
-  const names = new Set<string>([...promptToolSpecs().keys(), ...APP_TOOL_NAMES, ...CHROME_TOOL_NAMES])
+  const names = new Set<string>([...promptToolSpecs().keys(), ...APP_TOOL_NAMES])
   const out: ToolSet = {}
   for (const [name, t] of Object.entries(all)) if (names.has(name)) out[name] = t
   return out
