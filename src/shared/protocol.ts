@@ -657,6 +657,12 @@ export interface RpcMethods {
   'tasks.delete': { params: { id: string }; result: null }
   'tasks.send': { params: { id: string; text: string }; result: null }
   'tasks.stop': { params: { id: string }; result: null }
+  /** Messages sent while the task works, waiting to go out when its reply ends. */
+  'tasks.queued': { params: { id: string }; result: string[] }
+  /** The likely next message for the task, when its last reply ended (Tab accepts it). */
+  'tasks.suggestion': { params: { id: string }; result: string | null }
+  /** Takes the queued messages back (to edit them in the box); returns them. */
+  'tasks.unqueue': { params: { id: string }; result: string[] }
   'approvals.respond': {
     params: { taskId: string; approvalId: string; approved: boolean; always?: boolean }
     result: null
@@ -842,6 +848,11 @@ export interface RpcMethods {
   'duo.todo.remove': { params: { id: string }; result: DuoState }
   /** One Duo tool, for Duo's Freebuff through the MCP bridge. */
   'duo.tool': { params: { name: string; input: Record<string, unknown> }; result: { text: string } }
+  /** The operating prompt's tools, for command-line agents through the deskmates-prompt MCP server:
+   *  each with the prompt's description and JSON schema. */
+  'promptTools.list': { params: NoParams; result: Array<{ name: string; description: string; inputSchema: Record<string, unknown> }> }
+  /** Runs one of them for an agent working in `folder` (risky ones ask the user in the app first). */
+  'promptTools.call': { params: { folder: string; agent?: string; name: string; input: Record<string, unknown> }; result: { text: string } }
   /** Deskmates from anywhere: paired phones over the encrypted relay. */
   'remote.status': { params: NoParams; result: RemoteStatusInfo }
   'remote.pairStart': { params: NoParams; result: { url: string; until: number } }
@@ -919,6 +930,9 @@ export type CoreEvent =
   | { type: 'task.deleted'; taskId: string; projectId: string }
   | { type: 'task.item'; taskId: string; item: TimelineItem }
   | { type: 'task.timeline'; taskId: string; timeline: TimelineItem[] }
+  | { type: 'task.queued'; taskId: string; queued: string[] }
+  /** The likely next message once a reply ends (null clears it). */
+  | { type: 'task.suggestion'; taskId: string; text: string | null }
   | { type: 'changes.updated'; taskId: string; changes: FileChange[] }
   | { type: 'memory.updated'; projectId: string; memories: Memory[] }
   | { type: 'freebuff.models'; list: FreebuffModelList }

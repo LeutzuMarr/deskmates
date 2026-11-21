@@ -20,6 +20,10 @@ import { patientModel } from '../models/patience'
 import { PROVIDER_LABELS } from '../../shared/protocol'
 import { approvalFor } from './approvals'
 import { compactHistory } from './history'
+import { suggestNextMessage } from './suggest'
+import { historyBudgetChars, toolsChars } from '../models/context'
+import { guardRiskyTools, pickPromptTools } from '../tools/shared-prompt-tools'
+import { resolve as resolvePath } from 'node:path'
 import { buildInstructions, readProjectInstructions } from './instructions'
 import { LiveTimeline } from './live'
 import { buildTimeline, danglingToolCalls, pendingApprovals } from './timeline'
@@ -112,6 +116,8 @@ interface RunState {
 export class TaskRunner {
   private readonly deps: RunnerDeps
   private readonly runs = new Map<string, RunState>()
+  private readonly queued = new Map<string, string[]>()
+  private readonly suggestions = new Map<string, string>()
   /** In-memory collected (but not yet appended) approval answers. */
   private readonly answers = new Map<string, ApprovalAnswer[]>()
   private readonly idleWaiters = new Map<string, Array<() => void>>()
@@ -126,8 +132,15 @@ export class TaskRunner {
   async send(taskId: string, text: string): Promise<void> {
     const task = this.deps.repos.tasks.require(taskId)
 
+    // The suggestion is for the message the user hasn't written yet; now they have.
+    if (this.suggestions.delete(taskId)) this.deps.bus.emit({ type: 'task.suggestion', taskId, text: null })
+
+    // Sent while it works: kept, shown as queued, and sent as soon as this reply ends.
     if (this.runs.has(taskId)) {
-      throw new Error('This task is already working. Stop it first or wait.')
+      const queued = [...(this.queued.get(taskId) ?? []), text]
+      this.queued.set(taskId, queued)
+      this.deps.bus.emit({ type: 'task.queued', taskId, queued })
+      return
     }
     if (task.status === 'waiting-approval') {
       throw new Error('Answer the pending approval first.')
@@ -226,6 +239,41 @@ export class TaskRunner {
     this.startRun(taskId)
   }
 
+  /** The likely next message for a task whose reply just ended, or null (see suggest.ts). */
+  suggestion(taskId: string): string | null {
+    return this.suggestions.get(taskId) ?? null
+  }
+
+  private async suggest(taskId: string): Promise<void> {
+    const { repos, bus } = this.deps
+    try {
+      const task = repos.tasks.require(taskId)
+      const project = repos.projects.require(task.projectId)
+      const resolved = this.deps.models.resolve(project.model)
+      const messages = repos.tasks.messages(taskId).map((m) => m.message)
+      const text = await suggestNextMessage(messages, resolved.cli ? null : resolved.model)
+      // A run that started meanwhile (the user typed their own message) makes it moot.
+      if (!text || this.runs.has(taskId)) return
+      this.suggestions.set(taskId, text)
+      bus.emit({ type: 'task.suggestion', taskId, text })
+    } catch {
+      // No suggestion; nothing to report.
+    }
+  }
+
+  /** Messages the user sent while a task was working, in order, waiting for its reply to end. */
+  queuedMessages(taskId: string): string[] {
+    return this.queued.get(taskId) ?? []
+  }
+
+  /** Takes back the queued messages (the user pulled them into the box to edit). */
+  unqueue(taskId: string): string[] {
+    const queued = this.queued.get(taskId) ?? []
+    this.queued.delete(taskId)
+    this.deps.bus.emit({ type: 'task.queued', taskId, queued: [] })
+    return queued
+  }
+
   stop(taskId: string): void {
     const state = this.runs.get(taskId)
     if (state) {
@@ -281,6 +329,72 @@ export class TaskRunner {
     await Promise.all(taskIds.map((id) => this.whenIdle(id)))
   }
 
+  /**
+   * The operating prompt's tools for an agent working in `folder` outside this tool loop: a
+   * command-line agent (through the deskmates-prompt MCP server), a bot or Duo. The folder's Work
+   * project is used when there is one, else the project of the one command-line turn in flight,
+   * else the folder itself. File changes land on the running task when there is one, so the user
+   * can see and undo them there. Risky tools ask the user in the app first.
+   */
+  promptToolsFor(folder: string, agent: string, options: { guard?: boolean } = {}): ToolSet {
+    const { repos, bus, deps } = { repos: this.deps.repos, bus: this.deps.bus, deps: this.deps }
+    const norm = (path: string): string => resolvePath(path).replace(/[\\/]+$/, '').toLowerCase()
+    const projects = repos.projects.list().filter((p) => p.kind !== 'design')
+    const runningTasks = [...this.runs.keys()].map((id) => repos.tasks.get(id)).filter((t): t is NonNullable<typeof t> => Boolean(t))
+    let project = folder ? projects.find((p) => norm(p.folder) === norm(folder)) : undefined
+    if (!project) {
+      const cliRuns = runningTasks.map((t) => repos.projects.get(t.projectId)).filter((p): p is NonNullable<typeof p> => Boolean(p) && p!.kind !== 'design' && this.deps.models.resolve(p!.model).cli === true)
+      if (cliRuns.length === 1) project = cliRuns[0]
+    }
+    const running = project ? runningTasks.find((t) => t.projectId === project!.id) : undefined
+    const taskId = running?.id ?? `bridge:${project?.id ?? norm(folder)}`
+    const resolved = this.deps.models.resolve(project?.model ?? null)
+    const root = project?.folder ?? folder
+    if (!root) throw new Error('No folder to work in: start this agent in a Deskmates project folder.')
+    const ctx: ToolContext = {
+      taskId,
+      projectId: project?.id ?? '',
+      root,
+      changes: deps.changes,
+      memories: repos.memories,
+      modelRef: { provider: resolved.provider, modelId: resolved.modelId },
+      ...(deps.skills ? { skills: deps.skills } : {}),
+      ...(deps.connectors ? { connectors: deps.connectors } : {}),
+      ...(deps.plugins ? { plugins: deps.plugins } : {}),
+      ...(deps.render ? { render: deps.render } : {}),
+      ...(deps.browser ? { browser: deps.browser } : {}),
+      ...(deps.getSchedules?.() && project ? { schedules: deps.getSchedules() } : {}),
+      agentName: agent,
+      cliModel: true,
+      ...(deps.dataDir ? { dataDir: deps.dataDir } : {}),
+      ...(deps.google ? { google: deps.google } : {}),
+      chats: chatHistory(repos),
+      projectKind: 'work',
+      // A command-line turn's plan shows on its task, at the end of the chat, as the Work tab's does.
+      onPlan: (items) => {
+        if (!running) return
+        repos.tasks.update(taskId, { plan: items })
+        bus.emit({ type: 'task.updated', task: repos.tasks.require(taskId) })
+      },
+      onNotify: (title, body) => bus.emit({ type: 'notify', title, body }),
+      onChangesUpdated: () => {
+        if (running) bus.emit({ type: 'changes.updated', taskId, changes: repos.changes.list(taskId) })
+      },
+      onMemoryUpdated: () => {
+        if (project) bus.emit({ type: 'memory.updated', projectId: project.id, memories: repos.memories.list(project.id) })
+      }
+    }
+    const browser = deps.browser
+    const ask = async (name: string, detail: string): Promise<boolean> => {
+      if (!browser) return false
+      const answer = await browser.ask({ kind: 'action', domain: 'Deskmates', detail, agent, runKey: taskId }, 10 * 60_000)
+      return answer === 'allow-once' || answer === 'always'
+    }
+    const tools = pickPromptTools(deps.createTools(ctx))
+    // A caller with its own approval step (a bot run's approval cards) asks there instead.
+    return options.guard === false ? tools : guardRiskyTools(tools, ask)
+  }
+
   private startRun(taskId: string): void {
     const controller = new AbortController()
     const state: RunState = { controller, promise: Promise.resolve() }
@@ -294,7 +408,9 @@ export class TaskRunner {
 
     try {
       // Set status running
-      const runningTask = repos.tasks.update(taskId, { status: 'running', error: null })
+      // A finished task list belongs to the request before this one: a new request starts a new list.
+      const finishedPlan = repos.tasks.require(taskId).plan.every((item) => item.status === 'done')
+      const runningTask = repos.tasks.update(taskId, { status: 'running', error: null, ...(finishedPlan ? { plan: [] } : {}) })
       bus.emit({ type: 'task.updated', task: runningTask })
 
       // Read task, project and settings
@@ -410,7 +526,10 @@ export class TaskRunner {
 
       // Stream
       const stored = repos.tasks.messages(taskId)
-      const messages = compactHistory(stored.map((s) => s.message))
+      // History sized to this model's window, after the system prompt and tool list take their share.
+      const messages = compactHistory(stored.map((s) => s.message), {
+        maxTotalChars: historyBudgetChars({ provider, modelId, instructionsChars: instructions.length, toolsChars: toolsChars(tools) })
+      })
 
       const result = await agent.stream({
         messages,
@@ -493,6 +612,17 @@ export class TaskRunner {
         this.idleWaiters.delete(taskId)
         for (const resolve of waiters) resolve()
       }
+
+      // What the user sent while this ran goes out now, as the next message, unless it errored and
+      // needs them to look first (it stays queued, shown in the chat, until they send again).
+      const queued = this.queued.get(taskId)
+      if (queued?.length && repos.tasks.require(taskId).status !== 'waiting-approval') {
+        this.queued.delete(taskId)
+        bus.emit({ type: 'task.queued', taskId, queued: [] })
+        void this.send(taskId, queued.join('\n\n')).catch((error: unknown) => console.error('[core] sending the queued message failed', error))
+      } else if (repos.tasks.require(taskId).status === 'idle' && !controller.signal.aborted) {
+        void this.suggest(taskId)
+      }
     }
   }
 
@@ -541,7 +671,10 @@ export class TaskRunner {
         signal: controller.signal,
         onItem: (item) => {
           if (item.kind === 'assistant') {
-            live.appendText(item.text)
+            // Freebuff sends each paragraph whole and grows it in place by id, so it shows where it
+            // was said, between steps; the other CLIs send pieces of one reply to append.
+            if (resolved.provider === 'freebuff') bus.emit({ type: 'task.item', taskId, item })
+            else live.appendText(item.text)
             return
           }
           // A CLI turn's first output can be a long way off, so its tool activity (reading the

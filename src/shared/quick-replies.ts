@@ -26,7 +26,33 @@ function cleanOption(raw: string): string {
   return text.replace(/[.;,]$/, '').trim()
 }
 
+/** A question answered with yes or no ("Want me to continue?", "Should I send it?"). */
+const YES_NO = /^(?:so,?\s+|and\s+|ok(?:ay)?,?\s+)?(?:should|shall|do|does|did|would|will|want|can|could|may|is|are|ready|ok|okay|good to|happy for)\b/i
+
+/**
+ * The yes/no question a reply ends on, as its last sentence, or null. A reply that closes by asking
+ * to go on gets Yes and No buttons, so going on is one click.
+ */
+export function yesNoQuestion(text: string): string | null {
+  const lines = text.replace(/\r/g, '').split('\n').map((l) => l.trim()).filter(Boolean)
+  const last = lines.at(-1)
+  if (!last || !last.endsWith('?') || ITEM.test(last)) return null
+  // The last sentence of the last line: "Done. Want me to push it?" asks "Want me to push it?".
+  const sentence = (last.match(/[^.!?]*\?$/)?.[0] ?? last).replace(/\*\*/g, '').trim()
+  if (!YES_NO.test(sentence)) return null
+  // "Should I use A or B?" is a choice, not a yes/no.
+  if (/\bor\b/i.test(sentence) && !/\bor not\b/i.test(sentence)) return null
+  return sentence
+}
+
 export function quickReplies(text: string): QuickReplies | null {
+  const listed = listedReplies(text)
+  if (listed) return listed
+  const question = yesNoQuestion(text)
+  return question ? { question, options: ['Yes', 'No'] } : null
+}
+
+function listedReplies(text: string): QuickReplies | null {
   const lines = text.replace(/\r/g, '').split('\n').map((l) => l.trimEnd())
   while (lines.length && !lines[lines.length - 1]!.trim()) lines.pop()
   if (lines.length === 0) return null

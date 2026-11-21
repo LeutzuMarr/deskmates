@@ -100,7 +100,8 @@ describe("the operating prompt's tools", () => {
     }
     const ctx = { taskId: 't', projectId: 'p', root: dir, dataDir: dir } as unknown as ToolContext
     const tools = promptTools(ctx, base)
-    expect(Object.keys(tools).sort()).toEqual(['chart_display_v0', 'create_file', 'memory_write'])
+    // Gmail isn't connected in this run, so its tool exists but says how to connect instead of guessing.
+    expect(Object.keys(tools).sort()).toEqual(['chart_display_v0', 'create_file', 'mcp__Gmail__send_message', 'memory_write'])
     const run = (name: string, input: unknown) => (tools[name] as unknown as { execute: (i: unknown, o: unknown) => Promise<unknown> }).execute(input, {})
     await run('create_file', { description: 'notes', path: 'notes.md', file_text: 'hi' })
     expect(written).toEqual([{ file_path: 'notes.md', content: 'hi' }])
@@ -110,6 +111,7 @@ describe("the operating prompt's tools", () => {
     const page = readFileSync(join(dir, 'widgets', chart.widget.split('/').pop()!), 'utf8')
     expect(page).toContain('<svg')
     expect(page).toContain('deskmates-widget-height')
+    await expect(run('mcp__Gmail__send_message', {})).rejects.toThrow(/sign in with Google/)
   })
 })
 

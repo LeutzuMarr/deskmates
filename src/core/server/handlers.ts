@@ -8,6 +8,8 @@ import type { RemoteAccess } from '../phone/remote'
 import type { DuoProfile } from '../../shared/duo'
 import { freebuffModels, setFreebuffModels, type FreebuffModelList } from '../../shared/freebuff'
 import { removeWidgetsOf } from '../tools/widgets'
+import { promptToolInfos, runTool } from '../tools/shared-prompt-tools'
+import type { ToolSet } from 'ai'
 import { parseClientFile, type GoogleAuth } from '../google/auth'
 import type { When } from '../../shared/protocol'
 import { randomInt, randomUUID } from 'node:crypto'
@@ -108,6 +110,8 @@ export interface HandlerServices {
   /** Duo, and its tools for the MCP bridge. */
   duo?: DuoService
   duoTools?: () => Record<string, unknown>
+  /** The operating prompt's tools for an agent working in a folder (see TaskRunner.promptToolsFor). */
+  promptToolsFor?: (folder: string, agent: string) => ToolSet
   /** Scheduled tasks of Work and Design projects. */
   taskSchedules?: TaskScheduler
   /** Duo's approved Outbox item that may be sent on this site now, if any (the browser's send rule). */
@@ -340,6 +344,9 @@ export function createHandlers(services: HandlerServices): Handlers {
 
     'tasks.send': (params: { id: string; text: string }) => runner.send(params.id, params.text),
 
+    'tasks.queued': (params: { id: string }) => runner.queuedMessages(params.id),
+    'tasks.suggestion': (params: { id: string }) => runner.suggestion(params.id),
+    'tasks.unqueue': (params: { id: string }) => runner.unqueue(params.id),
     'tasks.stop': (params: { id: string }) => {
       runner.stop(params.id)
       return null
@@ -877,6 +884,12 @@ export function createHandlers(services: HandlerServices): Handlers {
       if (!chosen?.execute) throw new Error(`Unknown Duo tool: ${params.name}`)
       const input = chosen.inputSchema?.parse ? chosen.inputSchema.parse(params.input ?? {}) : (params.input ?? {})
       return { text: String(await chosen.execute(input, { toolCallId: 'bridge', messages: [] })) }
+    },
+    'promptTools.list': () => promptToolInfos(),
+    'promptTools.call': async (params: { folder: string; agent?: string; name: string; input: Record<string, unknown> }) => {
+      if (!services.promptToolsFor) throw new Error("The operating prompt's tools aren't available in this Deskmates.")
+      const tools = services.promptToolsFor(params.folder, params.agent?.trim() || 'Your coding agent')
+      return { text: await runTool(tools, params.name, params.input ?? {}) }
     },
 
     'taskSchedules.list': (params: { projectId?: string }) => requireSchedules().list(params.projectId),

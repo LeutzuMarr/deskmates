@@ -21,6 +21,7 @@ import { MemoryFiles } from './memory-files'
 import { webFetchText, webSearchResults } from './web'
 import { displayBody, imageGallery, saveWidget, widgetPage } from './widgets'
 import { WIDGET_TOOL_NAMES } from '../../shared/widgets'
+import { claudeDocsImplementations } from './claude-docs'
 import { join } from 'node:path'
 
 const USER_AGENT = 'Deskmates/1.0 (desktop assistant)'
@@ -399,7 +400,16 @@ function implementations(ctx: ToolContext, base: ToolSet): Record<string, Run> {
     }
   }
   for (const name of DISPLAY_TOOLS) impl[name] = display(name)
+  Object.assign(impl, claudeDocsImplementations(ctx, need))
   return impl
+}
+
+/** Why a tool the prompt names can't run here yet, in words the model can pass on to the user. */
+export function unavailableReason(name: string): string {
+  if (/^mcp__(Gmail|Google_Calendar|Google_Drive)__/.test(name)) {
+    return `${name} needs Google: the user hasn't signed in with Google in Deskmates yet. Nothing was read or sent. Tell the user to sign in with Google (Extras → Connectors → Google account → Sign in with Google) and try again; don't guess what their ${name.split('__')[1]!.replace('_', ' ')} holds.`
+  }
+  return `${name} isn't set up in this run, so nothing was done. Tell the user it isn't available here and use another tool for the job; don't describe a result you didn't get.`
 }
 
 /**
@@ -411,6 +421,14 @@ export function promptTools(ctx: ToolContext, base: ToolSet): ToolSet {
   if (specs.size === 0) return {}
   const impl = implementations(ctx, base)
   const out: ToolSet = {}
+  // Every tool the prompt describes exists in the run, so the model never has to imagine one. A tool
+  // whose service isn't set up (Google before sign-in) answers with what to do, instead of being absent.
+  for (const [name, spec] of specs) {
+    if (impl[name] || name in base || !spec.schema) continue
+    impl[name] = async () => {
+      throw new Error(unavailableReason(name))
+    }
+  }
   for (const [name, run] of Object.entries(impl)) {
     const spec = specs.get(name)
     if (!spec || name in base) continue

@@ -67,6 +67,18 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const task = taskId ? (tasksByProject[projectId] ?? []).find((t) => t.id === taskId) : undefined
   const running = task?.status === 'running'
   const awaitingApproval = task?.status === 'waiting-approval'
+  const queued = useStore((s) => (taskId ? s.queued[taskId] : undefined)) ?? []
+  // The likely next message, greyed out in the empty box once a reply ends; Tab puts it in.
+  const suggestion = useStore((s) => (taskId ? s.suggestions[taskId] : undefined)) ?? null
+  const showSuggestion = Boolean(suggestion) && !text && !running && !awaitingApproval && !selection
+  const timeline = useStore((s) => (taskId ? s.timelines[taskId] : undefined))
+  /** What the user sent before in this task, newest first, for the up arrow. */
+  const sentBefore = (): string[] =>
+    (timeline ?? [])
+      .filter((item) => item.kind === 'user')
+      .map((item) => (item as { text: string }).text)
+      .reverse()
+  const historyAt = useRef(-1)
   useEffect(() => {
     const focus = (): void => textareaRef.current?.focus()
     window.addEventListener(FOCUS_COMPOSER_EVENT, focus)
@@ -141,6 +153,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         else navigate({ name: 'task', projectId, taskId: created.id })
       }
       setText('')
+      historyAt.current = -1
       onClearSelection?.()
     } catch (error) {
       showToast(`Couldn't send the message: ${error instanceof Error ? error.message : String(error)}`)
@@ -158,7 +171,51 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     }
   }
 
+  /** Puts text in the box with the cursor at its end. */
+  const fill = (value: string): void => {
+    setText(value)
+    requestAnimationFrame(() => {
+      const el = textareaRef.current
+      el?.focus()
+      el?.setSelectionRange(value.length, value.length)
+    })
+  }
+
+  /** Takes the queued messages back into the box to change them. */
+  const editQueued = async (): Promise<void> => {
+    if (taskId === undefined) return
+    try {
+      const back = await core.call('tasks.unqueue', { id: taskId })
+      if (back.length) fill([back.join('\n\n'), text].filter(Boolean).join('\n\n'))
+    } catch (error) {
+      showToast(`Couldn't take the message back: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
+    // Tab takes the suggested next message.
+    if (event.key === 'Tab' && !event.shiftKey && showSuggestion && suggestion) {
+      event.preventDefault()
+      fill(suggestion)
+      return
+    }
+    // The up arrow in an empty box (or one still showing a recalled message) brings back earlier
+    // messages, newest first; the down arrow walks forward again.
+    const el = textareaRef.current
+    const atStart = !el || (el.selectionStart === 0 && el.selectionEnd === 0)
+    const past = sentBefore()
+    if (event.key === 'ArrowUp' && (!text || (historyAt.current >= 0 && atStart)) && past.length > 0) {
+      event.preventDefault()
+      historyAt.current = Math.min(historyAt.current + 1, past.length - 1)
+      setText(past[historyAt.current]!)
+      return
+    }
+    if (event.key === 'ArrowDown' && historyAt.current >= 0 && text === past[historyAt.current]) {
+      event.preventDefault()
+      historyAt.current -= 1
+      setText(historyAt.current >= 0 ? past[historyAt.current]! : '')
+      return
+    }
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault()
       void send()
@@ -181,6 +238,24 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           >
             <X size={12} aria-hidden="true" />
           </button>
+        </div>
+      )}
+      {queued.length > 0 && (
+        <div className="mb-2 flex flex-col gap-1.5" aria-label="Queued messages">
+          {queued.map((message, index) => (
+            <div
+              key={`${index}-${message.slice(0, 20)}`}
+              className="flex items-start gap-2 rounded-xl border border-dashed border-rule px-3 py-2 text-[13px] text-ink-muted"
+            >
+              <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">{message}</span>
+              <span className="shrink-0 text-[12px] text-ink-faint">Queued · sends when this reply ends</span>
+              {index === queued.length - 1 && (
+                <button type="button" className="btn btn-text shrink-0 px-0 text-[12px]" onClick={() => void editQueued()}>
+                  Edit
+                </button>
+              )}
+            </div>
+          ))}
         </div>
       )}
       <Glass
@@ -212,7 +287,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                 ? 'Drop to add the file’s path'
                 : running
                   ? 'Reply while it works, or press Esc to stop'
-                  : (placeholder ?? 'What should we work on?')
+                  : showSuggestion && suggestion
+                    ? suggestion
+                    : (placeholder ?? 'What should we work on?')
           }
           onChange={(event) => setText(event.target.value)}
           onKeyDown={onKeyDown}
@@ -221,7 +298,14 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           className="w-full resize-none bg-transparent px-2 pt-1 text-[15px] leading-normal text-ink outline-none placeholder:text-ink-faint"
         />
         <div className="mt-2 flex items-center justify-between gap-2">
-          <ModelPicker projectId={projectId} />
+          <div className="flex min-w-0 items-center gap-2">
+            <ModelPicker projectId={projectId} />
+            {showSuggestion && (
+              <span className="truncate text-[12px] text-ink-faint">
+                <kbd className="kbd">Tab</kbd> to use the suggestion
+              </span>
+            )}
+          </div>
           {running ? (
             <button
               type="button"

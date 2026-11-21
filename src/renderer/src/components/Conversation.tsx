@@ -220,6 +220,22 @@ export function Conversation({ taskId, mode = 'task', timeline, running, emptyHi
       i++
       continue
     }
+    // A sentence the agent said between steps is chat text the user reads, not a step line.
+    if (item.toolName === 'narration') {
+      const said = String((item.input as { text?: unknown } | undefined)?.text ?? '').trim()
+      if (said) {
+        nodes.push(
+          <div key={item.id} className="msg-row flex gap-3">
+            <div className="w-5 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <AssistantText text={said} />
+            </div>
+          </div>
+        )
+      }
+      i++
+      continue
+    }
     if (item.state === 'awaiting-approval') {
       nodes.push(<ApprovalCard key={item.id} mode={mode} id={taskId} item={item} />)
       i++
@@ -228,7 +244,7 @@ export function Conversation({ taskId, mode = 'task', timeline, running, emptyHi
     const group: TimelineItem[] = []
     while (i < timeline.length) {
       const current = timeline[i]
-      if (current.kind !== 'tool' || current.state === 'awaiting-approval' || CARD_TOOLS.has(current.toolName)) break
+      if (current.kind !== 'tool' || current.state === 'awaiting-approval' || CARD_TOOLS.has(current.toolName) || current.toolName === 'narration') break
       group.push(current)
       i++
     }

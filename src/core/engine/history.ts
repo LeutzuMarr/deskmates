@@ -4,6 +4,9 @@
  */
 import type { ModelMessage } from 'ai'
 
+/** Put before the oldest turn still sent, once older turns were dropped to fit the model. */
+export const DROPPED_NOTE = '[Earlier messages in this chat were left out to fit the model. If you need something from them, ask the user or look it up again; do not guess what they said.]'
+
 export interface CompactHistoryOptions {
   keepRecentTurns?: number
   maxOldOutputChars?: number
@@ -58,6 +61,7 @@ export function compactHistory(messages: ModelMessage[], options?: CompactHistor
   }
 
   // Drop oldest turns while total is too large and more than one turn remains
+  let dropped = false
   while (JSON.stringify(result).length > maxTotalChars) {
     // Recompute turn starts on current result
     const currentTurnStarts: number[] = []
@@ -71,6 +75,14 @@ export function compactHistory(messages: ModelMessage[], options?: CompactHistor
     // Drop everything from the start up to (but not including) the next user message
     const secondTurnStart = currentTurnStarts[1]
     result = result.slice(secondTurnStart)
+    dropped = true
+  }
+
+  // Say that turns were left out, so the model doesn't answer as if it remembered them.
+  if (dropped && result.length > 0) {
+    const first = result[0] as any
+    const text = { type: 'text', text: DROPPED_NOTE }
+    result[0] = { ...first, content: typeof first.content === 'string' ? `${DROPPED_NOTE}\n\n${first.content}` : [text, ...(first.content ?? [])] }
   }
 
   return result

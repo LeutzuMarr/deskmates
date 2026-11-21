@@ -781,20 +781,36 @@ select {
   border: 2px solid var(--ink-faint);
   flex-shrink: 0;
 }
-.plan-half {
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 50%;
-  background: var(--clay);
+/* Pending: a dashed ring. In progress: an arc that turns. Done: a filled ring with a check. */
+.plan-pending {
+  border-style: dashed;
+  border-width: 1.5px;
 }
 .plan-mark-active {
-  border-color: var(--clay);
+  border-color: var(--ink);
+  border-right-color: transparent;
+  border-bottom-color: transparent;
+  animation: dm-spin 0.9s linear infinite;
 }
 .plan-done {
   background: var(--olive);
   border-color: var(--olive);
+}
+.plan-done::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 0.5px;
+  width: 3px;
+  height: 6px;
+  border: solid var(--card);
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .plan-mark-active {
+    animation: none;
+  }
 }
 
 /* ---- Error bar ---- */

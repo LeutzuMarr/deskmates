@@ -13,6 +13,7 @@ import { join } from 'node:path'
 import { tool } from 'ai'
 import { z } from 'zod'
 import { promptsDir } from './instructions'
+import { GROUNDING_RULES } from './grounding'
 
 export const MY_PROMPT_FILE = join('my-prompt', 'my-prompt.md')
 
@@ -72,13 +73,18 @@ export function myPromptSection(title: string, path = myPromptPath()): string | 
  * What an agent is given: the first section in full and how to read the rest. `readHow` says how
  * this agent reads a section (a tool name, or the file path and line numbers for a command-line agent).
  */
-export function myPromptBrief(readHow: 'tool' | 'file' | 'none', path = myPromptPath()): string | null {
+/**
+ * `promptTools`: the run really has the prompt's tools under their own names (the Work tab on an API
+ * model, bots, Duo). 'mcp': a command-line agent that reaches them through the deskmates-prompt MCP
+ * server (Freebuff, OpenCode). Otherwise the agent is told it can't call them.
+ */
+export function myPromptBrief(readHow: 'tool' | 'file' | 'none', path = myPromptPath(), options: { promptTools?: boolean | 'mcp' } = {}): string | null {
   const loaded = loadMyPrompt(path)
   if (!loaded || loaded.sections.length === 0) return null
   const [first, ...rest] = loaded.sections
   const core = loaded.lines.slice(first!.from - 1, first!.to).join('\n').trim()
   if (readHow === 'none') {
-    return ["Your operating prompt is the user's own prompt. Its first section follows; follow it in everything you do.", '', core].join('\n')
+    return ["Your operating prompt is the user's own prompt. Its first section follows; follow it in everything you do.", '', core, '', GROUNDING_RULES].join('\n')
   }
   const index = rest
     .map((s) => (readHow === 'file' ? `- ${s.title} (lines ${s.from}–${s.to})` : `- ${s.title}`))
@@ -92,8 +98,14 @@ export function myPromptBrief(readHow: 'tool' | 'file' | 'none', path = myPrompt
     '',
     core,
     '',
-    `Its other sections, for when they apply. ${how} Where they name tools or products this app doesn't have (the "Tools" section describes another app's tools), use this app's own tools for the same job, and keep to this app's safety rules.`,
-    index
+    options.promptTools === 'mcp'
+      ? `Its other sections, for when they apply. ${how} The tools its "Tools" section names are real: the deskmates-prompt MCP server gives you each one under the same name (your agent may show it with a deskmates-prompt prefix). Call them rather than describing what they would do; the ones that send, delete, share or run commands ask the user in Deskmates first. Keep to this app's safety rules.`
+      : readHow === 'tool' && options.promptTools
+      ? `Its other sections, for when they apply. ${how} The tools they name are real tools in this run, under the same names; call them rather than describing what they would do. Where a section names a product this app doesn't have (claude.ai links, install cards), the tool's result says what happens here instead. Keep to this app's safety rules.`
+      : `Its other sections, for when they apply. ${how} Its "Tools" section describes tools of the Deskmates Work tab that you can't call here: only the tools you were actually given exist for you. Do the same job with those${readHow === 'file' ? ' and the deskmates command' : ''}, and never write a tool call or its result as if you had made it. Keep to this app's safety rules.`,
+    index,
+    '',
+    GROUNDING_RULES
   ].join('\n')
 }
 
