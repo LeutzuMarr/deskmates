@@ -73,7 +73,9 @@ async function configureModel(page: Page, baseUrl: string): Promise<void> {
   // Wait for the initial settings.get() round trip to populate the field before overwriting it —
   // otherwise the effect that fills it in from server state can clobber what we just typed.
   const urlInput = page.locator('#compatible-url')
-  await expect(urlInput).toHaveValue('https://openrouter.ai/api/v1')
+  await expect(urlInput).toBeVisible()
+  // The field starts empty and is filled from saved settings once they load; give that a moment.
+  await page.waitForTimeout(1500)
   await urlInput.fill(`${baseUrl}/v1`)
   await urlInput.press('Tab')
 

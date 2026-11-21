@@ -343,7 +343,7 @@ export function currentActivity(timeline: TimelineItem[]): string | null {
 }
 
 /** Lines added and removed by a file-writing step, worked out from its input; null for other steps. */
-export function stepDiff(item: Pick<ToolItem, 'toolName' | 'input' | 'state'>): { added: number; removed: number } | null {
+export function stepDiff(item: Pick<ToolItem, 'toolName' | 'input' | 'state'> & { output?: unknown }): { added: number; removed: number } | null {
   if (item.state === 'error' || item.state === 'denied') return null
   const input = (item.input && typeof item.input === 'object' ? item.input : {}) as Input
   const lines = (value: unknown): number => {
@@ -351,15 +351,23 @@ export function stepDiff(item: Pick<ToolItem, 'toolName' | 'input' | 'state'>): 
     return text ? text.replace(/\n$/, '').split('\n').length : 0
   }
   const name = item.toolName.toLowerCase()
-  if (['edit_file', 'edit', 'str_replace', 'str_replace_edit', 'memory_str_replace'].includes(name)) {
+  // Project files only: memory documents aren't part of what the task changed.
+  if (['edit_file', 'edit', 'str_replace', 'str_replace_edit'].includes(name)) {
     const before = input.old_text ?? input.old_string ?? input.old_str
     const after = input.new_text ?? input.new_string ?? input.new_str
     if (typeof before !== 'string') return null
     return { added: lines(after), removed: lines(before) }
   }
-  if (['write_file', 'write', 'create_file', 'memory_write', 'dc_write'].includes(name)) {
+  if (['write_file', 'write', 'create_file', 'dc_write'].includes(name)) {
     const content = input.content ?? input.file_text
-    return typeof content === 'string' ? { added: lines(content), removed: 0 } : null
+    if (typeof content !== 'string') return null
+    // Overwriting a file replaces lines this step can't see, so "+all, −0" would be wrong: only a
+    // newly created file gets a count. The tools say which it was in their result.
+    const output = item.output
+    const overwrote =
+      (output && typeof output === 'object' && (output as { created?: unknown }).created === false) ||
+      (typeof output === 'string' && /^Updated /.test(output))
+    return overwrote ? null : { added: lines(content), removed: 0 }
   }
   return null
 }

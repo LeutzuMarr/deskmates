@@ -16,7 +16,7 @@ import { jsonSchemaToZod } from '../connectors/schema'
 import { promptToolSpecs } from '../engine/my-prompt'
 import { resolveInside } from '../fs/safe-path'
 import type { ToolContext } from './context'
-import { callTool } from './cowork'
+import { callTool, nativePath } from './cowork'
 import { MemoryFiles } from './memory-files'
 import { webFetchText, webSearchResults } from './web'
 import { displayBody, imageGallery, saveWidget, widgetPage } from './widgets'
@@ -161,13 +161,13 @@ function implementations(ctx: ToolContext, base: ToolSet): Record<string, Run> {
     bash_tool: (input) => callTool(need('Bash'), { command: input.command, description: input.description }),
     create_file: async (input) => {
       const path = str(input.path)
-      if (existsSync(resolveInside(ctx.root, path))) throw new Error(`${path} already exists. Edit it with str_replace, or overwrite it with bash_tool.`)
+      if (existsSync(resolveInside(ctx.root, nativePath(path)))) throw new Error(`${path} already exists. Edit it with str_replace, or overwrite it with bash_tool.`)
       return callTool(need('Write'), { file_path: path, content: str(input.file_text) })
     },
     str_replace: (input) => callTool(need('Edit'), { file_path: input.path, old_string: input.old_str, new_string: str(input.new_str) }),
     view: async (input) => {
       const path = str(input.path) || '.'
-      const abs = resolveInside(ctx.root, path)
+      const abs = resolveInside(ctx.root, nativePath(path))
       if (existsSync(abs) && statSync(abs).isDirectory()) return callTool(need('list_files'), { path, depth: 2 })
       const range = Array.isArray(input.view_range) ? (input.view_range as number[]) : null
       const offset = range?.[0] && range[0] > 0 ? range[0] : 1
@@ -205,7 +205,8 @@ function implementations(ctx: ToolContext, base: ToolSet): Record<string, Run> {
       if (!ctx.chats) throw new Error('Past chats are not available in this run.')
       const words = str(input.query).toLowerCase().split(/\s+/).filter((w) => w.length > 2)
       const max = Math.min(Number(input.max_results) || 5, 10)
-      const chats = ctx.chats.list().filter((chat) => chat.id !== ctx.taskId && (!input.within_conversation_id || chat.id === input.within_conversation_id))
+      // The 300 most recent chats: enough to find what the user means, without reading the whole history.
+      const chats = ctx.chats.list().slice(0, 300).filter((chat) => chat.id !== ctx.taskId && (!input.within_conversation_id || chat.id === input.within_conversation_id))
       const hits: Array<{ conversation_id: string; title: string; project: string; updated: string; excerpt: string; score: number }> = []
       for (const chat of chats) {
         const turns = ctx.chats.turns(chat.id)
@@ -388,7 +389,7 @@ function implementations(ctx: ToolContext, base: ToolSet): Record<string, Run> {
       if (action !== 'publish') return { note: `Deskmates keeps artifacts as files in the project; "${action}" isn't needed here. Use present_files to show a file again.` }
       const path = str(input.file_path)
       if (!path) throw new Error('Artifact needs file_path: write the page to a file first, then publish it.')
-      const abs = resolveInside(ctx.root, path)
+      const abs = resolveInside(ctx.root, nativePath(path))
       if (!existsSync(abs)) throw new Error(`${path} doesn't exist yet. Write it first.`)
       const { readFileSync } = await import('node:fs')
       const content = readFileSync(abs, 'utf8')

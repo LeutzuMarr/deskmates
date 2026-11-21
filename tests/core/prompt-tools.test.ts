@@ -136,3 +136,16 @@ describe('line counts on file steps', () => {
     expect(stepDiff({ toolName: 'read_file', input: { path: 'a' }, state: 'done' })).toBeNull()
   })
 })
+
+describe('widget cleanup', () => {
+  it('deletes the widget pages a deleted chat pointed to, and only those', async () => {
+    const { removeWidgetsOf } = await import('../../src/core/tools/widgets')
+    const kept = saveWidget(dir, 'Kept', '<p>a</p>')
+    const gone = saveWidget(dir, 'Gone', '<p>b</p>')
+    const name = (url: string) => url.split('/').pop()!
+    expect(removeWidgetsOf(dir, [{ role: 'tool', content: [{ output: gone }] }])).toBe(1)
+    const { existsSync } = await import('node:fs')
+    expect(existsSync(join(dir, 'widgets', name(gone.widget)))).toBe(false)
+    expect(existsSync(join(dir, 'widgets', name(kept.widget)))).toBe(true)
+  })
+})

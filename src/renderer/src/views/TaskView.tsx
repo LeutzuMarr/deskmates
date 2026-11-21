@@ -253,7 +253,13 @@ function PlanRow({ item }: { item: PlanItem }) {
 
 function PlanMark({ status }: { status: PlanItem['status'] }) {
   if (status === 'done') return <span className="plan-mark plan-done" aria-hidden="true" />
-  if (status === 'in_progress') return <span className="plan-mark plan-half" aria-hidden="true" />
+  // The half-filled circle: .plan-half is the fill inside .plan-mark, not a class of its own mark.
+  if (status === 'in_progress')
+    return (
+      <span className="plan-mark plan-mark-active" aria-hidden="true">
+        <span className="plan-half" />
+      </span>
+    )
   return <span className="plan-mark" aria-hidden="true" />
 }
 
