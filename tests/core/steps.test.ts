@@ -65,7 +65,8 @@ describe("Freebuff's full output as steps", () => {
     steps.finish()
     const byId = new Map<string, ToolItem>()
     for (const item of items) byId.set(item.id, item)
-    return [...byId.values()].map((i) => [(i.input as { activity: string }).activity, i.state])
+    // Prose comes through as chat text ("said"), the lines of work as steps.
+    return [...byId.values()].map((i) => ((i as { kind: string }).kind === 'assistant' ? ['said', (i as unknown as { text: string }).text] : [(i.input as { activity: string }).activity, i.state]))
   }
 
   it('shows every line, even ones printed between two reads of the screen', () => {
@@ -77,10 +78,10 @@ describe("Freebuff's full output as steps", () => {
       ])
     ).toEqual([
       ['• Read AGENTS.md', 'done'],
-      ['Found that the deadline moved.', 'done'],
+      ['said', 'Found that the deadline moved.'],
       ['• Read a.ts', 'done'],
       ['$ npm test', 'done'],
-      ['All tests pass.', 'done']
+      ['said', 'All tests pass.']
     ])
   })
 

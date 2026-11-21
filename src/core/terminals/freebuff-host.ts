@@ -206,6 +206,11 @@ export function currentActivity(screen: string, prompt: string, skipEchoes = 0):
 
 /** A line that starts a new piece of work in Freebuff's output: a tool or command line. */
 const WORK_MARKER = /^(\$ |• |▸ |✓ |✗ |✔ |✘ |→ )/
+/** Whether an item of Freebuff's output is a line of work (a tool or command) rather than prose. */
+export function isWorkLine(text: string): boolean {
+  return WORK_MARKER.test(text.trim())
+}
+
 /** Freebuff's window is 110 columns; a cleaned line this long was most likely wrapped onto the next. */
 const WRAP_LENGTH = 95
 

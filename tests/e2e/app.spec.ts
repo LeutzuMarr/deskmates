@@ -47,7 +47,8 @@ async function launchApp(userDataDir: string, dataDir: string): Promise<{ app: E
     env: {
       ...process.env,
       DESKMATES_USER_DATA: userDataDir,
-      DESKMATES_DATA_DIR: dataDir
+      DESKMATES_DATA_DIR: dataDir,
+      DESKMATES_NO_HOME_CONFIG: '1'
     }
   })
   const page = await app.firstWindow()

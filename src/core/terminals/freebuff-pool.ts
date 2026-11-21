@@ -3,7 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { FREEBUFF_CURRENT_MODEL, type FreebuffModel, type FreebuffStatus } from '../../shared/freebuff'
 import type { TimelineItem } from '../../shared/protocol'
-import { FreebuffHost, StoppedError } from './freebuff-host'
+import { FreebuffHost, StoppedError, isWorkLine } from './freebuff-host'
 import type { CliRunOptions, CliRunResult } from './managed'
 
 /** Prompts longer than this go through a file: they are typed key by key into Freebuff's input. */
@@ -52,7 +52,9 @@ export class FreebuffPool {
       const reply = await host.ask(request, (items) => steps.reportAll(items))
       this.instructed.add(host)
       steps.finish()
-      if (reply) runOptions.onItem?.({ kind: 'assistant', id: randomUUID(), at: Date.now(), text: reply })
+      // Freebuff's prose was shown as chat text while it worked, its summary included; the reply only
+      // needs showing here when none was (a turn that said nothing until the end).
+      if (reply && !steps.saidSomething) runOptions.onItem?.({ kind: 'assistant', id: randomUUID(), at: Date.now(), text: reply })
       return { text: reply }
     } catch (error) {
       if (error instanceof StoppedError || runOptions.signal?.aborted) return { text: '', stopped: true }
@@ -110,6 +112,11 @@ export class FreebuffPool {
   }
 }
 
+/** A paragraph Freebuff wrote between its steps ("I'll check the config first."), shown as chat text. */
+function proseItem(id: string, text: string, at: number): TimelineItem {
+  return { kind: 'assistant', id, at, text }
+}
+
 /** One timeline line that follows Freebuff's progress through a turn, updated in place by its id. */
 function activityItem(id: string, activity: string, state: 'running' | 'done', at = Date.now()): TimelineItem {
   return { kind: 'tool', id, at, toolName: 'freebuff', input: { activity }, state }
@@ -153,11 +160,50 @@ export class ActivitySteps {
    * written grows its step, a new one becomes a new step. Matching by content rather than position
    * keeps steps from repeating when the start of the turn scrolls off Freebuff's window.
    */
+  /** Freebuff's prose so far, oldest first: each paragraph is one chat message, grown in place. */
+  private readonly said: Array<{ id: string; text: string; at: number }> = []
+
+  /** Whether Freebuff wrote any prose this turn (its reply then needs no separate message). */
+  get saidSomething(): boolean {
+    return this.said.length > 0
+  }
+
+  /**
+   * A paragraph of prose becomes chat text, not a step: steps are for what Freebuff did ("• Read
+   * file.ts", "$ npm test"), and its sentences are for the user to read. Matched by content like steps.
+   */
+  private reportProse(text: string, from: number): number {
+    for (let i = from; i < this.said.length; i++) {
+      const paragraph = this.said[i]!
+      const last = i === this.said.length - 1
+      if (text === paragraph.text || (last && text.startsWith(paragraph.text))) {
+        if (text.length > paragraph.text.length) {
+          paragraph.text = text
+          this.emit(proseItem(paragraph.id, text, paragraph.at))
+        }
+        return i + 1
+      }
+    }
+    // A new paragraph closes the step before it, as a new step would.
+    const current = this.current
+    if (current) this.emit(activityItem(current.id, current.text, 'done', current.at))
+    this.current = null
+    const paragraph = { id: randomUUID(), text, at: Date.now() }
+    this.said.push(paragraph)
+    this.emit(proseItem(paragraph.id, text, paragraph.at))
+    return this.said.length
+  }
+
   reportAll(items: string[]): void {
     let from = 0
+    let fromProse = 0
     for (const raw of items) {
       const text = raw.trim()
       if (!text) continue
+      if (!isWorkLine(text)) {
+        fromProse = this.reportProse(text, fromProse)
+        continue
+      }
       let match = -1
       for (let i = from; i < this.shown.length; i++) {
         const step = this.shown[i]!
@@ -191,7 +237,9 @@ export class ActivitySteps {
   finish(): void {
     const current = this.current
     if (current) this.emit(activityItem(current.id, current.text, 'done', current.at))
-    else this.emit(activityItem(this.firstId, 'Finished', 'done'))
+    // Only a turn that showed nothing at all gets a closing step: one that ended on a sentence has
+    // its steps already done, and the first of them carries firstId.
+    else if (this.shown.length === 0 && this.said.length === 0) this.emit(activityItem(this.firstId, 'Finished', 'done'))
     this.current = null
   }
 }

@@ -5,6 +5,7 @@ import { InstallPluginDialog } from '../components/InstallPluginDialog'
 import { ImportSkillDialog } from '../components/ImportSkillDialog'
 import { ConnectorDialog } from '../components/ConnectorDialog'
 import { ImportMcpConfigDialog } from '../components/ImportMcpConfigDialog'
+import { GoogleAccountCard } from '../components/GoogleAccountCard'
 import type { Connector } from '../../../shared/protocol'
 
 export function ExtrasHomeView() {
@@ -108,6 +109,7 @@ export function ExtrasHomeView() {
           A connector is an MCP server. Its tools show up to the assistant and your bots as mcp__-named
           tools.
         </p>
+        <GoogleAccountCard />
         {connectors.length === 0 ? (
           <div className="mt-3 rounded-3xl border border-rule bg-card p-5 text-[13px] text-ink-faint">
             No connectors yet. Add an MCP server by hand, or import your mcp_config.json in one move.

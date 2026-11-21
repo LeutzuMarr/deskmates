@@ -197,6 +197,11 @@
     inset 0 0 0 0.5px var(--lg-surface-edge),
     0 12px 40px var(--lg-shadow);
 }
+/* Menus hold choices to read: at the glass's 86% the page's own text showed through them wherever
+   the blur couldn't reach (inside animated or clipped sections), so they stay near-solid. */
+.menu {
+  background: color-mix(in srgb, var(--card) 97%, transparent);
+}
 .menu-item:hover,
 .menu-item:focus-visible,
 .menu-item[aria-selected='true'] {

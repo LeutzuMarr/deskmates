@@ -99,6 +99,10 @@ interface StoreState {
   projects: Project[]
   tasksByProject: Record<string, Task[]>
   timelines: Record<string, TimelineItem[]>
+  /** Messages sent while a task works, by task, waiting for its reply to end. */
+  queued: Record<string, string[]>
+  /** The likely next message per task (Tab puts it in the box). */
+  suggestions: Record<string, string | null>
   changes: Record<string, FileChange[]>
   memories: Record<string, Memory[]>
   keyStatus: ProviderId[]
@@ -289,6 +293,12 @@ export const useStore = create<StoreState>()((set, get) => {
         set({ timelines: { ...state.timelines, [event.taskId]: upsertById(timeline, event.item) } })
         break
       }
+      case 'task.suggestion':
+        set({ suggestions: { ...state.suggestions, [event.taskId]: event.text } })
+        break
+      case 'task.queued':
+        set({ queued: { ...state.queued, [event.taskId]: event.queued } })
+        break
       case 'task.timeline':
         set({ timelines: { ...state.timelines, [event.taskId]: event.timeline } })
         break
@@ -580,6 +590,8 @@ export const useStore = create<StoreState>()((set, get) => {
     projects: [],
     tasksByProject: {},
     timelines: {},
+    queued: {},
+    suggestions: {},
     changes: {},
     memories: {},
     keyStatus: [],

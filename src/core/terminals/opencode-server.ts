@@ -1,6 +1,15 @@
 import { createServer } from 'node:net'
 import type { ProcessSpawner } from './process'
 import type { SessionContextUsage } from '../../shared/protocol'
+import { openCodePromptToolsConfig } from './prompt-tools-config'
+
+/** The operating prompt's tools for the servers Deskmates starts, unless the user set their own
+ *  OPENCODE_CONFIG_CONTENT, which is left as it is. */
+function promptToolsEnv(): Record<string, string> {
+  if (process.env.OPENCODE_CONFIG_CONTENT) return {}
+  const config = openCodePromptToolsConfig()
+  return config ? { OPENCODE_CONFIG_CONTENT: config } : {}
+}
 
 /**
  * A long-lived `opencode serve` per project folder, and the one conversation Deskmates reuses across
@@ -535,7 +544,7 @@ export class OpenCodeServerPool {
 
     const proc = this.options.spawner.spawn('opencode', ['serve', '--port', String(port), '--hostname', '127.0.0.1'], {
       cwd: handle.folder,
-      env: { OPENCODE_PERMISSION: DESKMATES_OPENCODE_PERMISSIONS }
+      env: { OPENCODE_PERMISSION: DESKMATES_OPENCODE_PERMISSIONS, ...promptToolsEnv() }
     })
     handle.proc = proc
 

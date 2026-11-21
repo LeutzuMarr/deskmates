@@ -5,8 +5,9 @@ import { readFileSync, existsSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Memory, Project, ProviderId, Settings } from '../../shared/protocol'
 import { PROVIDER_LABELS, isCliProvider } from '../../shared/protocol'
-import { NARRATION_RULES } from './narration'
+import { presentationRules } from './presentation'
 import { myPromptBrief } from './my-prompt'
+import { GROUNDING_RULES } from './grounding'
 
 /** Returns the path to the project instructions file. */
 export function projectInstructionsPath(folder: string): string {
@@ -161,6 +162,13 @@ export function deskmatesToolsGuide(kind: 'work' | 'design', cli: boolean, baseP
   ].join('\n')
 }
 
+/** How an agent on this provider sets the task list: its own tool, the deskmates-prompt server
+ *  (Freebuff, OpenCode), or not at all (Antigravity, which has neither). */
+function planReach(provider: ProviderId): 'tool' | 'mcp' | 'none' {
+  if (!isCliProvider(provider)) return 'tool'
+  return provider === 'freebuff' || provider === 'opencode' ? 'mcp' : 'none'
+}
+
 /** Builds the full system instructions for the assistant. */
 export function buildInstructions(input: BuildInstructionsInput): string {
   const { project, settings, memories, projectInstructions, now, model } = input
@@ -170,7 +178,7 @@ export function buildInstructions(input: BuildInstructionsInput): string {
   // One prompt per tab: the Design tab reads claude-design.md, the Work tab the user's own prompt
   // (my-prompt.md). Only bare facts about this setup follow it, so nothing competes with it.
   const cli = isCliProvider(model.provider)
-  const basePrompt = isDesign ? loadBasePrompt('design') : myPromptBrief(cli ? 'file' : 'tool')
+  const basePrompt = isDesign ? loadBasePrompt('design') : myPromptBrief(cli ? 'file' : 'tool', undefined, { promptTools: !cli ? true : model.provider === 'freebuff' || model.provider === 'opencode' ? 'mcp' : false })
   if (basePrompt) {
     parts.push(basePrompt)
     parts.push('')
@@ -198,6 +206,14 @@ export function buildInstructions(input: BuildInstructionsInput): string {
     } else if (isDesign) {
       parts.push('')
       parts.push(baseToolsNote('design'))
+    }
+    // How the app shows the work (step lines, the task list, the summary, buttons), whatever the prompt.
+    parts.push('')
+    parts.push(presentationRules({ plan: planReach(model.provider), cards: !cli }))
+    // The user's prompt brings its own copy of these rules (myPromptBrief); the Design prompt doesn't.
+    if (isDesign) {
+      parts.push('')
+      parts.push(GROUNDING_RULES)
     }
     pushUserContext(parts, input)
     return parts.join('\n')
@@ -254,15 +270,14 @@ export function buildInstructions(input: BuildInstructionsInput): string {
   parts.push('How to write:')
   parts.push('- Lead with the result or answer, then only the details that matter.')
   parts.push('- Write plain, warm, direct sentences, and use Markdown only where it helps (short lists, code, small tables).')
-  parts.push('- Don\'t narrate every step, because the app already shows tool activity as a gray summary line; while working, add at most one short sentence when you change direction or find something important.')
-  parts.push('- Keep the final message short: what you did, what changed, and anything the user needs to decide.')
   parts.push('- If the request is ambiguous and a wrong guess would waste work, ask one clear question first.')
-  parts.push('- Never invent file contents or results you haven\'t seen.')
+  parts.push('')
+  parts.push(GROUNDING_RULES)
 
   parts.push('')
   parts.push(deskmatesToolsGuide(isDesign ? 'design' : 'work', isCliProvider(model.provider), false, { command: input.agentCommand, agentName: project.name }))
   parts.push('')
-  parts.push(NARRATION_RULES)
+  parts.push(presentationRules({ plan: planReach(model.provider), cards: !isCliProvider(model.provider) }))
 
   // 7. Identity
   parts.push('')

@@ -4,6 +4,7 @@ import type { EditorCommand } from '../../../shared/design-bridge'
 import { useStore } from '../lib/store'
 import { Conversation } from '../components/Conversation'
 import { Composer } from '../components/Composer'
+import { PlanCard } from '../components/PlanCard'
 import type { ComposerHandle } from '../components/Composer'
 import { PreviewPane } from '../components/PreviewPane'
 import { currentActivity } from '../lib/steps'
@@ -151,6 +152,7 @@ export function DesignView({ projectId }: { projectId: string }) {
       <div ref={containerRef} className="flex min-h-0 flex-1">
         <div className="flex min-w-0 shrink-0 flex-col" style={{ width: clampedChatWidth }}>
           <Conversation
+            editable
             taskId={task?.id ?? ''}
             timeline={timeline}
             running={running}
@@ -164,6 +166,7 @@ export function DesignView({ projectId }: { projectId: string }) {
                     {task.error}
                   </div>
                 )}
+                {task && <PlanCard plan={task.plan} />}
                 <Composer
                   ref={composerRef}
                   projectId={projectId}

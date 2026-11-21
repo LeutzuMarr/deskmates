@@ -8,6 +8,10 @@ import type { RemoteAccess } from '../phone/remote'
 import type { DuoProfile } from '../../shared/duo'
 import { freebuffModels, setFreebuffModels, type FreebuffModelList } from '../../shared/freebuff'
 import { removeWidgetsOf } from '../tools/widgets'
+import { promptToolInfos, runTool } from '../tools/shared-prompt-tools'
+import { findFiles } from '../fs/find-files'
+import type { ToolSet } from 'ai'
+import { parseClientFile, type GoogleAuth } from '../google/auth'
 import type { When } from '../../shared/protocol'
 import { randomInt, randomUUID } from 'node:crypto'
 import { basename, join, resolve, sep } from 'node:path'
@@ -65,6 +69,8 @@ const DEFAULT_PC_CPU_LIMIT = 2
 
 export interface HandlerServices {
   repos: Repos
+  /** Google sign-in (Gmail, Calendar, Drive); absent in tests. */
+  google?: GoogleAuth
   bus: EventBus
   runner: TaskRunner
   changes: ChangeLog
@@ -105,6 +111,8 @@ export interface HandlerServices {
   /** Duo, and its tools for the MCP bridge. */
   duo?: DuoService
   duoTools?: () => Record<string, unknown>
+  /** The operating prompt's tools for an agent working in a folder (see TaskRunner.promptToolsFor). */
+  promptToolsFor?: (folder: string, agent: string) => ToolSet
   /** Scheduled tasks of Work and Design projects. */
   taskSchedules?: TaskScheduler
   /** Duo's approved Outbox item that may be sent on this site now, if any (the browser's send rule). */
@@ -337,6 +345,13 @@ export function createHandlers(services: HandlerServices): Handlers {
 
     'tasks.send': (params: { id: string; text: string }) => runner.send(params.id, params.text),
 
+    'tasks.queued': (params: { id: string }) => runner.queuedMessages(params.id),
+    'tasks.resend': async (params: { id: string; text?: string }) => {
+      await runner.resend(params.id, params.text)
+      return null
+    },
+    'tasks.suggestion': (params: { id: string }) => runner.suggestion(params.id),
+    'tasks.unqueue': (params: { id: string }) => runner.unqueue(params.id),
     'tasks.stop': (params: { id: string }) => {
       runner.stop(params.id)
       return null
@@ -407,6 +422,7 @@ export function createHandlers(services: HandlerServices): Handlers {
       return readDesign(project.folder)
     },
 
+    'projects.findFiles': (params: { projectId: string; query: string }) => findFiles(repos.projects.require(params.projectId).folder, params.query ?? ''),
     'designs.files': (params: { projectId: string }) => listDesignFiles(requireDesign(params.projectId).folder),
 
     'designs.save': (
@@ -875,6 +891,12 @@ export function createHandlers(services: HandlerServices): Handlers {
       const input = chosen.inputSchema?.parse ? chosen.inputSchema.parse(params.input ?? {}) : (params.input ?? {})
       return { text: String(await chosen.execute(input, { toolCallId: 'bridge', messages: [] })) }
     },
+    'promptTools.list': () => promptToolInfos(),
+    'promptTools.call': async (params: { folder: string; agent?: string; name: string; input: Record<string, unknown> }) => {
+      if (!services.promptToolsFor) throw new Error("The operating prompt's tools aren't available in this Deskmates.")
+      const tools = services.promptToolsFor(params.folder, params.agent?.trim() || 'Your coding agent')
+      return { text: await runTool(tools, params.name, params.input ?? {}) }
+    },
 
     'taskSchedules.list': (params: { projectId?: string }) => requireSchedules().list(params.projectId),
     'taskSchedules.create': (params: { projectId: string; name: string; instruction: string; when: When; missed?: 'run-late' | 'skip' }) =>
@@ -890,6 +912,29 @@ export function createHandlers(services: HandlerServices): Handlers {
     'taskSchedules.runNow': (params: { id: string }) => requireSchedules().runNow(params.id),
     'taskSchedules.start': (params: { id: string }) => requireSchedules().startPending(params.id),
     'taskSchedules.dismiss': (params: { id: string }) => requireSchedules().dismiss(params.id),
+
+    // ---- Google account ----
+
+    'google.status': () => {
+      if (!services.google) throw new Error('Google sign-in isn’t available here.')
+      return services.google.status()
+    },
+    'google.connect': () => {
+      if (!services.google) throw new Error('Google sign-in isn’t available here.')
+      return services.google.connect()
+    },
+    'google.disconnect': async () => {
+      if (!services.google) throw new Error('Google sign-in isn’t available here.')
+      await services.google.disconnect()
+      return services.google.status()
+    },
+    'google.setClient': (params: { json: string }) => {
+      if (!services.google) throw new Error('Google sign-in isn’t available here.')
+      repos.settings.setExtra('googleClient', parseClientFile(String(params?.json ?? '')))
+      const status = services.google.status()
+      bus.emit({ type: 'google.updated', status })
+      return status
+    },
 
     'freebuff.models': () => {
       void refreshFreebuffModels()

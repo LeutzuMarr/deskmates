@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import { ListChecks, Undo2 } from 'lucide-react'
+import { PlanCard, PlanRow } from '../components/PlanCard'
 import { core } from '../lib/rpc'
 import { useStore } from '../lib/store'
 import { formatClock, formatDay, statusLabel, startingNotice } from '../lib/format'
@@ -9,7 +10,7 @@ import { Conversation } from '../components/Conversation'
 import { FreebuffStatusLine } from '../components/FreebuffStatusLine'
 import { DiffChip } from '../components/DiffChip'
 import { BrowserSurface, DockBrowserButton } from '../components/BrowserPanel'
-import type { ChangeStats, FileChange, PlanItem } from '../../../shared/protocol'
+import type { ChangeStats, FileChange } from '../../../shared/protocol'
 
 /** Provider and folder pairs whose agent has already run once since the app opened. */
 const startedOnce = new Set<string>()
@@ -136,9 +137,9 @@ export function TaskView({ projectId, taskId }: { projectId: string; taskId: str
               {task?.title.trim() === '' ? 'Untitled task' : task?.title}
             </h1>
           )}
-          <div className="mt-0.5 flex items-center gap-2">
-            <span className="truncate font-mono text-[12px] text-ink-muted">{project?.name}</span>
-            <span className="text-[12px] text-ink-faint">
+          <div className="mt-0.5 flex min-w-0 items-center gap-2">
+            <span className="max-w-[50%] shrink-0 truncate font-mono text-[12px] text-ink-muted">{project?.name}</span>
+            <span className="min-w-0 truncate whitespace-nowrap text-[12px] text-ink-faint">
               • {task ? statusLabel(task.status) : 'missing'} • Updated {formatDay(task?.updatedAt ?? 0)} at{' '}
               {formatClock(task?.updatedAt ?? 0)}
             </span>
@@ -162,6 +163,7 @@ export function TaskView({ projectId, taskId }: { projectId: string; taskId: str
 
       <div className="flex min-h-0 flex-1">
         <Conversation
+          editable
           taskId={taskId}
           timeline={timeline}
           running={task?.status === 'running'}
@@ -174,15 +176,8 @@ export function TaskView({ projectId, taskId }: { projectId: string; taskId: str
                   {task.error}
                 </div>
               )}
-              {task && task.plan.length > 0 && !task.plan.every((item) => item.status === 'done') && (
-                <div className="mb-3 rounded-2xl border border-rule bg-card px-4 py-3" aria-label="Task list">
-                  <ul className="flex flex-col gap-2">
-                    {task.plan.map((item, index) => (
-                      <PlanRow key={`${item.text}-${index}`} item={item} />
-                    ))}
-                  </ul>
-                </div>
-              )}
+              {/* The task list stays at the end of the chat, above the message box, finished or not. */}
+              {task && <PlanCard plan={task.plan} />}
               <Composer projectId={projectId} taskId={taskId} />
             </>
           }
@@ -239,28 +234,6 @@ export function TaskView({ projectId, taskId }: { projectId: string; taskId: str
 
     </div>
   )
-}
-
-function PlanRow({ item }: { item: PlanItem }) {
-  const done = item.status === 'done'
-  return (
-    <li className={`flex items-start gap-2 text-[13px] leading-snug ${done ? 'text-ink-faint' : 'text-ink'}`}>
-      <PlanMark status={item.status} />
-      <span className="whitespace-pre-wrap">{item.text}</span>
-    </li>
-  )
-}
-
-function PlanMark({ status }: { status: PlanItem['status'] }) {
-  if (status === 'done') return <span className="plan-mark plan-done" aria-hidden="true" />
-  // The half-filled circle: .plan-half is the fill inside .plan-mark, not a class of its own mark.
-  if (status === 'in_progress')
-    return (
-      <span className="plan-mark plan-mark-active" aria-hidden="true">
-        <span className="plan-half" />
-      </span>
-    )
-  return <span className="plan-mark" aria-hidden="true" />
 }
 
 function ChangeRow({ change }: { change: FileChange }) {

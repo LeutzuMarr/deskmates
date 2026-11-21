@@ -40,7 +40,7 @@ export function prepareDuoWorkspace(options: DuoWorkspaceOptions): void {
     const fresh = !existsSync(promptCopy) || statSync(promptCopy).mtimeMs < statSync(options.myPromptPath).mtimeMs
     if (fresh) copyFileSync(options.myPromptPath, promptCopy)
   }
-  const operating = existsSync(promptCopy) ? myPromptBrief('file', promptCopy) : null
+  const operating = existsSync(promptCopy) ? myPromptBrief('file', promptCopy, { promptTools: 'mcp' }) : null
   writeIfChanged(join(dir, 'AGENTS.md'), [operating, operating ? '\n---\n' : '', DUO_BRIEF].filter(Boolean).join('\n'))
   writeIfChanged(join(dir, 'profile.md'), profileMarkdown(options.profile))
   const playbook = join(dir, 'playbook.md')

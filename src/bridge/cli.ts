@@ -4,6 +4,7 @@ import { guide, designList, designPath, designRead, designWrite, designCreate, p
 import { connectCore, NotRunningError, type CoreClient } from './client'
 import { PcNotSetUpError } from './actions'
 import { runMcpServerOnStdio } from './mcp'
+import { runPromptMcpServerOnStdio } from './prompt-mcp'
 
 export const EXIT_OK = 0
 export const EXIT_USAGE = 1
@@ -43,6 +44,7 @@ Commands:
   browser wait [seconds]                 wait for a slow page, then read it
                                          (--as "<name>" names who is asking in the app)
   mcp                                    run the MCP server on stdio
+  prompt-mcp                             run the operating prompt’s tools as an MCP server on stdio
   help                                   show this help
 
 Exit codes: 0 ok, 1 usage error, 2 Deskmates isn't running, 3 core error.
@@ -104,6 +106,7 @@ export async function main(argv: string[], deps: CliDeps): Promise<number> {
     if (command === 'pc') return await cmdPc(deps, parsed, sub, rest)
     if (command === 'browser') return await cmdBrowser(deps, parsed, sub, rest)
     if (command === 'mcp') return await cmdMcp(deps, dataDir)
+    if (command === 'prompt-mcp') return await cmdPromptMcp(deps, dataDir)
     deps.error(`Unknown command: ${command}. Run deskmates help for the list.`)
     return EXIT_USAGE
   } catch (error) {
@@ -341,6 +344,24 @@ async function cmdMcp(deps: CliDeps, dataDir: string): Promise<number> {
   } finally {
     client.close()
   }
+}
+
+/** prompt-mcp: the operating prompt's tools on stdio. Starts whether or not Deskmates is running (so
+ * the agent that launched it always starts), and connects afresh for every call. */
+async function cmdPromptMcp(deps: CliDeps, dataDir: string): Promise<number> {
+  deps.error('Deskmates prompt-tools MCP server listening on stdio.')
+  const call: Parameters<typeof runPromptMcpServerOnStdio>[0]['call'] = async (method, params) => {
+    const client = await deps.connectCore({ dataDir })
+    try {
+      return await client.call(method, params)
+    } finally {
+      client.close()
+    }
+  }
+  const agent = process.env.DESKMATES_AGENT?.trim() || 'Your coding agent'
+  const folder = process.env.DESKMATES_FOLDER?.trim() || process.cwd()
+  await runPromptMcpServerOnStdio({ call, folder, agent })
+  return EXIT_OK
 }
 
 /** guide: prints the guide file; a missing file means the app hasn't run yet. */

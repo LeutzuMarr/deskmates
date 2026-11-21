@@ -15,7 +15,7 @@ function makeTempDirs(label: string): { base: string; userDataDir: string; dataD
 async function launchApp(userDataDir: string, dataDir: string, phonePort: number): Promise<{ app: ElectronApplication; page: Page }> {
   const app = await _electron.launch({
     args: ['.'],
-    env: { ...process.env, DESKMATES_USER_DATA: userDataDir, DESKMATES_DATA_DIR: dataDir, DESKMATES_PHONE_PORT: String(phonePort) }
+    env: { ...process.env, DESKMATES_USER_DATA: userDataDir, DESKMATES_DATA_DIR: dataDir, DESKMATES_NO_HOME_CONFIG: '1', DESKMATES_PHONE_PORT: String(phonePort) }
   })
   const page = await app.firstWindow()
   await page.waitForLoadState('domcontentloaded')

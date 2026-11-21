@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useId, useImperativeHandle, useRef, useState } from 'react'
+import { forwardRef, useEffect, useId, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
 import type { ClipboardEvent, DragEvent, KeyboardEvent } from 'react'
 import { ArrowUp, Square, X } from 'lucide-react'
 import { Glass } from 'glisse'
@@ -67,6 +67,86 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const task = taskId ? (tasksByProject[projectId] ?? []).find((t) => t.id === taskId) : undefined
   const running = task?.status === 'running'
   const awaitingApproval = task?.status === 'waiting-approval'
+  const queued = useStore((s) => (taskId ? s.queued[taskId] : undefined)) ?? []
+  // The likely next message, greyed out in the empty box once a reply ends; Tab puts it in.
+  const suggestion = useStore((s) => (taskId ? s.suggestions[taskId] : undefined)) ?? null
+  const showSuggestion = Boolean(suggestion) && !text && !running && !awaitingApproval && !selection
+  const timeline = useStore((s) => (taskId ? s.timelines[taskId] : undefined))
+  /** What the user sent before in this task, newest first, for the up arrow. */
+  const sentBefore = (): string[] =>
+    (timeline ?? [])
+      .filter((item) => item.kind === 'user')
+      .map((item) => (item as { text: string }).text)
+      .reverse()
+  const historyAt = useRef(-1)
+
+  // "/" at the start lists installed skills; "@" anywhere lists project files, as in Claude.
+  const [caret, setCaret] = useState(0)
+  const token = /(?:^|\s)([@/])([^\s@]*)$/.exec(text.slice(0, caret))
+  const mention = token && (token[1] === '@' || token.index === 0 && text.slice(0, caret).trimStart().startsWith('/'))
+    ? { kind: token[1] === '@' ? ('file' as const) : ('skill' as const), query: token[2] ?? '', start: caret - (token[2]?.length ?? 0) - 1 }
+    : null
+  const [menuItems, setMenuItems] = useState<string[]>([])
+  const [menuAt, setMenuAt] = useState(0)
+  const [menuClosed, setMenuClosed] = useState<string | null>(null)
+  const menuKey = mention ? `${mention.kind}:${mention.start}` : null
+  const menuOpen = Boolean(mention) && menuItems.length > 0 && menuClosed !== menuKey
+  useEffect(() => {
+    if (!mention) {
+      setMenuItems([])
+      return
+    }
+    let cancelled = false
+    const timer = setTimeout(async () => {
+      try {
+        const found =
+          mention.kind === 'skill'
+            ? (await core.call('skills.list', {}))
+                .filter((skill) => skill.enabled && skill.name.toLowerCase().includes(mention.query.toLowerCase()))
+                .map((skill) => skill.name)
+                .slice(0, 30)
+            : await core.call('projects.findFiles', { projectId, query: mention.query })
+        if (!cancelled) {
+          setMenuItems(found)
+          setMenuAt(0)
+        }
+      } catch {
+        if (!cancelled) setMenuItems([])
+      }
+    }, mention.kind === 'file' ? 120 : 0)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mention?.kind, mention?.query, projectId])
+  // Up from the box when there is room above it; down (this far below the menu's anchor, past the
+  // box) when the box sits near the top of the window, where an upward menu would be cut off.
+  const [menuBelow, setMenuBelow] = useState<number | null>(null)
+  useLayoutEffect(() => {
+    if (!menuOpen) return
+    const box = textareaRef.current?.closest('.composer-box') as HTMLElement | null
+    if (!box) return
+    const rect = box.getBoundingClientRect()
+    setMenuBelow(rect.top < 320 ? box.offsetHeight + 6 : null)
+  }, [menuOpen])
+
+  /** Replaces the typed "/name" or "@path" with the picked one. */
+  const pick = (choice: string): void => {
+    if (!mention) return
+    const mark = mention.kind === 'skill' ? '/' : '@'
+    const insert = `${mark}${/\s/.test(choice) ? `"${choice}"` : choice} `
+    const next = text.slice(0, mention.start) + insert + text.slice(caret)
+    const at = mention.start + insert.length
+    setText(next)
+    setMenuItems([])
+    requestAnimationFrame(() => {
+      const el = textareaRef.current
+      el?.focus()
+      el?.setSelectionRange(at, at)
+      setCaret(at)
+    })
+  }
   useEffect(() => {
     const focus = (): void => textareaRef.current?.focus()
     window.addEventListener(FOCUS_COMPOSER_EVENT, focus)
@@ -141,6 +221,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         else navigate({ name: 'task', projectId, taskId: created.id })
       }
       setText('')
+      historyAt.current = -1
       onClearSelection?.()
     } catch (error) {
       showToast(`Couldn't send the message: ${error instanceof Error ? error.message : String(error)}`)
@@ -158,7 +239,70 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     }
   }
 
+  /** Puts text in the box with the cursor at its end. */
+  const fill = (value: string): void => {
+    setText(value)
+    requestAnimationFrame(() => {
+      const el = textareaRef.current
+      el?.focus()
+      el?.setSelectionRange(value.length, value.length)
+    })
+  }
+
+  /** Takes the queued messages back into the box to change them. */
+  const editQueued = async (): Promise<void> => {
+    if (taskId === undefined) return
+    try {
+      const back = await core.call('tasks.unqueue', { id: taskId })
+      if (back.length) fill([back.join('\n\n'), text].filter(Boolean).join('\n\n'))
+    } catch (error) {
+      showToast(`Couldn't take the message back: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
+    // The / and @ menu takes the arrows, Enter, Tab and Esc while it is open.
+    if (menuOpen) {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault()
+        const step = event.key === 'ArrowDown' ? 1 : -1
+        setMenuAt((at) => (at + step + menuItems.length) % menuItems.length)
+        return
+      }
+      if ((event.key === 'Enter' && !event.shiftKey) || event.key === 'Tab') {
+        event.preventDefault()
+        pick(menuItems[menuAt] ?? menuItems[0]!)
+        return
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setMenuClosed(menuKey)
+        return
+      }
+    }
+    // Tab takes the suggested next message.
+    if (event.key === 'Tab' && !event.shiftKey && showSuggestion && suggestion) {
+      event.preventDefault()
+      fill(suggestion)
+      return
+    }
+    // The up arrow in an empty box (or one still showing a recalled message) brings back earlier
+    // messages, newest first; the down arrow walks forward again.
+    const el = textareaRef.current
+    const atStart = !el || (el.selectionStart === 0 && el.selectionEnd === 0)
+    const past = sentBefore()
+    if (event.key === 'ArrowUp' && (!text || (historyAt.current >= 0 && atStart)) && past.length > 0) {
+      event.preventDefault()
+      historyAt.current = Math.min(historyAt.current + 1, past.length - 1)
+      setText(past[historyAt.current]!)
+      return
+    }
+    if (event.key === 'ArrowDown' && historyAt.current >= 0 && text === past[historyAt.current]) {
+      event.preventDefault()
+      historyAt.current -= 1
+      setText(historyAt.current >= 0 ? past[historyAt.current]! : '')
+      return
+    }
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault()
       void send()
@@ -181,6 +325,56 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           >
             <X size={12} aria-hidden="true" />
           </button>
+        </div>
+      )}
+      {queued.length > 0 && (
+        <div className="mb-2 flex flex-col gap-1.5" aria-label="Queued messages">
+          {queued.map((message, index) => (
+            <div
+              key={`${index}-${message.slice(0, 20)}`}
+              className="flex items-start gap-2 rounded-xl border border-dashed border-rule px-3 py-2 text-[13px] text-ink-muted"
+            >
+              <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">{message}</span>
+              <span className="shrink-0 text-[12px] text-ink-faint">Queued · sends when this reply ends</span>
+              {index === queued.length - 1 && (
+                <button type="button" className="btn btn-text shrink-0 px-0 text-[12px]" onClick={() => void editQueued()}>
+                  Edit
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {menuOpen && mention && (
+        <div className="relative">
+          <div
+            className={`menu left-0 right-0 ${menuBelow === null ? 'bottom-1' : ''}`}
+            style={menuBelow === null ? undefined : { top: menuBelow }}
+            role="listbox" aria-label={mention.kind === 'skill' ? 'Skills' : 'Files'}>
+            <div className="px-2.5 pb-1 pt-1.5 text-[11px] uppercase tracking-wide text-ink-faint">{mention.kind === 'skill' ? 'Skills' : 'Files in this project'}</div>
+            <div className="scroll-area max-h-[240px] overflow-y-auto">
+              {menuItems.map((choice, index) => (
+                <button
+                  key={choice}
+                  type="button"
+                  role="option"
+                  aria-selected={index === menuAt}
+                  className="menu-item font-mono text-[12px]"
+                  onMouseEnter={() => setMenuAt(index)}
+                  onMouseDown={(event) => {
+                    // Keep the focus in the box; the click picks.
+                    event.preventDefault()
+                    pick(choice)
+                  }}
+                >
+                  <span className="truncate">
+                    {mention.kind === 'skill' ? '/' : '@'}
+                    {choice}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       )}
       <Glass
@@ -212,16 +406,29 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                 ? 'Drop to add the file’s path'
                 : running
                   ? 'Reply while it works, or press Esc to stop'
-                  : (placeholder ?? 'What should we work on?')
+                  : showSuggestion && suggestion
+                    ? suggestion
+                    : (placeholder ?? 'What should we work on?')
           }
-          onChange={(event) => setText(event.target.value)}
+          onChange={(event) => {
+            setText(event.target.value)
+            setCaret(event.target.selectionStart ?? event.target.value.length)
+          }}
+          onSelect={(event) => setCaret(event.currentTarget.selectionStart ?? 0)}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
           rows={1}
           className="w-full resize-none bg-transparent px-2 pt-1 text-[15px] leading-normal text-ink outline-none placeholder:text-ink-faint"
         />
         <div className="mt-2 flex items-center justify-between gap-2">
-          <ModelPicker projectId={projectId} />
+          <div className="flex min-w-0 items-center gap-2">
+            <ModelPicker projectId={projectId} />
+            {showSuggestion && (
+              <span className="truncate text-[12px] text-ink-faint">
+                <kbd className="kbd">Tab</kbd> to use the suggestion
+              </span>
+            )}
+          </div>
           {running ? (
             <button
               type="button"

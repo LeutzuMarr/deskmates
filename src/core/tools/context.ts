@@ -7,8 +7,10 @@ import type { SubagentRunner } from '../engine/subagents'
 import type { MemoriesRepo } from '../store/repos'
 import type { RenderClient } from '../render/types'
 import type { BrowserService } from '../browser/service'
+import type { ChromeDriver } from '../chrome/service'
 import type { TaskScheduler } from '../schedules/task-scheduler'
 import type { ScreenControl } from './screen-control'
+import type { GoogleAuth } from '../google/auth'
 
 /** A past chat (a task) as the chat-history tools see it. */
 export interface ChatSummary {
@@ -55,6 +57,8 @@ export interface ToolContext {
   render?: RenderClient
   /** The agent browser the user can watch from the title bar. Absent without the app. */
   browser?: BrowserService
+  /** The user's own Chrome; the core's one shared connection when absent. */
+  chrome?: ChromeDriver
   /** Who is acting, as the user reads it in browser questions: "Work", "Design", or a scheduled task's name. */
   agentName?: string
   /** Screen control (screen_look / screen_act); absent without a desktop. */
@@ -65,6 +69,8 @@ export interface ToolContext {
   cliModel?: boolean
   /** Deskmates' data folder, where shared memory documents and chat widgets are kept. */
   dataDir?: string
+  /** The connected Google account (Gmail, Calendar, Drive); absent when Google isn't set up. */
+  google?: GoogleAuth
   /** Past chats in Deskmates, for conversation_search, recent_chats and read_conversation. */
   chats?: ChatHistory
   /** Stops the run (so a browser wait doesn't outlive it). */

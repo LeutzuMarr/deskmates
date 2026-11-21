@@ -19,7 +19,13 @@ describe('quick replies', () => {
 
   it('ignores lists that are not a question to the user', () => {
     expect(quickReplies('Done. I changed:\n1. the header\n2. the footer')).toBeNull()
-    expect(quickReplies('Should I go on?')).toBeNull()
     expect(quickReplies('Pick one?\n1. only one')).toBeNull()
+  })
+
+  it('offers Yes and No for a closing yes/no question, but not for a choice', () => {
+    expect(quickReplies('Fixed the header.\n\nShould I go on?')).toEqual({ question: 'Should I go on?', options: ['Yes', 'No'] })
+    expect(quickReplies('Done. Want me to push it?')).toEqual({ question: 'Want me to push it?', options: ['Yes', 'No'] })
+    expect(quickReplies('Should I use tabs or spaces?')).toBeNull()
+    expect(quickReplies('What colour do you want?')).toBeNull()
   })
 })

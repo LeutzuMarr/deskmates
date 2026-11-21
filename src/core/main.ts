@@ -26,6 +26,7 @@ import { buildTools } from './tools'
 import { PluginsService } from './extensions/plugins'
 import { SkillsService } from './extensions/skills'
 import { McpConnectorManager, createMcpTransport } from './connectors'
+import { GoogleAuth, type GoogleClient } from './google/auth'
 import { createSubagentRunner } from './engine/subagents'
 import { ChildProcessSpawner } from './terminals/process'
 import { PsAttachHelperSpawner } from './terminals/attach'
@@ -44,6 +45,7 @@ import { RemoteAccess, type RemoteConfig } from './phone/remote'
 import { DuoService } from './duo/service'
 import { prepareDuoWorkspace } from './duo/workspace'
 import { duoTools } from './tools/duo'
+import { ensureFreebuffPromptTools, setPromptToolsCommand } from './terminals/prompt-tools-config'
 import { agentBrowserTools } from './tools/browser'
 import { webFetchText, webSearchResults } from './tools/web'
 import { myPromptBrief, myPromptPath, promptSectionTool } from './engine/my-prompt'
@@ -134,9 +136,24 @@ async function main(): Promise<void> {
           }),
     onActiveChange: (active) => parentPort?.postMessage({ type: 'computer-use', active } satisfies CoreToHost)
   })
+  // Google sign-in: the OAuth client comes from the app's settings (loaded once from the
+  // client_secret file) or the environment; the user only presses Connect.
+  const google = new GoogleAuth({
+    dataDir,
+    client: () => {
+      const saved = repos.settings.getExtra<GoogleClient | null>('googleClient', null)
+      if (saved?.clientId && saved.clientSecret) return saved
+      const clientId = process.env.DESKMATES_GOOGLE_CLIENT_ID?.trim()
+      const clientSecret = process.env.DESKMATES_GOOGLE_CLIENT_SECRET?.trim()
+      return clientId && clientSecret ? { clientId, clientSecret } : null
+    },
+    onChange: (status) => bus.emit({ type: 'google.updated', status })
+  })
+  void google.load()
   const runner = new TaskRunner({
     repos,
     dataDir,
+    google,
     bus,
     // Read only when a task runs, by which time the agent kit below exists.
     agentCommand: () => commandPath,
@@ -168,7 +185,7 @@ async function main(): Promise<void> {
     mode: repos.settings.getPcMode()
   })
   const botHost = host ?? new UnavailableHost()
-  const botRunner = new BotRunner({ repos, bus, host: botHost, models, dataDir, skills, connectors })
+  const botRunner = new BotRunner({ repos, bus, host: botHost, models, dataDir, skills, connectors, promptToolsFor: (folder, agent, options) => runner.promptToolsFor(folder, agent, options) })
   const scheduler = new Scheduler({ repos, bus, runner: commandRunner, dataDir, run: botRunner })
   const taskWakeTimers = new WakeTimerManager({ runner: commandRunner, dataDir })
   const taskSchedules = new TaskScheduler({
@@ -210,6 +227,15 @@ async function main(): Promise<void> {
   })
 
   const commandPath = join(kitDir, agentCommandFileName())
+  // Freebuff and OpenCode reach the operating prompt's tools through `deskmates prompt-mcp`.
+  setPromptToolsCommand(commandPath)
+  try {
+    // Test runs use a throwaway data folder: they must not point the user's Freebuff at it.
+    const outcome = process.env.DESKMATES_NO_HOME_CONFIG === '1' ? 'unchanged' : ensureFreebuffPromptTools(commandPath)
+    if (outcome === 'skipped') console.warn("[core] ~/.agents/mcp.json isn't valid JSON, so Freebuff wasn't given the prompt's tools. Fix or remove that file.")
+  } catch (error) {
+    console.error("[core] couldn't give Freebuff the prompt's tools", error)
+  }
   // The mounted prompt directories (DESKMATES_PROMPTS_DIR set by the host; falls back to a local
   // ./prompts for standalone runs). Connected terminal agents get the user's own prompt: its first
   // section in full plus an index of the rest (with line numbers in the real file), written next to
@@ -308,6 +334,8 @@ async function main(): Promise<void> {
     defaultModel: () => repos.settings.get().defaultModel,
     resolveModel: (ref) => models.resolve(ref),
     apiTools: () => ({
+      // The operating prompt's tools first, so Duo's own tools of the same name win.
+      ...runner.promptToolsFor(duoFolder, 'Duo'),
       ...agentBrowserTools({ browser, agent: 'Duo', runKey: 'duo', sendPermit: (domain) => duo.sendPermit(domain), screenshotDir: join(duoFolder, 'screenshots') }),
       ...duoTools(duo, duoPlaybook),
       ...promptSectionTool(myPromptPath(promptRoot)),
@@ -322,7 +350,7 @@ async function main(): Promise<void> {
         execute: async ({ url }, { abortSignal }) => webFetchText(url, abortSignal)
       })
     }),
-    operatingPrompt: () => myPromptBrief('tool', myPromptPath(promptRoot)),
+    operatingPrompt: () => myPromptBrief('tool', myPromptPath(promptRoot), { promptTools: true }),
     notify: (title, body) => bus.emit({ type: 'notify', title, body })
   })
   try {
@@ -343,6 +371,7 @@ async function main(): Promise<void> {
 
   const handlers = createHandlers({
     repos,
+    google,
     bus,
     runner,
     changes,
@@ -369,6 +398,7 @@ async function main(): Promise<void> {
     taskSchedules,
     duo,
     duoTools: () => duoTools(duo, duoPlaybook),
+    promptToolsFor: (folder, agent) => runner.promptToolsFor(folder, agent),
     duoSendPermit: (domain) => duo.sendPermit(domain),
     remote,
     setRemoteConfig: (patch) => repos.settings.setExtra('remote', { ...EMPTY_REMOTE, ...repos.settings.getExtra<RemoteConfig>('remote', EMPTY_REMOTE), ...patch })
@@ -394,7 +424,7 @@ async function main(): Promise<void> {
     port: Number(process.env.DESKMATES_PORT ?? 0),
     agent: {
       token: agentToken,
-      methods: ['app.info', 'projects.list', 'designs.read', 'designs.save', 'designs.create', 'screen.look', 'screen.point', 'screen.say', 'screen.clear', 'browser.state', 'browser.tool', 'duo.tool'],
+      methods: ['app.info', 'projects.list', 'designs.read', 'designs.save', 'designs.create', 'screen.look', 'screen.point', 'screen.say', 'screen.clear', 'browser.state', 'browser.tool', 'duo.tool', 'promptTools.list', 'promptTools.call'],
       events: ['design.updated', 'project.updated']
     }
   })
