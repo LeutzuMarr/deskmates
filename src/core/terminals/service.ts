@@ -82,8 +82,9 @@ export interface TerminalsService {
   /** What the hidden Freebuff behind the Work tab shows about its session; null when none runs. */
   freebuffStatus(folder?: string): FreebuffStatus | null
 
-  /** Freebuff's model list read off an idle running Freebuff; null when none is running idle. */
-  freebuffModels(): Promise<FreebuffModel[] | null>
+  /** Freebuff's model list read off an idle running Freebuff. With `startIn`, a hidden Freebuff is
+   *  started in that folder just for the read when none is idle; otherwise null then. */
+  freebuffModels(startIn?: string): Promise<FreebuffModel[] | null>
 }
 
 const TOOL_NAMES: Record<TerminalTool, string> = { opencode: 'OpenCode', agy: 'Antigravity', freebuff: 'Freebuff' }
@@ -186,8 +187,8 @@ export class TerminalsManager implements TerminalsService {
     return this.freebuff.status(folder)
   }
 
-  freebuffModels(): Promise<FreebuffModel[] | null> {
-    return this.freebuff.listModels()
+  freebuffModels(startIn?: string): Promise<FreebuffModel[] | null> {
+    return this.freebuff.listModels(startIn)
   }
 
   /** Releases the background processes this service owns: the per-folder `opencode serve` and hidden

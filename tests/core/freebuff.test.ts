@@ -196,6 +196,48 @@ describe('Freebuff model list', () => {
     ])
   })
 
+  it("reads Freebuff 0.2.36's picker: reasoning levels, wrapped taglines, costs below a description, the scrollbar", () => {
+    // Captured from Freebuff 0.2.36's /model picker (November 2026), status bar left out.
+    const screen = ` ↑↓ choose model · Tab reasoning · Enter select · Esc cancel
+ ┌──────────────────────────────────────────────────────────────────────────────┐
+ │ › Muse Spark 1.3 • high · Falls back when busy                               │
+ │                      3x · May use data for AI training                       │
+ │ When it's busy, DeepSeek V4.1 Flash answers instead.                         │
+ └──────────────────────────────────────────────────────────────────────────────┘
+
+ POWERFUL · Frontier models like GPT-6.1 Sol and more
+ ┌──────────────────────────────────────────────────────────────────────────────┐
+ │   Muse Ember • medium · Meta · fast · Images · New                           │
+ │                                  Paid plan                                   │▄
+ └──────────────────────────────────────────────────────────────────────────────┘▀
+ ┌──────────────────────────────────────────────────────────────────────────────┐
+ │   Claude Haiku 5.5 · 100k context • medium · Anthropic · fast · Images       │
+ │                                  Paid plan                                   │
+ └──────────────────────────────────────────────────────────────────────────────┘
+
+ STANDARD · Free and low-cost models
+ ┌──────────────────────────────────────────────────────────────────────────────┐
+ │   DeepSeek V4.1 Flash Slow • low · Slow · cheapest · Images · New ·          │
+ │ Promotional                                                                  │
+ │                                      1x                                      │
+ └──────────────────────────────────────────────────────────────────────────────┘
+ ┌──────────────────────────────────────────────────────────────────────────────┐
+ │   Nemotron 3.5 Lightning • high · Fast                                       │▄
+ │                         May use data for AI training                         │▀
+ └──────────────────────────────────────────────────────────────────────────────┘
+
+ FREE · 10/12 hours daily · resets in 6h 11m
+
+ ↑  Show fewer                                                                   █`
+    expect(parsePickerCards(screen)).toEqual([
+      { name: 'Muse Spark 1.3', cost: '3x', note: 'Falls back when busy' },
+      { name: 'Muse Ember', cost: 'Paid plan', note: 'Meta · fast · Images · New' },
+      { name: 'Claude Haiku 5.5', cost: 'Paid plan', note: '100k context · Anthropic · fast · Images' },
+      { name: 'DeepSeek V4.1 Flash Slow', cost: '1x', note: 'Slow · cheapest · Images · New · Promotional' },
+      { name: 'Nemotron 3.5 Lightning', cost: null, note: 'Fast' }
+    ])
+  })
+
   it('replaces the list with a fresh read, dropping models Freebuff no longer offers', () => {
     setFreebuffModels([
       { name: 'New Paid', cost: 'Paid plan' },

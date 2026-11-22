@@ -20,6 +20,8 @@ export class FreebuffPool {
   /** Hosts whose current Freebuff session has been told where the standing instructions are. */
   private readonly instructed = new WeakSet<FreebuffHost>()
   private lastFolder: string | null = null
+  /** Hidden Freebuffs started only to read the model list; stopped with the pool if still open. */
+  private readonly readers = new Set<FreebuffHost>()
 
   async execute(folder: string, prompt: string, model: string | undefined, runOptions: CliRunOptions = {}): Promise<CliRunResult> {
     if (runOptions.signal?.aborted) return { text: '', stopped: true }
@@ -90,17 +92,35 @@ export class FreebuffPool {
     return host && host.current !== 'stopped' && host.current !== 'error' ? host.status() : null
   }
 
-  /** Freebuff's current model list, read off an idle running Freebuff (the one used last first).
-   *  Null when none is running idle: Deskmates never starts a Freebuff session just to read it. */
-  async listModels(): Promise<FreebuffModel[] | null> {
+  /**
+   * Freebuff's current model list, read off an idle running Freebuff (the one used last first).
+   * Null when none is running idle, unless `startIn` names a folder: then a hidden Freebuff of its
+   * own is started there just to open /model, and closed again right after. Opening Freebuff sends
+   * nothing (its first message is what starts a session), and this Freebuff is kept apart from the
+   * project ones, so no turn ever waits on it or shares its screen.
+   */
+  async listModels(startIn?: string): Promise<FreebuffModel[] | null> {
     const last = this.lastFolder ? this.hosts.get(this.lastFolder) : undefined
     const host = [last, ...this.hosts.values()].find((h) => h?.current === 'idle')
-    return host ? host.listModels() : null
+    if (host) return host.listModels()
+    if (!startIn || freebuffBlock()) return null
+    mkdirSync(startIn, { recursive: true })
+    const reader = new FreebuffHost({ workspace: startIn, onState: () => {} })
+    this.readers.add(reader)
+    try {
+      await reader.start()
+      return await reader.listModels()
+    } finally {
+      reader.stop()
+      this.readers.delete(reader)
+    }
   }
 
   dispose(): void {
     for (const host of this.hosts.values()) host.stop()
     this.hosts.clear()
+    for (const reader of this.readers) reader.stop()
+    this.readers.clear()
   }
 
   private hostFor(folder: string, trustAgents = false): FreebuffHost {
