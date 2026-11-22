@@ -3,7 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { FREEBUFF_CURRENT_MODEL, type FreebuffModel, type FreebuffStatus } from '../../shared/freebuff'
 import type { TimelineItem } from '../../shared/protocol'
-import { FreebuffHost, StoppedError, isWorkLine } from './freebuff-host'
+import { FreebuffHost, StoppedError, groupWork, isWorkLine } from './freebuff-host'
 import { THIRD_PARTY_REFUSAL, blockFreebuff, blockedMessage, freebuffBlock, freebuffTurnError } from './freebuff-guard'
 import type { CliRunOptions, CliRunResult } from './managed'
 
@@ -64,6 +64,9 @@ export class FreebuffPool {
 
       const steps = new ActivitySteps(activityId, (item) => runOptions.onItem?.(item))
       const reply = await host.ask(request, (items) => steps.reportAll(items))
+      // The finished reply too, for whatever the last read of the screen missed: its steps then show
+      // as steps rather than inside the answer.
+      if (reply) steps.reportAll(groupWork(reply.split('\n')))
       // An error card on Freebuff's screen isn't an answer: what it says is in Freebuff's own log.
       const refused = turnError()
       if (refused) {

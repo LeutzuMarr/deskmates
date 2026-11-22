@@ -31,7 +31,7 @@ import { resolve as resolvePath } from 'node:path'
 import { buildInstructions, readProjectInstructions } from './instructions'
 import { guideInstructions, guideReminder } from './guides'
 import { LiveTimeline } from './live'
-import { buildTimeline, danglingToolCalls, pendingApprovals } from './timeline'
+import { buildTimeline, danglingToolCalls, freebuffReplyContent, pendingApprovals } from './timeline'
 
 /** Model resolver interface — declared locally per job instructions. */
 export interface ModelResolver {
@@ -841,7 +841,7 @@ export class TaskRunner {
     // Whatever the CLI managed to say is kept even when the run was cut short — stopping a run that
     // had already answered shouldn't throw the answer away.
     if (result.text) {
-      repos.tasks.appendMessages(taskId, [{ role: 'assistant', content: result.text }])
+      repos.tasks.appendMessages(taskId, [{ role: 'assistant', content: resolved.provider === 'freebuff' ? freebuffReplyContent(result.text) : result.text }])
     }
 
     if (result.stopped || controller.signal.aborted) {

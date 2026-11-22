@@ -2,9 +2,26 @@
  * Timeline builder: converts stored messages into timeline items for the UI.
  * Also provides pendingApprovals and danglingToolCalls helpers.
  */
-import type { ModelMessage } from 'ai'
+import type { AssistantContent, ModelMessage } from 'ai'
 import type { ReplySource, TimelineItem, ToolItem } from '../../shared/protocol'
 import type { StoredMessage } from '../store/repos'
+import { replyParts } from '../terminals/freebuff-host'
+
+/**
+ * How a Freebuff reply is stored: its prose as text, and each step it took ("• Read file.ts", its
+ * thinking) as a text part marked as a step. The chat shows a step as a small grey step line rather
+ * than as part of the answer. Plain text parts keep the history valid for any other model.
+ */
+export function freebuffReplyContent(reply: string): AssistantContent {
+  const parts = replyParts(reply)
+  if (!parts.some((part) => part.step)) return reply
+  return parts.map((part) => (part.step ? { type: 'text' as const, text: part.text, providerOptions: { deskmates: { step: 'freebuff' } } } : { type: 'text' as const, text: part.text }))
+}
+
+/** Whether a stored text part is one of Freebuff's steps (see freebuffReplyContent). */
+function isFreebuffStep(part: unknown): boolean {
+  return (part as { providerOptions?: { deskmates?: { step?: unknown } } }).providerOptions?.deskmates?.step === 'freebuff'
+}
 
 const FETCH_TOOLS = /^(WebFetch|web_fetch|fetch_url|browser_open)$/
 const SEARCH_TOOLS = /^(WebSearch|web_search)$/
@@ -112,7 +129,9 @@ export function buildTimeline(stored: StoredMessage[], forks?: Map<number, { ind
           if (text.trim()) items.push({ kind: 'thinking', id: `m${i}r${partIdx}`, at, text })
         } else if ((part as any).type === 'text') {
           const text = ((part as any).text ?? '').toString()
-          if (text.trim()) {
+          if (text.trim() && isFreebuffStep(part)) {
+            items.push({ kind: 'tool', id: `m${i}p${partIdx}`, at, toolName: 'freebuff', input: { activity: text }, state: 'done' })
+          } else if (text.trim()) {
             items.push({ kind: 'assistant', id: `m${i}p${partIdx}`, at, text })
           }
         } else if ((part as any).type === 'tool-call') {
