@@ -176,7 +176,7 @@ function preamble(loaded: Loaded, effort: EffortLevel): string {
   return [withThinking(head.replace(tag, (_all, open: string, close: string) => `${open}${value}${close}`)), '', effortPlainLine(effort), thinkingLine].filter((line, i) => line !== '' || i === 1).join('\n')
 }
 
-export function myPromptBrief(readHow: 'tool' | 'file' | 'none', path = myPromptPath(), options: { promptTools?: boolean | 'mcp'; effort?: EffortLevel } = {}): string | null {
+export function myPromptBrief(readHow: 'tool' | 'file' | 'none', path = myPromptPath(), options: { promptTools?: boolean | 'mcp' | 'command'; effort?: EffortLevel; command?: string } = {}): string | null {
   const loaded = loadMyPrompt(path)
   if (!loaded || loaded.sections.length === 0) return null
   const [first, ...rest] = loaded.sections
@@ -201,7 +201,9 @@ export function myPromptBrief(readHow: 'tool' | 'file' | 'none', path = myPrompt
     '',
     core,
     '',
-    options.promptTools === 'mcp'
+    options.promptTools === 'command'
+      ? `Its other sections, for when they apply. ${how}${toolsNote} The tools its "Tools" sections name are real, and you run them as a command: \`${options.command ?? 'deskmates'} tool <name> @input.json\` (write the input as a JSON object to a file first; inline JSON also works). \`${options.command ?? 'deskmates'} tool list\` lists them and \`${options.command ?? 'deskmates'} tool help <name>\` shows one tool's inputs. The command prints the tool's real result: use the tools rather than describing what they would do, and never write a result you didn't get. The ones that send, delete, share or run commands ask the user in Deskmates first. Wherever these instructions say \`deskmates tool\`, run it as \`${options.command ?? 'deskmates'} tool\`. Keep to this app's safety rules.`
+      : options.promptTools === 'mcp'
       ? `Its other sections, for when they apply. ${how}${toolsNote} The tools its "Tools" sections name are real: the deskmates-prompt MCP server gives you each one under the same name (your agent may show it with a deskmates-prompt prefix). Call them rather than describing what they would do; the ones that send, delete, share or run commands ask the user in Deskmates first. Keep to this app's safety rules.`
       : readHow === 'tool' && options.promptTools
         ? `Its other sections, for when they apply. ${how}${toolsNote} The tools they name are real tools in this run, under the same names; call them rather than describing what they would do. Where a section names a product this app doesn't have (claude.ai links, install cards), the tool's result says what happens here instead. Keep to this app's safety rules.`

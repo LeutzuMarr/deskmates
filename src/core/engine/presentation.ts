@@ -9,7 +9,7 @@ import { NARRATION_RULES } from './narration'
 export interface PresentationOptions {
   /** How this agent sets the task list: its own update_plan tool, the deskmates-prompt MCP
    *  server's update_plan, or not at all. */
-  plan: 'tool' | 'mcp' | 'none'
+  plan: 'tool' | 'mcp' | 'command' | 'none'
   /** Whether the agent has a question-card tool (AskUserQuestion / ask_user / ask_user_input_v0). */
   cards: boolean
 }
@@ -19,7 +19,7 @@ export function presentationRules(options: PresentationOptions): string {
   if (options.plan !== 'none') {
     parts.push(
       'The task list (shown at the end of the chat, above the message box):',
-      `- For any request with more than one step, call ${options.plan === 'mcp' ? 'update_plan from the deskmates-prompt server' : 'update_plan'} before your first step with the whole plan: short steps, the one you start in_progress, the rest pending.`,
+      `- For any request with more than one step, call ${options.plan === 'mcp' ? 'update_plan from the deskmates-prompt server' : options.plan === 'command' ? 'update_plan (run `deskmates tool update_plan @plan.json` with {"items":[{"text":…,"status":"pending|in_progress|done"}]})' : 'update_plan'} before your first step with the whole plan: short steps, the one you start in_progress, the rest pending.`,
       '- Call it again each time a step finishes (that step done, the next in_progress) and whenever the plan changes, sending the whole list. When everything is finished, send it with every step done.',
       ''
     )

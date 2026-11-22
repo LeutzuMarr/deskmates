@@ -396,16 +396,17 @@ export function guideInstructions(runKey: string, text: string, dir?: string, fo
  * For command-line agents (Freebuff, OpenCode, Antigravity), whose instructions are set once per
  * session: a line added to the message they're sent, naming the guide tool to call first.
  */
-export function guideReminder(text: string, dir?: string, force: GuideKind[] = []): string {
+export function guideReminder(text: string, dir?: string, force: GuideKind[] = [], how: 'mcp' | 'command' = 'mcp'): string {
   const calls: string[] = []
+  const run = (name: string, input = ''): string => (how === 'command' ? `\`deskmates tool ${name}${input ? ` ${input}` : ''}\`` : name)
   for (const kind of new Set([...guidesForMessage(text), ...force])) {
     if (!guidePath(kind, dir)) continue
-    if (kind === 'chrome') calls.push('read_chrome_instructions (before your first Chrome step)')
-    if (kind === 'research') calls.push('read_research_instructions (before you search)')
-    if (kind === 'visualize') calls.push(`mcp__visualize__read_me with modules ${JSON.stringify(visualizeModulesFor(text))} (before you draw)`)
+    if (kind === 'chrome') calls.push(`${run('read_chrome_instructions')} (before your first Chrome step)`)
+    if (kind === 'research') calls.push(`${run('read_research_instructions')} (before you search)`)
+    if (kind === 'visualize') calls.push(`${run('mcp__visualize__read_me', how === 'command' ? JSON.stringify(JSON.stringify({ modules: visualizeModulesFor(text) })) : '')}${how === 'command' ? '' : ` with modules ${JSON.stringify(visualizeModulesFor(text))}`} (before you draw)`)
   }
   if (!calls.length) return ''
-  return `\n\n[Deskmates: this task needs the user's guides. Call ${calls.join(', and ')} from the deskmates-prompt tools first, then follow them for this whole task. They rank above any skill.]`
+  return `\n\n[Deskmates: this task needs the user's guides. ${how === 'command' ? 'Run' : 'Call'} ${calls.join(', and ')}${how === 'command' ? '' : ' from the deskmates-prompt tools'} first, then follow them for this whole task. They rank above any skill.]`
 }
 
 /**

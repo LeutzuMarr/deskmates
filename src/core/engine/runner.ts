@@ -807,7 +807,7 @@ export class TaskRunner {
       ? "[Deskmates: the user replaced their previous message with the one below (or asked for a new answer to it). Forget your earlier answer to it and anything you did for it, and answer this one fresh.]\n\n"
       : ''
     const researchNote = research ? '\n\n[Deskmates: the user turned Research on for this message: research it thoroughly from many sources and end with the sources.]' : ''
-    const prompt = `${replaced}${userText.trim()}${guideReminder(userText, undefined, research ? ['research'] : [])}${researchNote}`
+    const prompt = `${replaced}${userText.trim()}${guideReminder(userText, undefined, research ? ['research'] : [], resolved.provider === 'freebuff' ? 'command' : 'mcp')}${researchNote}`
 
     const live = new LiveTimeline(taskId, bus, () => Date.now())
     /** Whether the agent said anything during the turn (Freebuff shows its prose as it goes). */

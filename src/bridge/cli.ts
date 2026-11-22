@@ -42,6 +42,9 @@ Commands:
   browser back                           go back a page
   browser tabs [list|switch|close] [id]  list, switch or close tabs
   browser wait [seconds]                 wait for a slow page, then read it
+  tool list [words]                      the operating prompt's tools (Gmail, Calendar, Chrome, plan…)
+  tool help <name>                       one tool's description and inputs
+  tool <name> [json|@file.json|-]        run a tool and print its result
                                          (--as "<name>" names who is asking in the app)
   mcp                                    run the MCP server on stdio
   prompt-mcp                             run the operating prompt’s tools as an MCP server on stdio
@@ -107,6 +110,7 @@ export async function main(argv: string[], deps: CliDeps): Promise<number> {
     if (command === 'browser') return await cmdBrowser(deps, parsed, sub, rest)
     if (command === 'mcp') return await cmdMcp(deps, dataDir)
     if (command === 'prompt-mcp') return await cmdPromptMcp(deps, dataDir)
+    if (command === 'tool') return await cmdTool(deps, dataDir, sub, rest)
     deps.error(`Unknown command: ${command}. Run deskmates help for the list.`)
     return EXIT_USAGE
   } catch (error) {
@@ -362,6 +366,65 @@ async function cmdPromptMcp(deps: CliDeps, dataDir: string): Promise<number> {
   const folder = process.env.DESKMATES_FOLDER?.trim() || process.cwd()
   await runPromptMcpServerOnStdio({ call, folder, agent })
   return EXIT_OK
+}
+
+/**
+ * tool list [words] | tool help <name> | tool <name> [json | @file.json | -]: the operating prompt's
+ * tools as a command, for agents that use them by running commands (Freebuff). Same tools, same
+ * names and the same approvals as through the prompt-tools server; the result is printed.
+ */
+async function cmdTool(deps: CliDeps, dataDir: string, sub: string | undefined, rest: string[]): Promise<number> {
+  const client = await deps.connectCore({ dataDir })
+  try {
+    if (!sub || sub === 'list') {
+      const words = rest.join(' ').toLowerCase().split(/\s+/).filter(Boolean)
+      const tools = await client.call('promptTools.list', {})
+      const shown = tools.filter((t) => words.every((w) => `${t.name} ${t.description}`.toLowerCase().includes(w)))
+      deps.log(shown.map((t) => `${t.name}: ${t.description.replace(/\s+/g, ' ').slice(0, 140)}`).join('\n') || 'No tool matches.')
+      deps.log('\nRun `deskmates tool help <name>` for a tool\'s inputs, then `deskmates tool <name> @input.json` (or inline JSON).')
+      return EXIT_OK
+    }
+    if (sub === 'help') {
+      const name = rest[0]
+      const tool = (await client.call('promptTools.list', {})).find((t) => t.name === name)
+      if (!tool) {
+        deps.error(`There is no tool called ${name ?? '(none given)'}. Run deskmates tool list.`)
+        return EXIT_USAGE
+      }
+      deps.log(`${tool.name}\n\n${tool.description}\n\nInput (JSON schema):\n${JSON.stringify(tool.inputSchema, null, 2)}`)
+      return EXIT_OK
+    }
+    let raw = rest.join(' ').trim()
+    if (raw === '-') raw = await readStdin()
+    else if (raw.startsWith('@')) raw = readFileSync(raw.slice(1).replace(/^"|"$/g, ''), 'utf8')
+    let input: Record<string, unknown> = {}
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw.replace(/^﻿/, '')) as unknown
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('not an object')
+        input = parsed as Record<string, unknown>
+      } catch {
+        deps.error('The input must be a JSON object: inline, @path-to-file.json, or - for stdin. Writing it to a file avoids quoting trouble.')
+        return EXIT_USAGE
+      }
+    }
+    const folder = process.env.DESKMATES_FOLDER?.trim() || process.cwd()
+    const agent = process.env.DESKMATES_AGENT?.trim() || 'Freebuff'
+    const result = await client.call('promptTools.call', { folder, agent, name: sub, input })
+    deps.log(result.text)
+    return EXIT_OK
+  } finally {
+    client.close()
+  }
+}
+
+function readStdin(): Promise<string> {
+  return new Promise((resolve) => {
+    let data = ''
+    process.stdin.setEncoding('utf8')
+    process.stdin.on('data', (chunk) => (data += chunk))
+    process.stdin.on('end', () => resolve(data))
+  })
 }
 
 /** guide: prints the guide file; a missing file means the app hasn't run yet. */
