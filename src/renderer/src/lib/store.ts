@@ -150,6 +150,12 @@ interface StoreState {
   /** Whether the browser panel is open (desktop only). */
   browserOpen: boolean
   setBrowserOpen: (open: boolean) => void
+  /** The artifact open in the panel beside the chat (Claude's artifact view). */
+  artifact: { taskId: string; itemId: string } | null
+  setArtifact: (artifact: { taskId: string; itemId: string } | null) => void
+  /** The task whose view can show the artifact panel (the Work tab's open task), or null. */
+  artifactHost: string | null
+  setArtifactHost: (taskId: string | null) => void
   /** Every project's scheduled tasks. */
   taskSchedules: TaskSchedule[]
   /** The file each design's preview shows (relative to the design folder); unset means its default page. */
@@ -638,6 +644,10 @@ export const useStore = create<StoreState>()((set, get) => {
     browser: null,
     browserOpen: false,
     setBrowserOpen: (open) => set({ browserOpen: open }),
+    artifact: null,
+    setArtifact: (artifact) => set({ artifact }),
+    artifactHost: null,
+    setArtifactHost: (taskId) => set({ artifactHost: taskId }),
     taskSchedules: [],
     designFiles: {},
     unread: {},

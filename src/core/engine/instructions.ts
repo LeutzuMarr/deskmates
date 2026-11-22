@@ -1,6 +1,7 @@
 /**
  * System-instructions builder for the Deskmates assistant.
  */
+import { knowledgeInstructions } from '../tools/knowledge'
 import { readFileSync, existsSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Memory, Project, ProviderId, Settings } from '../../shared/protocol'
@@ -91,6 +92,10 @@ export interface BuildInstructionsInput {
   project: Project
   settings: Settings
   memories: Memory[]
+  /** The project's knowledge files as text (Claude's project knowledge). */
+  knowledge?: Array<{ name: string; text: string }>
+  /** Recent thumbs-down replies in this project with the user's reason, newest first. */
+  criticism?: Array<{ comment: string; text: string }>
   projectInstructions: string | null
   now: Date
   model: { provider: ProviderId; modelId: string }
@@ -309,6 +314,20 @@ function pushUserContext(parts: string[], input: BuildInstructionsInput): void {
   } else {
     parts.push('Saved memories:')
     parts.push('No saved memories yet.')
+  }
+
+  // 8.2 Project knowledge
+  const knowledge = knowledgeInstructions(input.knowledge ?? [])
+  if (knowledge) {
+    parts.push('')
+    parts.push(knowledge)
+  }
+
+  // 8.3 What the user disliked in earlier replies (thumbs down with a reason)
+  if (input.criticism?.length) {
+    parts.push('')
+    parts.push("Feedback the user gave on earlier replies in this project (thumbs down, with their reason). Don't repeat these mistakes:")
+    for (const c of input.criticism) parts.push(`- "${c.comment.replace(/\s+/g, ' ').trim()}" (on a reply that began: "${c.text.replace(/\s+/g, ' ').trim().slice(0, 140)}")`)
   }
 
   // 8.5 Installed skills

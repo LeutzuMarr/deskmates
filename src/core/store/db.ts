@@ -94,7 +94,22 @@ export const MIGRATIONS: string[] = [
    CREATE TABLE duo_todos (id TEXT PRIMARY KEY, text TEXT NOT NULL, due TEXT, done INTEGER NOT NULL DEFAULT 0, source TEXT NOT NULL, created_at INTEGER NOT NULL);
    CREATE TABLE duo_sent (domain TEXT NOT NULL, company TEXT NOT NULL, kind TEXT NOT NULL, at INTEGER NOT NULL);
    CREATE INDEX duo_sent_by_domain ON duo_sent(domain);`,
-  `ALTER TABLE tasks ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;`
+  `ALTER TABLE tasks ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;`,
+  `CREATE TABLE message_versions (
+     task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+     at INTEGER NOT NULL, version INTEGER NOT NULL, body TEXT NOT NULL DEFAULT '',
+     active INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL,
+     PRIMARY KEY (task_id, at, version));
+   CREATE TABLE feedback (
+     task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+     item_id TEXT NOT NULL, rating TEXT NOT NULL, comment TEXT NOT NULL DEFAULT '', text TEXT NOT NULL DEFAULT '',
+     created_at INTEGER NOT NULL,
+     PRIMARY KEY (task_id, item_id));
+   CREATE TABLE knowledge (
+     id TEXT PRIMARY KEY,
+     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+     name TEXT NOT NULL, text TEXT NOT NULL, size INTEGER NOT NULL, created_at INTEGER NOT NULL);
+   CREATE INDEX knowledge_by_project ON knowledge(project_id, created_at);`
 ]
 
 export function openDatabase(file: string): DatabaseSync {

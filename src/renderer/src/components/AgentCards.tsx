@@ -4,6 +4,7 @@ import { core } from '../lib/rpc'
 import { useStore } from '../lib/store'
 import { concentricVars } from '../lib/design'
 import { AssistantText } from './Markdown'
+import { ArtifactCard } from './ArtifactPanel'
 import type { ToolItem } from '../../../shared/protocol'
 import type { QuickReplies } from '../../../shared/quick-replies'
 import { WIDGET_PROMPT_MESSAGE, WIDGET_TOOL_NAMES } from '../../../shared/widgets'
@@ -259,11 +260,15 @@ function FileCards({ item }: { item: ToolItem }) {
 
 /** The card for one of CARD_TOOLS. `answered` is true once the user has written after it. */
 export function AgentCard({ taskId, item, answered, running }: { taskId: string; item: ToolItem; answered: boolean; running: boolean }) {
+  const artifactHost = useStore((s) => s.artifactHost)
   if (item.toolName === 'SendUserMessage') {
     const message = String(((item.input ?? {}) as { message?: unknown }).message ?? '')
     return message ? <AssistantText text={message} /> : null
   }
   if (item.toolName === 'SendUserFile' || item.toolName === 'present_files') return item.state === 'done' ? <FileCards item={item} /> : null
+  // Artifacts open in the panel beside the chat, as in Claude, where the view has that panel (the
+  // Work tab); elsewhere, and for the other widgets, they draw in place.
+  if (item.toolName === 'Artifact' && artifactHost === taskId) return <ArtifactCard taskId={taskId} item={item} running={running} />
   if (WIDGET_TOOL_NAMES.includes(item.toolName)) return <WidgetCard taskId={taskId} item={item} running={running} />
   return <QuestionCard taskId={taskId} item={item} answered={answered} running={running} />
 }

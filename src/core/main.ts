@@ -48,7 +48,7 @@ import { duoTools } from './tools/duo'
 import { ensureFreebuffPromptTools, setPromptToolsCommand } from './terminals/prompt-tools-config'
 import { webFetchText, webSearchResults } from './tools/web'
 import { myPromptBrief, myPromptPath, promptSectionTool } from './engine/my-prompt'
-import { setEffortSource } from './engine/effort'
+import { setEffortSource, setThinkingSource } from './engine/effort'
 import { DEFAULT_DUO_PROFILE, type DuoProfile } from '../shared/duo'
 import { tool as aiTool } from 'ai'
 import { z } from 'zod'
@@ -101,6 +101,7 @@ async function main(): Promise<void> {
   const repos = createRepos(db)
   // Every agent's instructions carry the effort level the user picked next to the model.
   setEffortSource(() => repos.settings.get().effort)
+  setThinkingSource(() => repos.settings.get().thinking)
   repos.tasks.resetInterrupted()
   repos.runs.resetInterrupted()
 

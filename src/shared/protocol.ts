@@ -119,6 +119,9 @@ export interface Settings {
   responseStyle: ResponseStyle
   /** How hard every agent thinks: the operating prompt's effort level (shared/effort.ts). */
   effort: EffortLevel
+  /** Extended thinking: 'auto' lets the model decide (the prompt's own <thinking_mode>), 'on'
+   *  thinks before every reply, 'off' answers straight away. */
+  thinking: ThinkingMode
   /** Base URL for the OpenAI-compatible provider (OpenRouter, Ollama, LM Studio…), ending in /v1. */
   compatibleBaseUrl: string
   /** Base URL of the local Ollama server's OpenAI-compatible API, ending in /v1. */
@@ -180,11 +183,15 @@ export interface PhoneInfo {
   error: string | null
 }
 
+export type ThinkingMode = 'auto' | 'on' | 'off'
+export const THINKING_MODES: readonly ThinkingMode[] = ['auto', 'on', 'off']
+
 export const DEFAULT_SETTINGS: Settings = {
   defaultModel: null,
   globalInstructions: '',
   responseStyle: 'normal',
   effort: 'medium',
+  thinking: 'auto',
   compatibleBaseUrl: 'https://openrouter.ai/api/v1',
   ollamaBaseUrl: 'http://localhost:11434/v1',
   lmstudioBaseUrl: 'http://localhost:1234/v1',
@@ -271,11 +278,38 @@ export interface ToolItem {
 
 export type TimelineItem =
   /** images: data: URLs of the pictures sent with the message. */
-  | { kind: 'user'; id: string; at: number; text: string; images?: string[] }
-  | { kind: 'assistant'; id: string; at: number; text: string }
+  /** position: where the message is in the chat (for Edit and versions); versions: when it was
+   *  edited or retried, which version shows (0-based) of how many. */
+  | { kind: 'user'; id: string; at: number; text: string; images?: string[]; files?: string[]; position?: number; versions?: { index: number; count: number } }
+  /** sources: the web pages the reply drew on (from the searches and pages read before it). */
+  | { kind: 'assistant'; id: string; at: number; text: string; sources?: ReplySource[] }
   /** The model's reasoning before it answers or acts, for models that share it (Gemini 2.5+, DeepSeek R1 and the like). */
   | { kind: 'thinking'; id: string; at: number; text: string }
   | ToolItem
+
+/** A file in a project's knowledge (Claude's "project knowledge"): its text goes to every chat in the project. */
+export interface KnowledgeFile {
+  id: string
+  projectId: string
+  name: string
+  /** Bytes of the file as added. */
+  size: number
+  /** Characters of text read from it. */
+  chars: number
+  createdAt: number
+}
+
+/** A thumbs up or down on one reply, with the user's reason. */
+export interface ReplyFeedback {
+  rating: 'up' | 'down'
+  comment: string
+}
+
+/** A web page an answer used, for the sources under a reply. */
+export interface ReplySource {
+  title: string
+  url: string
+}
 
 export interface Memory {
   id: string
@@ -677,8 +711,25 @@ export interface RpcMethods {
   'tasks.queued': { params: { id: string }; result: string[] }
   /** How full the model's context was after the task's last step. */
   'tasks.context': { params: { id: string }; result: { used: number; window: number } | null }
-  /** Edit (with text) or Retry (without): replaces the last message and its reply, then sends again. */
-  'tasks.resend': { params: { id: string; text?: string }; result: null }
+  /** Edit (with text) or Retry (without) the message at `position` (the last one by default): what
+   *  was there stays as a version the user can flip back to, and the message goes out again. */
+  'tasks.resend': { params: { id: string; text?: string; position?: number }; result: null }
+  /** Shows version `index` (0-based) of the edited message at `position`. */
+  'tasks.switchVersion': { params: { id: string; position: number; index: number }; result: null }
+  /** The thumbs up and down on this task's replies, by timeline item id. */
+  'tasks.feedback': { params: { id: string }; result: Record<string, ReplyFeedback> }
+  /** Rates one reply (rating null clears it). */
+  'tasks.setFeedback': { params: { id: string; itemId: string; rating: 'up' | 'down' | null; comment?: string; text?: string }; result: Record<string, ReplyFeedback> }
+  'knowledge.list': { params: { projectId: string }; result: KnowledgeFile[] }
+  /** Adds a file to the project's knowledge; its text is read here (Word, Excel, PowerPoint, PDF, text). */
+  'knowledge.add': { params: { projectId: string; name: string; dataBase64: string }; result: KnowledgeFile[] }
+  'knowledge.delete': { params: { projectId: string; id: string }; result: KnowledgeFile[] }
+  /** How dictation works here: 'record' (a model writes the recording down), 'system' (Windows speech), 'none'. */
+  'dictation.mode': { params: NoParams; result: 'record' | 'system' | 'none' }
+  'dictation.transcribe': { params: { audioBase64: string; mediaType: string }; result: string }
+  /** Starts or stops Windows speech recognition; phrases arrive as dictation.text events. */
+  'dictation.start': { params: NoParams; result: null }
+  'dictation.stop': { params: NoParams; result: null }
   /** The likely next message for the task, when its last reply ended (Tab accepts it). */
   'tasks.suggestion': { params: { id: string }; result: string | null }
   /** Takes the queued messages back (to edit them in the box); returns them. */
@@ -955,6 +1006,9 @@ export type CoreEvent =
   | { type: 'task.queued'; taskId: string; queued: string[] }
   /** Tokens the model read in the task's last step, against its context window. */
   | { type: 'task.context'; taskId: string; used: number; window: number }
+  | { type: 'dictation.text'; text: string }
+  | { type: 'dictation.state'; listening: boolean; error?: string; language?: string }
+  | { type: 'knowledge.updated'; projectId: string; files: KnowledgeFile[] }
   /** The likely next message once a reply ends (null clears it). */
   | { type: 'task.suggestion'; taskId: string; text: string | null }
   | { type: 'changes.updated'; taskId: string; changes: FileChange[] }

@@ -3,6 +3,10 @@ import type { ComponentPropsWithoutRef, ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import type { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
+import 'katex/dist/katex.min.css'
+import { withMath } from '../lib/math'
 import { CopyButton } from './CopyButton'
 
 /** The language a fenced block was tagged with (```ts → "ts"), if any. */
@@ -34,11 +38,14 @@ const components: Components = {
   a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />
 }
 
+const REMARK = [remarkGfm, [remarkMath, { singleDollarTextMath: false }]] as NonNullable<Parameters<typeof Markdown>[0]['remarkPlugins']>
+const REHYPE = [[rehypeKatex, { throwOnError: false, strict: 'ignore' }]] as NonNullable<Parameters<typeof Markdown>[0]['rehypePlugins']>
+
 export function AssistantText({ text }: { text: string }) {
   return (
     <div className="markdown">
-      <Markdown remarkPlugins={[remarkGfm]} components={components}>
-        {text}
+      <Markdown remarkPlugins={REMARK} rehypePlugins={REHYPE} components={components}>
+        {withMath(text)}
       </Markdown>
     </div>
   )

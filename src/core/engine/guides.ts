@@ -135,26 +135,37 @@ export function chromeInstructions(section?: string, dir?: string): string | nul
     .trim()
 }
 
-/** Runs that have been given the Chrome instructions, so they are handed over once per run. */
-const chromeGiven = new Map<string, number>()
+/** Which guides each run has been given (by run key and kind), so each is handed over once. */
+const given = new Map<string, number>()
 const GIVEN_FOR_MS = 6 * 60 * 60_000
 
+/** Notes that `runKey` has had guide `kind` (read it, or got it with a tool result or its instructions). */
+export function markGuideGiven(runKey: string, kind: GuideKind): void {
+  given.set(`${kind}:${runKey}`, Date.now())
+  if (given.size > 1500) given.delete(given.keys().next().value as string)
+}
+
+/** Whether this run still needs guide `kind` (and the file exists to give). */
+export function guideDue(runKey: string, kind: GuideKind, dir?: string): boolean {
+  const at = given.get(`${kind}:${runKey}`)
+  if (at !== undefined && Date.now() - at < GIVEN_FOR_MS) return false
+  return guidePath(kind, dir) !== null
+}
+
 export function markChromeInstructionsGiven(runKey: string): void {
-  chromeGiven.set(runKey, Date.now())
-  if (chromeGiven.size > 500) chromeGiven.delete(chromeGiven.keys().next().value as string)
+  markGuideGiven(runKey, 'chrome')
 }
 
 /** Whether this run still needs the Chrome instructions (and the file exists to give). */
 export function chromeInstructionsDue(runKey: string, dir?: string): boolean {
-  const at = chromeGiven.get(runKey)
-  if (at !== undefined && Date.now() - at < GIVEN_FOR_MS) return false
-  return guidePath('chrome', dir) !== null
+  return guideDue(runKey, 'chrome', dir)
 }
 
-/** Forgets which runs had the Chrome instructions (tests). */
+/** Forgets which runs had which guides (tests). */
 export function resetChromeInstructions(): void {
-  chromeGiven.clear()
+  given.clear()
 }
+export const resetGuides = resetChromeInstructions
 
 // ---- Research ----
 
@@ -281,9 +292,12 @@ export function guideTools(runKey: string, dir?: string): ToolSet {
       description:
         'The instructions for research: read them when the user asks you to research something, or a question needs a thorough, multi-source answer (not for simple facts or chat). They say when to ask clarifying questions and how to launch the research agent (mcp__claude_ai__launch_extended_search_task).',
       inputSchema: z.object({}),
-      execute: async () =>
-        researchInstructions(dir) ??
-        "The research instructions aren't in Deskmates' prompts folder. Research with WebSearch and WebFetch yourself: several searches, read the best sources, and end with a short Sources list."
+      execute: async () => {
+        const text = researchInstructions(dir)
+        if (!text) return "The research instructions aren't in Deskmates' prompts folder. Research with WebSearch and WebFetch yourself: several searches, read the best sources, and end with a short Sources list."
+        markGuideGiven(runKey, 'research')
+        return text
+      }
     })
   }
 }
@@ -298,4 +312,96 @@ export function guideToolInfos(): Array<{ name: string; description: string; inp
     const { $schema: _drop, ...schema } = z.toJSONSchema(t.inputSchema, { io: 'input' }) as Record<string, unknown>
     return { name, description: t.description, inputSchema: schema }
   })
+}
+
+// ---- When a task needs a guide ----
+
+const RESEARCH_ASK = /\b(research|investigate|look into|deep[- ]dive|find out everything|comprehensive (?:overview|review|report|analysis)|literature review|market (?:research|analysis)|competitive analysis|state of the art|cite (?:your )?sources|with sources|report on|write (?:me )?a report)\b/i
+const CHROME_ASK = /\b(chrome|my browser|my tabs?|in (?:the|my) browser|open (?:the )?(?:website|site|page|tab)|go to (?:https?:\/\/|www\.|[a-z0-9-]+\.(?:com|org|net|io|ro|dev|app|ai|co)\b)|log ?in to|sign ?in to|on (?:linkedin|gmail|facebook|instagram|x\.com|twitter|youtube|amazon|github)|fill (?:in|out) (?:the |this |a )?form)\b/i
+const VISUALIZE_ASK = /\b(diagram|flow ?chart|chart|graph|plot|visuali[sz]e|visuali[sz]ation|illustrate|illustration|draw (?:me )?|sketch|mock-?up|wireframe|infographic|interactive (?:demo|widget|explainer)|calculator)\b/i
+
+/** The guides a user's message calls for, judged from its words. */
+export function guidesForMessage(text: string): GuideKind[] {
+  const out: GuideKind[] = []
+  if (RESEARCH_ASK.test(text)) out.push('research')
+  if (CHROME_ASK.test(text)) out.push('chrome')
+  if (VISUALIZE_ASK.test(text)) out.push('visualize')
+  return out
+}
+
+/** The Visualizer modules a message most likely needs. */
+export function visualizeModulesFor(text: string): string[] {
+  const modules = new Set<string>()
+  if (/\b(chart|graph|plot|data|dashboard|numbers?|statistics?)\b/i.test(text)) modules.add('chart')
+  if (/\b(diagram|flow ?chart|architecture|process|steps|works?|timeline)\b/i.test(text)) modules.add('diagram')
+  if (/\b(mock-?up|wireframe|ui|screen|layout)\b/i.test(text)) modules.add('mockup')
+  if (/\b(interactive|calculator|simulat\w*|slider|game|explore)\b/i.test(text)) modules.add('interactive')
+  if (/\b(illustrat\w*|art|draw|sketch|picture|poster)\b/i.test(text)) modules.add('art')
+  if (modules.size === 0) modules.add('diagram')
+  return [...modules]
+}
+
+const GUIDE_TITLES: Record<GuideKind, string> = {
+  chrome: "Working in the user's Chrome (the Claude in Chrome instructions)",
+  research: 'Research (the research instructions)',
+  visualize: 'Visuals in the chat (the Visualizer guide)'
+}
+
+/** One guide's full text for the task, or null when its file isn't there. */
+function guideText(kind: GuideKind, text: string, dir?: string): string | null {
+  if (kind === 'chrome') return chromeInstructions(undefined, dir)
+  if (kind === 'research') return researchInstructions(dir)
+  return visualizeGuide(visualizeModulesFor(text), dir)
+}
+
+/**
+ * The guides this message needs, written in full into the run's instructions, for agents that get
+ * fresh instructions each run (API models, bots, Duo). Each guide is given once per task and marked
+ * given, so the tools don't hand it over again. Empty when no guide applies.
+ */
+export function guideInstructions(runKey: string, text: string, dir?: string): string {
+  const blocks: string[] = []
+  for (const kind of guidesForMessage(text)) {
+    if (!guideDue(runKey, kind, dir)) continue
+    const body = guideText(kind, text, dir)
+    if (!body) continue
+    markGuideGiven(runKey, kind)
+    blocks.push(`## ${GUIDE_TITLES[kind]}\n\n${body}`)
+  }
+  if (!blocks.length) return ''
+  return [
+    '# Guides for this task',
+    "The user's latest message needs the guides below. They are the user's own instruction files and rank above any skill and above your own habits: follow them for every step of this task they cover, including the steps they ask for before you start (clarifying questions, a plan, reading a guide part).",
+    '',
+    ...blocks
+  ].join('\n')
+}
+
+/**
+ * For command-line agents (Freebuff, OpenCode, Antigravity), whose instructions are set once per
+ * session: a line added to the message they're sent, naming the guide tool to call first.
+ */
+export function guideReminder(text: string, dir?: string): string {
+  const calls: string[] = []
+  for (const kind of guidesForMessage(text)) {
+    if (!guidePath(kind, dir)) continue
+    if (kind === 'chrome') calls.push('read_chrome_instructions (before your first Chrome step)')
+    if (kind === 'research') calls.push('read_research_instructions (before you search)')
+    if (kind === 'visualize') calls.push(`mcp__visualize__read_me with modules ${JSON.stringify(visualizeModulesFor(text))} (before you draw)`)
+  }
+  if (!calls.length) return ''
+  return `\n\n[Deskmates: this task needs the user's guides. Call ${calls.join(', and ')} from the deskmates-prompt tools first, then follow them for this whole task. They rank above any skill.]`
+}
+
+/**
+ * Holds back a tool that a guide governs until the run has that guide: the call does nothing and
+ * returns the guide instead, so the agent redoes it the guide's way. Null when the run may go on.
+ */
+export function guideGate(runKey: string, kind: 'research' | 'visualize', modules: string[] = [], dir?: string): string | null {
+  if (!guideDue(runKey, kind, dir)) return null
+  const body = kind === 'research' ? researchInstructions(dir) : visualizeGuide(modules.length ? modules : ['diagram', 'chart', 'interactive'], dir)
+  if (!body) return null
+  markGuideGiven(runKey, kind)
+  const what = kind === 'research' ? 'The research was not started yet' : 'Nothing was drawn yet'
+  return `${what}: first read and follow the user's guide for this, below (it ranks above any skill). Then make the call again the way it says.\n\n${body}`
 }

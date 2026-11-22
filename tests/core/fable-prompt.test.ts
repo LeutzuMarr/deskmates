@@ -400,7 +400,14 @@ describe('the prompt’s tools under its own names', () => {
       }
     }
     const tools = promptTools(context({ subagents: subagents as never }), {})
-    const result = (await call(tools, 'mcp__claude_ai__launch_extended_search_task', { command: 'How did tea prices move?' })) as { task_id: string; research_report: { title: string; sources: unknown[] } }
+    // With the research instructions in the prompts folder, the first launch hands them over instead
+    // of starting (so the agent follows them first); the next one starts.
+    const first = await call(tools, 'mcp__claude_ai__launch_extended_search_task', { command: 'How did tea prices move?' })
+    if (typeof first === 'string') {
+      expect(first).toContain('The research was not started yet')
+      expect(asked).toHaveLength(0)
+    }
+    const result = (typeof first === 'string' ? await call(tools, 'mcp__claude_ai__launch_extended_search_task', { command: 'How did tea prices move?' }) : first) as { task_id: string; research_report: { title: string; sources: unknown[] } }
     expect(result.research_report.title).toBe('Tea prices')
     expect(result.research_report.sources).toEqual([{ title: 'Market report', url: 'https://example.com/report' }])
     expect(asked[0]!.maxSteps).toBe(40)

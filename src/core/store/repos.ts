@@ -10,6 +10,7 @@ import {
   type Connector,
   type ConnectorTransport,
   type FileChange,
+  type KnowledgeFile,
   type Handoff,
   type HandoffState,
   type Memory,
@@ -252,6 +253,141 @@ export class TasksRepo {
     return null
   }
 
+  // ---- Versions (edit branches) ----
+  //
+  // Editing or retrying a message keeps what was there: the message and everything after it are
+  // saved as one version at that position, and the new message starts the next version there. The
+  // user flips between versions with ‹ 1/2 ›, as in Claude. A version's body also carries the
+  // versions saved further down its own branch, so each branch keeps its own history.
+
+  /** Every position that has versions: how many, and which one is showing (0-based). */
+  forks(id: string): Map<number, { index: number; count: number }> {
+    const rows = this.db.prepare('SELECT at, version, active FROM message_versions WHERE task_id = ? ORDER BY at, version').all(id) as Array<{ at: number; version: number; active: number }>
+    const out = new Map<number, { index: number; count: number }>()
+    for (const row of rows) {
+      const entry = out.get(row.at) ?? { index: 0, count: 0 }
+      if (row.active) entry.index = entry.count
+      entry.count++
+      out.set(row.at, entry)
+    }
+    return out
+  }
+
+  /** The user message at position `at` (0-based, in stored order), or null when that isn't one. */
+  userMessageAt(id: string, at: number): { text: string; images: Array<{ dataUrl: string }>; documents: string[] } | null {
+    const row = this.db.prepare('SELECT body FROM messages WHERE task_id = ? ORDER BY seq LIMIT 1 OFFSET ?').get(id, at) as { body: string } | undefined
+    if (!row) return null
+    const message = JSON.parse(row.body) as ModelMessage
+    if (message.role !== 'user') return null
+    const content = message.content as unknown
+    const parts = Array.isArray(content) ? (content as Array<Record<string, unknown>>) : []
+    const texts = parts.filter((part) => part?.type === 'text').map((part) => String(part.text ?? ''))
+    // Attached documents travel as their own text parts; they go out again with the message.
+    const isDocument = (t: string): boolean => t.startsWith('<document name="')
+    const text = typeof content === 'string' ? content : texts.filter((t) => !isDocument(t)).join('\n')
+    const images = parts
+      .filter((part) => part?.type === 'image' && typeof part.image === 'string')
+      .map((part) => ({ dataUrl: `data:${String(part.mediaType ?? 'image/png')};base64,${String(part.image)}` }))
+    return { text, images, documents: texts.filter(isDocument) }
+  }
+
+  /** Position of the last user message, or -1. */
+  lastUserPosition(id: string): number {
+    const rows = this.db.prepare('SELECT body FROM messages WHERE task_id = ? ORDER BY seq').all(id) as Array<{ body: string }>
+    for (let i = rows.length - 1; i >= 0; i--) if ((JSON.parse(rows[i]!.body) as ModelMessage).role === 'user') return i
+    return -1
+  }
+
+  /** Takes the messages from position `at` on (and the versions below it) out, as one saved body. */
+  private cutBranch(id: string, at: number): string {
+    const rows = this.db.prepare('SELECT seq, body FROM messages WHERE task_id = ? ORDER BY seq').all(id) as Array<{ seq: number; body: string }>
+    const tail = rows.slice(at)
+    const nested = this.db.prepare('SELECT at, version, body, active, created_at FROM message_versions WHERE task_id = ? AND at > ?').all(id, at)
+    if (tail.length) this.db.prepare('DELETE FROM messages WHERE task_id = ? AND seq >= ?').run(id, tail[0]!.seq)
+    this.db.prepare('DELETE FROM message_versions WHERE task_id = ? AND at > ?').run(id, at)
+    return JSON.stringify({ messages: tail.map((row) => JSON.parse(row.body) as unknown), versions: nested })
+  }
+
+  /** Puts a saved body back at the end of the task. */
+  private restoreBranch(id: string, body: string): void {
+    const saved = JSON.parse(body || '{}') as { messages?: ModelMessage[]; versions?: Array<{ at: number; version: number; body: string; active: number; created_at: number }> }
+    this.appendMessages(id, saved.messages ?? [])
+    const insert = this.db.prepare('INSERT INTO message_versions (task_id, at, version, body, active, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+    for (const v of saved.versions ?? []) insert.run(id, v.at, v.version, v.body, v.active, v.created_at)
+  }
+
+  /**
+   * Starts a new version at position `at` (a user message): what is there now is saved as a version
+   * and removed, so the edited (or retried) message can go out in its place. Returns that message.
+   */
+  forkAt(id: string, at: number): { text: string; images: Array<{ dataUrl: string }>; documents: string[] } | null {
+    const message = this.userMessageAt(id, at)
+    if (!message) return null
+    this.db.exec('BEGIN')
+    try {
+      const now = Date.now()
+      const existing = this.db.prepare('SELECT version, active FROM message_versions WHERE task_id = ? AND at = ? ORDER BY version').all(id, at) as Array<{ version: number; active: number }>
+      const body = this.cutBranch(id, at)
+      if (existing.length === 0) {
+        this.db.prepare('INSERT INTO message_versions (task_id, at, version, body, active, created_at) VALUES (?, ?, 0, ?, 0, ?)').run(id, at, body, now)
+      } else {
+        this.db.prepare('UPDATE message_versions SET body = ?, active = 0 WHERE task_id = ? AND at = ? AND active = 1').run(body, id, at)
+      }
+      const next = existing.length ? Math.max(...existing.map((v) => v.version)) + 1 : 1
+      this.db.prepare("INSERT INTO message_versions (task_id, at, version, body, active, created_at) VALUES (?, ?, ?, '', 1, ?)").run(id, at, next, now)
+      this.db.exec('COMMIT')
+    } catch (error) {
+      this.db.exec('ROLLBACK')
+      throw error
+    }
+    return message
+  }
+
+  /** Shows version `index` (0-based) at position `at`: the current one is saved, that one put back. */
+  switchVersion(id: string, at: number, index: number): void {
+    const versions = this.db.prepare('SELECT version, active, body FROM message_versions WHERE task_id = ? AND at = ? ORDER BY version').all(id, at) as Array<{ version: number; active: number; body: string }>
+    const target = versions[index]
+    if (!target) throw new Error(`There is no version ${index + 1} of that message.`)
+    if (target.active) return
+    this.db.exec('BEGIN')
+    try {
+      const body = this.cutBranch(id, at)
+      this.db.prepare('UPDATE message_versions SET body = ?, active = 0 WHERE task_id = ? AND at = ? AND active = 1').run(body, id, at)
+      this.restoreBranch(id, target.body)
+      this.db.prepare("UPDATE message_versions SET body = '', active = 1 WHERE task_id = ? AND at = ? AND version = ?").run(id, at, target.version)
+      this.db.exec('COMMIT')
+    } catch (error) {
+      this.db.exec('ROLLBACK')
+      throw error
+    }
+  }
+
+  // ---- Feedback (thumbs up and down on replies) ----
+
+  /** Ratings on this task's replies, by timeline item id. */
+  feedback(id: string): Record<string, { rating: 'up' | 'down'; comment: string; text: string }> {
+    const rows = this.db.prepare('SELECT item_id, rating, comment, text FROM feedback WHERE task_id = ?').all(id) as Array<{ item_id: string; rating: string; comment: string; text: string }>
+    return Object.fromEntries(rows.map((r) => [r.item_id, { rating: r.rating === 'down' ? 'down' : 'up', comment: r.comment, text: r.text }]))
+  }
+
+  /** Rates one reply (null clears it). `text` is the reply, kept so a rating follows its own words. */
+  setFeedback(id: string, itemId: string, rating: 'up' | 'down' | null, comment = '', text = ''): void {
+    if (rating === null) {
+      this.db.prepare('DELETE FROM feedback WHERE task_id = ? AND item_id = ?').run(id, itemId)
+      return
+    }
+    this.db
+      .prepare('INSERT INTO feedback (task_id, item_id, rating, comment, text, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(task_id, item_id) DO UPDATE SET rating = excluded.rating, comment = excluded.comment, text = excluded.text, created_at = excluded.created_at')
+      .run(id, itemId, rating, comment.slice(0, 2000), text.slice(0, 4000), Date.now())
+  }
+
+  /** The project's most recent thumbs-down notes with a reason, newest first, for the agent to learn from. */
+  recentCriticism(projectId: string, limit = 5): Array<{ comment: string; text: string }> {
+    return this.db
+      .prepare("SELECT f.comment, f.text FROM feedback f JOIN tasks t ON t.id = f.task_id WHERE t.project_id = ? AND f.rating = 'down' AND f.comment != '' ORDER BY f.created_at DESC LIMIT ?")
+      .all(projectId, limit) as Array<{ comment: string; text: string }>
+  }
+
   appendMessages(id: string, messages: ModelMessage[], at = Date.now()): void {
     const { last } = this.db
       .prepare('SELECT COALESCE(MAX(seq), -1) AS last FROM messages WHERE task_id = ?')
@@ -287,6 +423,38 @@ export class MemoriesRepo {
 
   delete(id: string, projectId: string): boolean {
     return this.db.prepare('DELETE FROM memories WHERE id = ? AND project_id = ?').run(id, projectId).changes > 0
+  }
+}
+
+/** Files the user added to a project's knowledge, as text: every chat in the project can read them. */
+export class KnowledgeRepo {
+  constructor(private readonly db: DatabaseSync) {}
+
+  list(projectId: string): KnowledgeFile[] {
+    return (this.db.prepare('SELECT id, project_id, name, size, created_at, length(text) AS chars FROM knowledge WHERE project_id = ? ORDER BY created_at').all(projectId) as Row[]).map((r) => ({
+      id: r.id as string,
+      projectId: r.project_id as string,
+      name: r.name as string,
+      size: Number(r.size),
+      chars: Number(r.chars),
+      createdAt: Number(r.created_at)
+    }))
+  }
+
+  /** The files with their text, for the agent. */
+  texts(projectId: string): Array<{ name: string; text: string }> {
+    return this.db.prepare('SELECT name, text FROM knowledge WHERE project_id = ? ORDER BY created_at').all(projectId) as Array<{ name: string; text: string }>
+  }
+
+  add(projectId: string, name: string, text: string, size: number): KnowledgeFile {
+    const id = randomUUID()
+    const createdAt = Date.now()
+    this.db.prepare('INSERT INTO knowledge (id, project_id, name, text, size, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(id, projectId, name, text, size, createdAt)
+    return { id, projectId, name, size, chars: text.length, createdAt }
+  }
+
+  delete(id: string, projectId: string): boolean {
+    return this.db.prepare('DELETE FROM knowledge WHERE id = ? AND project_id = ?').run(id, projectId).changes > 0
   }
 }
 
@@ -1014,6 +1182,7 @@ export interface Repos {
   projects: ProjectsRepo
   tasks: TasksRepo
   memories: MemoriesRepo
+  knowledge: KnowledgeRepo
   changes: ChangesRepo
   usage: UsageRepo
   bots: BotsRepo
@@ -1033,6 +1202,7 @@ export function createRepos(db: DatabaseSync): Repos {
     projects: new ProjectsRepo(db),
     tasks: new TasksRepo(db),
     memories: new MemoriesRepo(db),
+    knowledge: new KnowledgeRepo(db),
     changes: new ChangesRepo(db),
     usage: new UsageRepo(db),
     bots: new BotsRepo(db),

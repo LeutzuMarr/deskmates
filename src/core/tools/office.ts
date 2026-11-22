@@ -211,6 +211,21 @@ export function wrapText(text: string, font: MeasurableFont, size: number, maxWi
   return lines
 }
 
+/**
+ * The text of a file the user added (project knowledge): Word, Excel, PowerPoint and PDF read as
+ * their text, anything else as UTF-8 when it is text. Throws for binary files it can't read.
+ */
+export async function documentText(name: string, data: Buffer): Promise<string> {
+  const ext = extname(name).toLowerCase()
+  if (ext === '.docx') return readDocx(data)
+  if (ext === '.xlsx' || ext === '.xlsm') return readXlsx(data)
+  if (ext === '.pptx') return readPptx(data)
+  if (ext === '.pdf') return readPdf(data)
+  const sample = data.subarray(0, 8000)
+  if (sample.includes(0)) throw new Error(`${name} isn't a text file or a document Deskmates can read (Word, Excel, PowerPoint, PDF, or text).`)
+  return data.toString('utf8')
+}
+
 export function officeTools(ctx: ToolContext) {
   const rel = (absPath: string) => toProjectRelative(ctx.root, absPath)
 

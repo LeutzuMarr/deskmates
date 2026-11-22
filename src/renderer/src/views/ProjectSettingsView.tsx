@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Trash2 } from 'lucide-react'
 import { core } from '../lib/rpc'
+import { ProjectKnowledge } from '../components/ProjectKnowledge'
 import { useStore } from '../lib/store'
 import { PROVIDERS, PROVIDER_LABELS, isCliProvider, isLocalProvider } from '../../../shared/protocol'
 import { freebuffModelLabel } from '../../../shared/freebuff'
@@ -249,6 +250,8 @@ export function ProjectSettingsView({ projectId }: { projectId: string }) {
             </div>
           </div>
         </section>
+
+        <ProjectKnowledge projectId={projectId} />
 
         <section className="mt-8">
           <div className="flex items-center justify-between">

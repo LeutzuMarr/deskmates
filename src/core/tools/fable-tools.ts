@@ -13,6 +13,7 @@ import { tool, type Tool, type ToolSet } from 'ai'
 import { z } from 'zod'
 import type { PlanItem, When } from '../../shared/protocol'
 import { myPromptSection } from '../engine/my-prompt'
+import { guideGate } from '../engine/guides'
 import { readOnlySubagentTools } from './agent-tools'
 import type { ToolContext } from './context'
 import { webFetchText, webSearchResults } from './web'
@@ -278,6 +279,9 @@ export function fableImplementations(ctx: ToolContext): Record<string, Run> {
       const command = str(input.command).trim()
       if (!command) throw new Error('launch_extended_search_task needs the full research task in command.')
       if (!ctx.subagents) throw new Error("The research agent can't run here. Do the research yourself with WebSearch and WebFetch: several searches, read the best sources in full, then write the report with a Sources list.")
+      // The user's research instructions come first: they decide whether to ask before launching.
+      const gate = guideGate(ctx.taskId, 'research')
+      if (gate) return gate
       const id = `research_${randomUUID().slice(0, 8)}`
       const search = myPromptSection('Search instructions')
       const [report] = await ctx.subagents.run({

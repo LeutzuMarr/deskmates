@@ -5,6 +5,7 @@
  */
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { DEFAULT_EFFORT, EFFORT_LABELS, type EffortLevel, isEffortLevel } from '../../shared/effort'
+import type { ThinkingMode } from '../../shared/protocol'
 import { myPromptPath } from './my-prompt'
 
 /** The prompt's table, used when the file has none: low 8, medium 10, high 30, extra 80, max. */
@@ -51,6 +52,35 @@ export function effortLines(level: EffortLevel | undefined, path?: string): stri
   return [`\`<reasoning_effort>${effortTable(path)[chosen]}</reasoning_effort>\``, effortPlainLine(chosen)].join('\n')
 }
 
+// ---- Extended thinking (the on/off switch next to the effort level) ----
+
+let thinkingSource: () => ThinkingMode | undefined = () => 'auto'
+
+export function setThinkingSource(read: () => ThinkingMode | undefined): void {
+  thinkingSource = read
+}
+
+export function currentThinking(): ThinkingMode {
+  try {
+    const mode = thinkingSource()
+    return mode === 'on' || mode === 'off' ? mode : 'auto'
+  } catch {
+    return 'auto'
+  }
+}
+
+/** The prompt's <thinking_mode> value for the switch (null keeps the file's own value). */
+export function thinkingTagValue(mode: ThinkingMode): string | null {
+  return mode === 'on' ? 'interleaved' : mode === 'off' ? 'disabled' : null
+}
+
+/** The plain line saying what the switch means, for every model. Empty for 'auto'. */
+export function thinkingPlainLine(mode: ThinkingMode): string {
+  if (mode === 'on') return "Extended thinking: on (the user's setting in Deskmates): think the problem through before every reply and between tool calls, then answer."
+  if (mode === 'off') return "Extended thinking: off (the user's setting in Deskmates): answer straight away without a long think first; still check facts and results before you claim them."
+  return ''
+}
+
 let source: () => EffortLevel | undefined = () => DEFAULT_EFFORT
 
 /** Where the current level comes from (the app's settings); main.ts sets it at start. */
@@ -74,8 +104,19 @@ type ProviderOptions = Record<string, Record<string, unknown>>
  * The model's own reasoning setting for a level, where the model has one: OpenAI's reasoning models
  * (o-series, GPT-5) and Gemini's thinking models. Undefined for everything else.
  */
-export function effortProviderOptions(provider: string, modelId: string, level: EffortLevel | undefined): ProviderOptions | undefined {
-  const chosen = isEffortLevel(level) ? level : DEFAULT_EFFORT
+export function effortProviderOptions(provider: string, modelId: string, level: EffortLevel | undefined, thinking: ThinkingMode = currentThinking()): ProviderOptions | undefined {
+  const picked = isEffortLevel(level) ? level : DEFAULT_EFFORT
+  // Thinking on: at least a high setting. Off: the least the model allows.
+  const chosen: EffortLevel = thinking === 'on' && (picked === 'low' || picked === 'medium') ? 'high' : picked
+  if (thinking === 'off') {
+    if (provider === 'openai' && /^gpt-5/i.test(modelId)) return { openai: { reasoningEffort: 'minimal' } }
+    if (provider === 'openai' && /^o\d/i.test(modelId)) return { openai: { reasoningEffort: 'low' } }
+    if (provider === 'google' && /gemini-[3-9]/i.test(modelId) && !/image|tts|embedding|live|audio/i.test(modelId)) return { google: { thinkingConfig: { includeThoughts: false, thinkingLevel: 'low' } } }
+    if (provider === 'google' && /gemini-2\.5/i.test(modelId) && !/image|tts|embedding|live|audio/i.test(modelId)) {
+      return { google: { thinkingConfig: { includeThoughts: false, thinkingBudget: /pro/i.test(modelId) ? 128 : 0 } } }
+    }
+    return undefined
+  }
   if (provider === 'openai' && /^(o\d|gpt-5)/i.test(modelId)) {
     const effort = chosen === 'low' ? 'low' : chosen === 'medium' ? 'medium' : 'high'
     return { openai: { reasoningEffort: effort } }

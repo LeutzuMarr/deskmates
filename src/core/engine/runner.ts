@@ -12,7 +12,7 @@ import {
 } from 'ai'
 import type { EventBus } from '../events'
 import type { ChangeLog } from '../fs/change-log'
-import type { Repos } from '../store/repos'
+import type { Repos, StoredMessage } from '../store/repos'
 import type { ToolContext } from '../tools/context'
 import type { ModelRef, ProviderId, TimelineItem } from '../../shared/protocol'
 import type { TerminalsService } from '../terminals/service'
@@ -22,12 +22,14 @@ import { approvalFor } from './approvals'
 import { compactHistory } from './history'
 import { suggestNextMessage } from './suggest'
 import { gistTitle, summaryTitle } from './titles'
-import { textWithSavedImages, userMessageWithImages, type ImageAttachment } from './attachments'
+import { decodeDocument, documentPart, isImageAttachment, textWithSavedDocuments, textWithSavedImages, userMessageWithImages, type ImageAttachment } from './attachments'
+import { documentText } from '../tools/office'
 import { contextTokens, historyBudgetChars, toolsChars } from '../models/context'
 import { guardRiskyTools, pickPromptTools } from '../tools/shared-prompt-tools'
 import { effortProviderOptions } from './effort'
 import { resolve as resolvePath } from 'node:path'
 import { buildInstructions, readProjectInstructions } from './instructions'
+import { guideInstructions, guideReminder } from './guides'
 import { LiveTimeline } from './live'
 import { buildTimeline, danglingToolCalls, pendingApprovals } from './timeline'
 
@@ -135,10 +137,13 @@ export class TaskRunner {
     this.deps = deps
   }
 
-  async send(taskId: string, text: string, images: ImageAttachment[] = []): Promise<void> {
+  async send(taskId: string, text: string, attachments: ImageAttachment[] = [], keptDocuments: string[] = []): Promise<void> {
+    // Pictures go to the model as images; other files (PDF, Word, Excel, text…) as their text.
+    const images = attachments.filter(isImageAttachment)
+    const files = attachments.filter((a) => !isImageAttachment(a))
     const task = this.deps.repos.tasks.require(taskId)
-    if (images.length > 0 && this.runs.has(taskId)) {
-      throw new Error('Images can be sent once this reply ends. Your text can go now.')
+    if (attachments.length > 0 && this.runs.has(taskId)) {
+      throw new Error('Attachments can be sent once this reply ends. Your text can go now.')
     }
 
     // The suggestion is for the message the user hasn't written yet; now they have.
@@ -155,13 +160,23 @@ export class TaskRunner {
       throw new Error('Answer the pending approval first.')
     }
 
-    // Append user message: images as image parts for an API model, as saved files for a CLI one.
-    if (images.length > 0) {
+    // Append user message: images as image parts and documents as their text for an API model, as
+    // saved files for a CLI one.
+    if (attachments.length > 0 || keptDocuments.length > 0) {
       const project = this.deps.repos.projects.require(task.projectId)
       const cli = this.deps.models.resolve(project.model).cli === true
-      this.deps.repos.tasks.appendMessages(taskId, [
-        cli ? { role: 'user', content: textWithSavedImages(text, images, project.folder) } : userMessageWithImages(text, images)
-      ])
+      if (cli) {
+        const withDocs = textWithSavedDocuments(textWithSavedImages(text, images, project.folder), files, project.folder)
+        this.deps.repos.tasks.appendMessages(taskId, [{ role: 'user', content: keptDocuments.length ? `${withDocs}\n\n${keptDocuments.join('\n\n')}` : withDocs }])
+      } else {
+        const documents = [...keptDocuments]
+        for (const file of files) {
+          const name = file.name ?? 'file'
+          const body = (await documentText(name, decodeDocument(file))).trim()
+          documents.push(documentPart(name, body || '(This file has no text Deskmates can read.)'))
+        }
+        this.deps.repos.tasks.appendMessages(taskId, [userMessageWithImages(text, images, documents)])
+      }
     } else {
       this.deps.repos.tasks.appendMessages(taskId, [{ role: 'user', content: text }])
     }
@@ -175,7 +190,7 @@ export class TaskRunner {
 
     // Emit timeline
     const stored = this.deps.repos.tasks.messages(taskId)
-    this.deps.bus.emit({ type: 'task.timeline', taskId, timeline: buildTimeline(stored) })
+    this.deps.bus.emit({ type: 'task.timeline', taskId, timeline: buildTimeline(stored, this.deps.repos.tasks.forks(taskId)) })
 
     // Start the run in the background
     this.startRun(taskId)
@@ -259,13 +274,26 @@ export class TaskRunner {
    * no text): the message and the reply after it are removed, then the message goes out fresh.
    * File changes the old reply made stay, as in Claude; the user can undo them from the changes list.
    */
-  async resend(taskId: string, text?: string): Promise<void> {
+  async resend(taskId: string, text?: string, position?: number): Promise<void> {
     if (this.runs.has(taskId)) throw new Error('Stop the task first, then edit or retry.')
-    const previous = this.deps.repos.tasks.dropFromLastUserMessage(taskId)
-    if (previous === null) throw new Error('There is no message to edit or retry yet.')
+    const { tasks } = this.deps.repos
+    // Any of the user's messages can be edited; the last one by default (Retry).
+    const at = position ?? tasks.lastUserPosition(taskId)
+    if (at < 0) throw new Error('There is no message to edit or retry yet.')
+    // What was there is kept as a version the user can flip back to (‹ 1/2 ›).
+    const previous = tasks.forkAt(taskId, at)
+    if (previous === null) throw new Error('That message is not one of yours, so it cannot be edited.')
     const next = text?.trim() || previous.text
-    this.deps.repos.tasks.update(taskId, { status: 'idle', error: null })
-    await this.send(taskId, next, previous.images)
+    tasks.update(taskId, { status: 'idle', error: null, plan: [] })
+    await this.send(taskId, next, previous.images, previous.documents)
+  }
+
+  /** Shows another version of an edited message (and the replies of that version). */
+  switchVersion(taskId: string, position: number, index: number): void {
+    if (this.runs.has(taskId)) throw new Error('Stop the task first, then switch versions.')
+    this.deps.repos.tasks.switchVersion(taskId, position, index)
+    this.suggestions.delete(taskId)
+    this.deps.bus.emit({ type: 'task.timeline', taskId, timeline: this.timeline(taskId) })
   }
 
   /** How full the model's context was after the task's last step, or null before one. */
@@ -358,7 +386,7 @@ export class TaskRunner {
 
   timeline(taskId: string): TimelineItem[] {
     const stored = this.deps.repos.tasks.messages(taskId)
-    const items = buildTimeline(stored)
+    const items = buildTimeline(stored, this.deps.repos.tasks.forks(taskId))
 
     // Apply overlay from collected but unsent answers
     const answers = this.answers.get(taskId)
@@ -434,6 +462,7 @@ export class TaskRunner {
       ...(deps.dataDir ? { dataDir: deps.dataDir } : {}),
       ...(deps.google ? { google: deps.google } : {}),
       chats: chatHistory(repos),
+      ...(project ? { knowledge: () => repos.knowledge.texts(project.id) } : {}),
       projectKind: 'work',
       // A command-line turn's plan shows on its task, at the end of the chat, as the Work tab's does.
       onPlan: (items) => {
@@ -508,6 +537,7 @@ export class TaskRunner {
         ...(deps.dataDir ? { dataDir: deps.dataDir } : {}),
         ...(deps.google ? { google: deps.google } : {}),
         chats: chatHistory(repos),
+        knowledge: () => repos.knowledge.texts(task.projectId),
         signal: controller.signal,
         projectKind: project.kind === 'design' ? 'design' : 'work',
         renameProject: (title) => {
@@ -546,10 +576,12 @@ export class TaskRunner {
       }
 
       const tools = deps.createTools(ctx)
-      const instructions = buildInstructions({
+      const baseInstructions = buildInstructions({
         project,
         settings,
         memories: repos.memories.list(task.projectId),
+        knowledge: repos.knowledge.texts(task.projectId),
+        criticism: repos.tasks.recentCriticism(task.projectId),
         projectInstructions: readProjectInstructions(project.folder),
         now: getNow(),
         model: { provider, modelId },
@@ -560,7 +592,9 @@ export class TaskRunner {
       })
 
       // CLI-backed providers (OpenCode/agy): run the whole turn through a terminal session instead
-      // of the tool-calling loop — their own agents/tools execute inside the CLI.
+      // of the tool-calling loop — their own agents/tools execute inside the CLI. Their session keeps
+      // its instructions, so the guides a message needs are named in the message instead (below).
+      const instructions = resolved.cli ? baseInstructions : [baseInstructions, guideInstructions(taskId, lastUserText(repos.tasks.messages(taskId)))].filter(Boolean).join('\n\n')
       if (resolved.cli) {
         await this.executeCliTurn(taskId, task, project, resolved, instructions, controller)
         return
@@ -732,7 +766,8 @@ export class TaskRunner {
     // then remembered by the session — the 175KB prompt is no longer re-sent, and no longer re-read,
     // before every question. It is also what makes the second prompt in a session cheap: the model
     // already has the brief and only has to read the new message.
-    const prompt = userText.trim()
+    // The user's guides (Chrome, research, visuals) the message needs, named for the agent to read first.
+    const prompt = `${userText.trim()}${guideReminder(userText)}`
 
     const live = new LiveTimeline(taskId, bus, () => Date.now())
     const result = await terminals.execute(
@@ -795,6 +830,13 @@ function messageText(content: unknown): string {
     .map((part) => (part && typeof part === 'object' && (part as { type?: string }).type === 'text' ? String((part as { text?: unknown }).text ?? '') : ''))
     .filter(Boolean)
     .join('\n')
+}
+
+/** The text of the task's latest user message. */
+function lastUserText(stored: StoredMessage[]): string {
+  const last = [...stored].reverse().find((s) => s.message.role === 'user')
+  // Attached documents don't count: their words aren't the user asking for anything.
+  return last ? messageText(last.message.content).replace(/<document name="[^"]*">[\s\S]*?<\/document>/g, '') : ''
 }
 
 /** Every project's chats, for the chat-history tools. */
