@@ -17,7 +17,7 @@ import type { ToolContext } from '../tools/context'
 import type { ModelRef, ProviderId, TimelineItem } from '../../shared/protocol'
 import type { TerminalsService } from '../terminals/service'
 import { patientModel } from '../models/patience'
-import { PROVIDER_LABELS } from '../../shared/protocol'
+import { PROVIDER_LABELS, STEP_LIMIT_NOTE } from '../../shared/protocol'
 import { approvalFor } from './approvals'
 import { compactHistory } from './history'
 import { suggestNextMessage } from './suggest'
@@ -125,6 +125,13 @@ export class TaskRunner {
   private readonly suggestions = new Map<string, string>()
   /** Tasks whose next turn replaces an edited or retried message (for command-line agents). */
   private readonly replacedTurns = new Set<string>()
+  /** Tasks whose next message has Research on (the switch in the message box). */
+  private readonly researchTurns = new Set<string>()
+
+  /** Turns Research on for the task's next message. */
+  researchNext(taskId: string): void {
+    this.researchTurns.add(taskId)
+  }
   /** Chats still titled with the gist of their first message, waiting for a summary title. */
   private readonly autoTitles = new Map<string, { title: string; message: string }>()
   private readonly contexts = new Map<string, { used: number; window: number }>()
@@ -583,11 +590,14 @@ export class TaskRunner {
         }
       }
 
-      const tools = deps.createTools(ctx)
+      const tools = withoutSwitchedOffTools(deps.createTools(ctx), { webSearch: settings.webSearch !== false, incognito: task.incognito === true })
+      const research = this.researchTurns.delete(taskId)
       const baseInstructions = buildInstructions({
         project,
         settings,
-        memories: repos.memories.list(task.projectId),
+        incognito: task.incognito === true,
+        research,
+        memories: task.incognito ? [] : repos.memories.list(task.projectId),
         knowledge: repos.knowledge.texts(task.projectId),
         criticism: repos.tasks.recentCriticism(task.projectId),
         projectInstructions: readProjectInstructions(project.folder),
@@ -602,9 +612,9 @@ export class TaskRunner {
       // CLI-backed providers (OpenCode/agy): run the whole turn through a terminal session instead
       // of the tool-calling loop — their own agents/tools execute inside the CLI. Their session keeps
       // its instructions, so the guides a message needs are named in the message instead (below).
-      const instructions = resolved.cli ? baseInstructions : [baseInstructions, guideInstructions(taskId, lastUserText(repos.tasks.messages(taskId)))].filter(Boolean).join('\n\n')
+      const instructions = resolved.cli ? baseInstructions : [baseInstructions, guideInstructions(taskId, lastUserText(repos.tasks.messages(taskId)), undefined, research ? ['research'] : [])].filter(Boolean).join('\n\n')
       if (resolved.cli) {
-        await this.executeCliTurn(taskId, task, project, resolved, instructions, controller)
+        await this.executeCliTurn(taskId, task, project, resolved, instructions, controller, research)
         return
       }
 
@@ -704,7 +714,22 @@ export class TaskRunner {
             body: `${currentTask.title}: ${pending[0].toolName}`
           })
         } else {
-          repos.tasks.update(taskId, { status: 'idle', error: null })
+          // Stopped at the step limit in the middle of the work: say so, and offer Continue.
+          let limited = false
+          try {
+            const steps = (await (result as unknown as { steps: Promise<Array<{ finishReason?: string }>> }).steps) ?? []
+            limited = steps.length >= settings.maxSteps && steps.at(-1)?.finishReason === 'tool-calls'
+          } catch {
+            limited = false
+          }
+          repos.tasks.update(taskId, {
+            status: 'idle',
+            error: limited ? `${STEP_LIMIT_NOTE} ${settings.maxSteps} steps, the limit for one reply (Settings). Press Continue to keep going.` : null
+          })
+          if (limited) {
+            this.suggestions.set(taskId, 'Continue')
+            bus.emit({ type: 'task.suggestion', taskId, text: 'Continue' })
+          }
         }
       }
     } catch (err) {
@@ -736,7 +761,7 @@ export class TaskRunner {
         this.queued.delete(taskId)
         bus.emit({ type: 'task.queued', taskId, queued: [] })
         void this.send(taskId, queued.join('\n\n')).catch((error: unknown) => console.error('[core] sending the queued message failed', error))
-      } else if (repos.tasks.require(taskId).status === 'idle' && !controller.signal.aborted) {
+      } else if (repos.tasks.require(taskId).status === 'idle' && !controller.signal.aborted && !repos.tasks.require(taskId).error?.startsWith(STEP_LIMIT_NOTE)) {
         void this.suggest(taskId)
       }
     }
@@ -755,7 +780,8 @@ export class TaskRunner {
     project: { kind: string; folder: string },
     resolved: { provider: ProviderId; modelId: string },
     instructions: string,
-    controller: AbortController
+    controller: AbortController,
+    research = false
   ): Promise<void> {
     const { repos, bus } = this.deps
     const terminals = this.deps.getTerminals?.()
@@ -780,7 +806,8 @@ export class TaskRunner {
     const replaced = this.replacedTurns.delete(taskId)
       ? "[Deskmates: the user replaced their previous message with the one below (or asked for a new answer to it). Forget your earlier answer to it and anything you did for it, and answer this one fresh.]\n\n"
       : ''
-    const prompt = `${replaced}${userText.trim()}${guideReminder(userText)}`
+    const researchNote = research ? '\n\n[Deskmates: the user turned Research on for this message: research it thoroughly from many sources and end with the sources.]' : ''
+    const prompt = `${replaced}${userText.trim()}${guideReminder(userText, undefined, research ? ['research'] : [])}${researchNote}`
 
     const live = new LiveTimeline(taskId, bus, () => Date.now())
     const result = await terminals.execute(
@@ -835,6 +862,22 @@ export function sharesThoughts(provider: string, modelId: string): boolean {
   return /gemini-(2\.5|[3-9])/i.test(modelId) && !/image|tts|embedding|live|audio/i.test(modelId)
 }
 
+const WEB_TOOLS = /^(WebSearch|WebFetch|web_search|web_fetch|fetch_url|mcp__claude_ai__launch_extended_search_task)$/
+const MEMORY_AND_HISTORY_TOOLS = /^(remember|memory_\w+|memory|conversation_search|recent_chats|read_conversation|memory_user_edits)$/
+
+/** The run's tools without the ones the user switched off: the web (Web search off), and memory
+ *  and past chats in an incognito chat. */
+export function withoutSwitchedOffTools(tools: ToolSet, switches: { webSearch: boolean; incognito: boolean }): ToolSet {
+  if (switches.webSearch && !switches.incognito) return tools
+  const out: ToolSet = {}
+  for (const [name, t] of Object.entries(tools)) {
+    if (!switches.webSearch && WEB_TOOLS.test(name)) continue
+    if (switches.incognito && MEMORY_AND_HISTORY_TOOLS.test(name)) continue
+    out[name] = t
+  }
+  return out
+}
+
 /** The text of a stored message: its text parts, joined. */
 function messageText(content: unknown): string {
   if (typeof content === 'string') return content
@@ -858,7 +901,12 @@ export function chatHistory(repos: Repos): NonNullable<ToolContext['chats']> {
     list: () =>
       repos.projects
         .list()
-        .flatMap((project) => repos.tasks.list(project.id).map((task) => ({ id: task.id, title: task.title, project: project.name, updatedAt: task.updatedAt })))
+        .flatMap((project) =>
+          repos.tasks
+            .list(project.id)
+            .filter((task) => !task.incognito)
+            .map((task) => ({ id: task.id, title: task.title, project: project.name, updatedAt: task.updatedAt }))
+        )
         .sort((a, b) => b.updatedAt - a.updatedAt),
     turns: (id) =>
       repos.tasks

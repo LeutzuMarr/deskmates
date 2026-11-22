@@ -150,6 +150,12 @@ interface StoreState {
   /** Whether the browser panel is open (desktop only). */
   browserOpen: boolean
   setBrowserOpen: (open: boolean) => void
+  /** The next chat started from a project's home is incognito (not kept). */
+  incognitoNext: boolean
+  setIncognitoNext: (on: boolean) => void
+  /** Research is on for the next message (the switch in the message box). */
+  researchNext: boolean
+  setResearchNext: (on: boolean) => void
   /** The artifact open in the panel beside the chat (Claude's artifact view). */
   artifact: { taskId: string; itemId: string } | null
   setArtifact: (artifact: { taskId: string; itemId: string } | null) => void
@@ -295,9 +301,14 @@ function engineUnreachableStatus(message: string): EngineStatus {
   }
 }
 
+/** How many task events each task has had, so a slower snapshot never overwrites newer events. */
+const taskEventCount = new Map<string, number>()
+
 export const useStore = create<StoreState>()((set, get) => {
   const applyEvent = (event: CoreEvent): void => {
     const state = get()
+    const eventTask = event.type === 'task.updated' ? event.task.id : event.type === 'task.timeline' || event.type === 'task.item' ? event.taskId : null
+    if (eventTask) taskEventCount.set(eventTask, (taskEventCount.get(eventTask) ?? 0) + 1)
     switch (event.type) {
       case 'task.item': {
         const timeline = state.timelines[event.taskId] ?? []
@@ -644,6 +655,10 @@ export const useStore = create<StoreState>()((set, get) => {
     browser: null,
     browserOpen: false,
     setBrowserOpen: (open) => set({ browserOpen: open }),
+    incognitoNext: false,
+    setIncognitoNext: (on) => set({ incognitoNext: on }),
+    researchNext: false,
+    setResearchNext: (on) => set({ researchNext: on }),
     artifact: null,
     setArtifact: (artifact) => set({ artifact }),
     artifactHost: null,
@@ -674,6 +689,11 @@ export const useStore = create<StoreState>()((set, get) => {
 
     navigate: (view) => {
       const current = get().view
+      // Leaving an incognito chat deletes it, as in Claude (Settings and back doesn't count).
+      if (current.name === 'task' && view.name !== 'settings' && !(view.name === 'task' && view.taskId === current.taskId)) {
+        const left = (get().tasksByProject[current.projectId] ?? []).find((t) => t.id === current.taskId)
+        if (left?.incognito) void core.call('tasks.delete', { id: left.id }).catch(() => undefined)
+      }
       if (view.name === 'settings' && current.name !== 'settings') set({ settingsReturn: current })
       else if (view.name !== 'settings') set({ settingsReturn: null })
       set({ view, unread: withoutKeys(get().unread, idsShownBy(view, get().tasksByProject)) })
@@ -731,7 +751,9 @@ export const useStore = create<StoreState>()((set, get) => {
 
     createTask: async (projectId) => {
       try {
-        const task = await core.call('tasks.create', { projectId })
+        const incognito = get().incognitoNext
+        const task = await core.call('tasks.create', { projectId, ...(incognito ? { incognito: true } : {}) })
+        if (incognito) set({ incognitoNext: false })
         const tasks = get().tasksByProject[projectId] ?? []
         set({ tasksByProject: { ...get().tasksByProject, [projectId]: upsertTask(tasks, task) } })
         return task
@@ -743,14 +765,32 @@ export const useStore = create<StoreState>()((set, get) => {
 
     openTask: async (projectId, taskId) => {
       try {
-        const { task, timeline } = await core.call('tasks.get', { id: taskId })
-        const changes = await core.call('changes.list', { taskId })
+        // A reply can finish while this loads: its events are newer than this snapshot, so the
+        // snapshot doesn't overwrite them (the chat would look stuck on "running").
+        const seen = taskEventCount.get(taskId) ?? 0
+        const [{ task, timeline }, changes] = await Promise.all([core.call('tasks.get', { id: taskId }), core.call('changes.list', { taskId })])
+        const stale = (taskEventCount.get(taskId) ?? 0) !== seen
         const tasks = get().tasksByProject[projectId] ?? []
         set({
-          tasksByProject: { ...get().tasksByProject, [projectId]: upsertTask(tasks, task) },
-          timelines: { ...get().timelines, [taskId]: timeline },
+          ...(stale
+            ? {}
+            : {
+                tasksByProject: { ...get().tasksByProject, [projectId]: upsertTask(tasks, task) },
+                timelines: { ...get().timelines, [taskId]: timeline }
+              }),
           changes: { ...get().changes, [taskId]: changes }
         })
+        if (stale) {
+          // Make sure the newer state is complete (an item event alone carries no task status).
+          const before = taskEventCount.get(taskId) ?? 0
+          const fresh = await core.call('tasks.get', { id: taskId })
+          if ((taskEventCount.get(taskId) ?? 0) === before) {
+            set({
+              tasksByProject: { ...get().tasksByProject, [projectId]: upsertTask(get().tasksByProject[projectId] ?? [], fresh.task) },
+              timelines: { ...get().timelines, [taskId]: fresh.timeline }
+            })
+          }
+        }
       } catch (error) {
         get().showToast(`Couldn't open the task: ${error instanceof Error ? error.message : String(error)}`)
       }

@@ -18,6 +18,7 @@ import { currentActivity } from '../lib/steps'
 import type { StartingNotice } from '../lib/format'
 import type { ReplyFeedback, TimelineItem, ToolItem } from '../../../shared/protocol'
 import { FeedbackButtons, SourcesChip, VersionSwitcher } from './ReplyExtras'
+import { QuoteSelection } from './QuoteSelection'
 
 interface ConversationProps {
   /** A task id in 'task' mode (the default), a bot run id in 'run' mode. */
@@ -248,7 +249,9 @@ export function Conversation({ taskId, mode = 'task', timeline, running, emptyHi
                     ))}
                   </div>
                 )}
-                <div className="user-bubble whitespace-pre-wrap">{item.text}</div>
+                <div className="user-bubble whitespace-pre-wrap" title={new Date(item.at).toLocaleString()}>
+                  {item.text}
+                </div>
                 {item.versions && typeof item.position === 'number' && (
                   <VersionSwitcher taskId={taskId} position={item.position} index={item.versions.index} count={item.versions.count} disabled={running} />
                 )}
@@ -296,7 +299,7 @@ export function Conversation({ taskId, mode = 'task', timeline, running, emptyHi
             <div className="w-5 shrink-0" />
           )}
           <div className="min-w-0 flex-1">
-            {firstOfTurn && replyTime}
+            {firstOfTurn && <span title={new Date(item.at).toLocaleString()}>{replyTime}</span>}
             <AssistantText text={item.text} />
             {isLast && mode === 'task' && !running && i === timeline.length - 1 && (() => {
               const replies = quickReplies(item.text)
@@ -415,6 +418,7 @@ export function Conversation({ taskId, mode = 'task', timeline, running, emptyHi
           )}
         </div>
       </div>
+      <QuoteSelection root={scrollRef} />
       {showJump && (
         <button
           type="button"

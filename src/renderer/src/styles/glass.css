@@ -340,3 +340,10 @@ dialog::backdrop {
     animation: none;
   }
 }
+
+/* A switched-on outline button (Incognito): filled, so on and off are told apart in either theme. */
+.btn-outline.is-on,
+.btn-outline.is-on:hover:not(:disabled) {
+  background: var(--ink);
+  color: var(--canvas);
+}

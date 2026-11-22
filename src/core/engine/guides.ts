@@ -363,13 +363,13 @@ function guideText(kind: GuideKind, text: string, dir?: string): string | null {
  * fresh instructions each run (API models, bots, Duo). Each guide is given once per task and marked
  * given, so the tools don't hand it over again. Empty when no guide applies.
  */
-export function guideInstructions(runKey: string, text: string, dir?: string): string {
+export function guideInstructions(runKey: string, text: string, dir?: string, force: GuideKind[] = []): string {
   // A task's instructions are built afresh for every run, so a guide put there stays there for the
   // rest of the task (the agent would otherwise lose it on the next message).
   const sticky = inInstructions.get(runKey) ?? { kinds: new Set<GuideKind>(), asked: '' }
-  for (const kind of guidesForMessage(text)) {
-    if (sticky.kinds.has(kind) || !guideDue(runKey, kind, dir)) continue
-    sticky.kinds.add(kind)
+  for (const kind of new Set([...guidesForMessage(text), ...force])) {
+    if (sticky.kinds.has(kind) || (!guideDue(runKey, kind, dir) && !force.includes(kind))) continue
+    if (guidePath(kind, dir)) sticky.kinds.add(kind)
   }
   if (sticky.kinds.size === 0) return ''
   sticky.asked = `${sticky.asked}\n${text}`.slice(-4000)
@@ -396,9 +396,9 @@ export function guideInstructions(runKey: string, text: string, dir?: string): s
  * For command-line agents (Freebuff, OpenCode, Antigravity), whose instructions are set once per
  * session: a line added to the message they're sent, naming the guide tool to call first.
  */
-export function guideReminder(text: string, dir?: string): string {
+export function guideReminder(text: string, dir?: string, force: GuideKind[] = []): string {
   const calls: string[] = []
-  for (const kind of guidesForMessage(text)) {
+  for (const kind of new Set([...guidesForMessage(text), ...force])) {
     if (!guidePath(kind, dir)) continue
     if (kind === 'chrome') calls.push('read_chrome_instructions (before your first Chrome step)')
     if (kind === 'research') calls.push('read_research_instructions (before you search)')

@@ -103,6 +103,8 @@ async function main(): Promise<void> {
   setEffortSource(() => repos.settings.get().effort)
   setThinkingSource(() => repos.settings.get().thinking)
   repos.tasks.resetInterrupted()
+  // Incognito chats are never kept, not even across a crash.
+  repos.tasks.deleteIncognito()
   repos.runs.resetInterrupted()
 
   const bus = new EventBus()

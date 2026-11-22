@@ -110,13 +110,17 @@ export interface Appearance {
 }
 
 /** How replies are written, as Claude's styles: the default, shorter, more teaching, or more formal. */
-export type ResponseStyle = 'normal' | 'concise' | 'explanatory' | 'formal'
+export type ResponseStyle = 'normal' | 'concise' | 'explanatory' | 'formal' | 'custom'
 
 export interface Settings {
   defaultModel: ModelRef | null
   globalInstructions: string
   /** How every agent writes its replies. */
   responseStyle: ResponseStyle
+  /** The user's own style, in their words, used when responseStyle is 'custom'. */
+  customStyle?: string
+  /** Whether agents may search and read the web (Claude's "Web search" switch). */
+  webSearch?: boolean
   /** How hard every agent thinks: the operating prompt's effort level (shared/effort.ts). */
   effort: EffortLevel
   /** Extended thinking: 'auto' lets the model decide (the prompt's own <thinking_mode>), 'on'
@@ -192,6 +196,8 @@ export const DEFAULT_SETTINGS: Settings = {
   responseStyle: 'normal',
   effort: 'medium',
   thinking: 'auto',
+  customStyle: '',
+  webSearch: true,
   compatibleBaseUrl: 'https://openrouter.ai/api/v1',
   ollamaBaseUrl: 'http://localhost:11434/v1',
   lmstudioBaseUrl: 'http://localhost:1234/v1',
@@ -258,9 +264,14 @@ export interface Task {
   error: string | null
   /** Kept at the top of the project's chats. */
   pinned: boolean
+  /** Not kept: left out of chat search and memory, and deleted when the user leaves it. */
+  incognito?: boolean
   createdAt: number
   updatedAt: number
 }
+
+/** The start of a task's note when a reply stopped at the step limit (Continue picks it up). */
+export const STEP_LIMIT_NOTE = 'Paused after'
 
 export type ToolItemState = 'running' | 'awaiting-approval' | 'done' | 'error' | 'denied'
 
@@ -701,7 +712,9 @@ export interface RpcMethods {
   'projects.instructions.get': { params: { id: string }; result: { path: string; content: string } }
   'projects.instructions.set': { params: { id: string; content: string }; result: null }
   'tasks.list': { params: { projectId: string }; result: Task[] }
-  'tasks.create': { params: { projectId: string }; result: Task }
+  'tasks.create': { params: { projectId: string; incognito?: boolean }; result: Task }
+  /** Chats whose messages contain the words, with the matching line. */
+  'tasks.search': { params: { query: string }; result: Array<{ taskId: string; projectId: string; title: string; snippet: string; updatedAt: number }> }
   'tasks.get': { params: { id: string }; result: { task: Task; timeline: TimelineItem[] } }
   'tasks.rename': { params: { id: string; title: string }; result: Task }
   /** Pins a chat to the top of its project's list, or unpins it. */

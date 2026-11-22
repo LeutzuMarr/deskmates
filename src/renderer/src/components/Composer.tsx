@@ -10,6 +10,8 @@ import { FOCUS_COMPOSER_EVENT } from '../lib/shortcuts'
 import { ModelPicker } from './ModelPicker'
 import { EffortPicker } from './EffortPicker'
 import { DictationButton } from './DictationButton'
+import { ToolsMenu } from './ToolsMenu'
+import { QUOTE_EVENT } from '../lib/quote'
 import { ContextMeter } from './ContextMeter'
 import { BUILT_IN_COMMANDS, runBuiltIn } from '../lib/commands'
 
@@ -38,6 +40,9 @@ interface ComposerProps {
   placeholder?: string
 }
 
+/** A paste longer than this goes in as an attachment rather than as text in the box. */
+const LONG_PASTE_CHARS = 4000
+
 /** Files a message carries as documents the model reads. */
 const DOCUMENT_EXTENSIONS = /\.(pdf|docx|xlsx|xlsm|pptx|txt|md|markdown|csv|tsv|json|html?|xml|ya?ml|jsx?|tsx?|py|java|c|cpp|h|cs|go|rs|rb|php|sql|css|log|ini|toml)$/i
 
@@ -54,6 +59,25 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   }
   const [busy, setBusy] = useState(false)
   const [dragging, setDragging] = useState(false)
+  const researchOn = useStore((s) => s.researchNext)
+
+  // "Quote" on words selected in a reply: they go above what's being typed, as a quote.
+  useEffect(() => {
+    const onQuote = (event: Event): void => {
+      const quote = (event as CustomEvent<string>).detail
+      if (typeof quote !== 'string' || !quote.trim()) return
+      const current = textareaRef.current?.value ?? ''
+      setText(`${quote}${current}`)
+      window.setTimeout(() => {
+        const el = textareaRef.current
+        if (!el) return
+        el.focus()
+        el.setSelectionRange(el.value.length, el.value.length)
+      }, 0)
+    }
+    window.addEventListener(QUOTE_EVENT, onQuote)
+    return () => window.removeEventListener(QUOTE_EVENT, onQuote)
+  })
 
   // The same composer stays mounted when the view switches tasks; bring that task's own draft back.
   useEffect(() => {
@@ -242,6 +266,21 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
   const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>): void => {
     const files = Array.from(event.clipboardData.files)
+    // A long paste becomes an attachment ("Pasted text"), as in Claude, instead of filling the box.
+    const pasted = files.length === 0 ? event.clipboardData.getData('text/plain') : ''
+    if (pasted.length > LONG_PASTE_CHARS) {
+      event.preventDefault()
+      if (images.length >= 6) {
+        showToast('A message can carry at most 6 attachments.')
+        return
+      }
+      const bytes = new TextEncoder().encode(pasted)
+      let binary = ''
+      for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+      const lines = pasted.split('\n').length
+      setImages((current) => [...current, { dataUrl: `data:text/plain;base64,${btoa(binary)}`, name: `Pasted text (${lines} line${lines === 1 ? '' : 's'}).txt` }])
+      return
+    }
     if (files.length === 0) return
     // A pasted screenshot or copied picture is attached; files copied in Explorer go in as paths.
     const pictures = files.filter(isImage)
@@ -276,11 +315,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     setBusy(true)
     try {
       if (taskId !== undefined) {
-        await core.call('tasks.send', { id: taskId, text: outgoing, ...(attached.length ? { images: attached } : {}) })
+        await core.call('tasks.send', { id: taskId, text: outgoing, ...(attached.length ? { images: attached } : {}), ...(researchOn ? { research: true } : {}) })
       } else {
         const created = await createTask(projectId)
         if (!created) return
-        await core.call('tasks.send', { id: created.id, text: outgoing, ...(attached.length ? { images: attached } : {}) })
+        await core.call('tasks.send', { id: created.id, text: outgoing, ...(attached.length ? { images: attached } : {}), ...(researchOn ? { research: true } : {}) })
         if (project?.kind === 'design') navigate({ name: 'design', projectId })
         else navigate({ name: 'task', projectId, taskId: created.id })
       }
@@ -531,6 +570,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                 event.target.value = ''
               }}
             />
+            <ToolsMenu />
             <DictationButton
               disabled={false}
               onText={(words) => {

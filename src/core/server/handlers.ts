@@ -323,9 +323,10 @@ export function createHandlers(services: HandlerServices): Handlers {
 
     'tasks.list': (params: { projectId: string }) => repos.tasks.list(params.projectId),
 
-    'tasks.create': (params: { projectId: string }) => {
+    'tasks.search': (params: { query: string }) => repos.tasks.search(String(params.query ?? '')),
+    'tasks.create': (params: { projectId: string; incognito?: boolean }) => {
       repos.projects.require(params.projectId)
-      const task = repos.tasks.create(params.projectId)
+      const task = repos.tasks.create(params.projectId, 'New task', params.incognito === true)
       bus.emit({ type: 'task.updated', task })
       return task
     },
@@ -360,7 +361,10 @@ export function createHandlers(services: HandlerServices): Handlers {
       return null
     },
 
-    'tasks.send': (params: { id: string; text: string; images?: Array<{ dataUrl: string; name?: string }> }) => runner.send(params.id, params.text, params.images ?? []),
+    'tasks.send': (params: { id: string; text: string; images?: Array<{ dataUrl: string; name?: string }>; research?: boolean }) => {
+      if (params.research) runner.researchNext(params.id)
+      return runner.send(params.id, params.text, params.images ?? [])
+    },
 
     'tasks.queued': (params: { id: string }) => runner.queuedMessages(params.id),
     'tasks.context': (params: { id: string }) => runner.contextUse(params.id),

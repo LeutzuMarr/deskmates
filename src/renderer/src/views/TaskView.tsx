@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { KeyboardEvent } from 'react'
-import { Download, ListChecks, Undo2 } from 'lucide-react'
+import { Download, Ghost, ListChecks, Undo2 } from 'lucide-react'
+import { STEP_LIMIT_NOTE } from '../../../shared/protocol'
 import { exportChat } from '../lib/commands'
 import { PlanCard, PlanRow } from '../components/PlanCard'
 import { core } from '../lib/rpc'
@@ -176,6 +177,12 @@ export function TaskView({ projectId, taskId }: { projectId: string; taskId: str
         </div>
       </header>
 
+      {task?.incognito && (
+        <div className="incognito-bar" role="note">
+          <Ghost size={14} aria-hidden="true" />
+          Incognito chat: not kept. It is deleted when you leave it and stays out of chat search and memory.
+        </div>
+      )}
       <div className="relative flex min-h-0 flex-1">
         <Conversation
           editable
@@ -189,6 +196,19 @@ export function TaskView({ projectId, taskId }: { projectId: string; taskId: str
               {task?.status === 'error' && task.error && (
                 <div className="error-bar mb-3" role="alert">
                   {task.error}
+                </div>
+              )}
+              {/* Stopped at the step limit mid-work: Continue picks it up, as in Claude. */}
+              {task?.status === 'idle' && task.error?.startsWith(STEP_LIMIT_NOTE) && (
+                <div className="limit-bar mb-3" role="status">
+                  <span className="min-w-0 flex-1">{task.error}</span>
+                  <button
+                    type="button"
+                    className="btn btn-ivory shrink-0 px-3 text-[13px]"
+                    onClick={() => core.call('tasks.send', { id: taskId, text: 'Continue' }).catch((error: unknown) => showToast(`Couldn't continue: ${error instanceof Error ? error.message : String(error)}`))}
+                  >
+                    Continue
+                  </button>
                 </div>
               )}
               {/* The task list stays at the end of the chat, above the message box, finished or not. */}

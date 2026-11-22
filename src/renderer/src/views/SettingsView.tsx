@@ -26,6 +26,39 @@ const EMPTY_PC_CONNECTION: PcCloudConnection = {
   registryPassword: ''
 }
 
+/** The user's own response style, as Claude's custom styles: a description in their words. */
+function CustomStyleField({ initial }: { initial: string }) {
+  const [draft, setDraft] = useState(initial)
+  const showToast = useStore((s) => s.showToast)
+  const save = async (): Promise<void> => {
+    try {
+      await core.call('settings.update', { customStyle: draft.trim().slice(0, 2000) })
+      showToast('Custom style saved')
+    } catch (error) {
+      showToast(`Couldn't save the style: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  return (
+    <div className="field mt-3">
+      <label className="field-label" htmlFor="custom-style">
+        Describe how replies should read (or paste a sample of writing you like)
+      </label>
+      <textarea
+        id="custom-style"
+        className="input min-h-[88px] w-full resize-y"
+        value={draft}
+        placeholder="Warm and plain, short paragraphs, British spelling, no emojis…"
+        onChange={(event) => setDraft(event.target.value)}
+      />
+      <div className="mt-2 flex justify-end">
+        <button type="button" className="btn btn-outline" disabled={draft.trim() === initial.trim()} onClick={() => void save()}>
+          Save style
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export function SettingsView() {
   const settings = useStore((s) => s.settings)
   const keyStatus = useStore((s) => s.keyStatus)
@@ -480,8 +513,10 @@ export function SettingsView() {
                 <option value="concise">Concise: shorter, straight to the point</option>
                 <option value="explanatory">Explanatory: teaches as it goes</option>
                 <option value="formal">Formal: clear and professional</option>
+                <option value="custom">Custom: in your own words</option>
               </select>
             </div>
+            {settings?.responseStyle === 'custom' && <CustomStyleField initial={settings.customStyle ?? ''} />}
           </div>
         </section>
 

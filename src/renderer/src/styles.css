@@ -1573,3 +1573,106 @@ dialog:modal {
 .feedback-form {
   order: 99;
 }
+
+/* ---- Incognito chats ---- */
+.incognito-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 32px;
+  font-size: 12px;
+  color: var(--ink-muted);
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  border-bottom: 1px solid var(--rule);
+}
+.btn.is-on {
+  background: var(--ink);
+  color: var(--canvas);
+  border-color: var(--ink);
+}
+
+/* ---- Stopped at the step limit ---- */
+.limit-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px 10px 16px;
+  border: 1px solid var(--rule);
+  border-radius: 16px;
+  background: var(--card);
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+/* ---- Quote a selection in a reply ---- */
+.quote-btn {
+  position: fixed;
+  z-index: 60;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--ink);
+  font-size: 12px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.14);
+  cursor: pointer;
+}
+.quote-btn:hover {
+  background: var(--oat);
+}
+
+/* ---- Tools menu: switches and the chips that show what's on ---- */
+.switch {
+  appearance: none;
+  position: relative;
+  flex-shrink: 0;
+  width: 30px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--rule);
+  cursor: pointer;
+  transition: background-color 140ms ease;
+}
+.switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--card);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform 140ms ease;
+}
+.switch:checked {
+  background: var(--clay);
+}
+.switch:checked::after {
+  transform: translateX(12px);
+}
+.switch:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+.tool-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border: 1px solid color-mix(in srgb, var(--clay) 50%, var(--rule));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--clay) 12%, transparent);
+  color: var(--ink);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.tool-chip.is-off {
+  border-color: var(--rule);
+  background: transparent;
+  color: var(--ink-muted);
+}

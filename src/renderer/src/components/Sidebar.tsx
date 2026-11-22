@@ -121,7 +121,7 @@ export function Sidebar() {
                   renameValue={task.title}
                   active={selectedTaskId === task.id}
                   mark={taskMark(task.status, unread[task.id])}
-                  detail={task.pinned ? 'Pinned' : undefined}
+                  detail={task.incognito ? 'Incognito' : task.pinned ? 'Pinned' : undefined}
                   onOpen={() => {
                     if (selectedTaskId !== task.id) navigate({ name: 'task', projectId: project.id, taskId: task.id })
                   }}
