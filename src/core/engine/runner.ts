@@ -810,6 +810,8 @@ export class TaskRunner {
     const prompt = `${replaced}${userText.trim()}${guideReminder(userText, undefined, research ? ['research'] : [])}${researchNote}`
 
     const live = new LiveTimeline(taskId, bus, () => Date.now())
+    /** Whether the agent said anything during the turn (Freebuff shows its prose as it goes). */
+    let said = false
     const result = await terminals.execute(
       resolved.provider as 'opencode' | 'agy' | 'freebuff',
       project.folder,
@@ -820,6 +822,7 @@ export class TaskRunner {
         signal: controller.signal,
         onItem: (item) => {
           if (item.kind === 'assistant') {
+            if (item.text.trim()) said = true
             // Freebuff sends each paragraph whole and grows it in place by id, so it shows where it
             // was said, between steps; the other CLIs send pieces of one reply to append.
             if (resolved.provider === 'freebuff') bus.emit({ type: 'task.item', taskId, item })
@@ -846,6 +849,8 @@ export class TaskRunner {
       return
     }
     if (result.error) throw new Error(result.error)
+    // Nothing back and no error is still a failed turn: say so rather than leave the chat silent.
+    if (!result.text?.trim() && !said) throw new Error(`${PROVIDER_LABELS[resolved.provider]} finished without an answer. Send the message again, or pick another model.`)
 
     repos.tasks.update(taskId, { status: 'idle', error: null })
 

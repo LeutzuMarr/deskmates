@@ -49,6 +49,7 @@ import { ensureFreebuffPromptTools, setPromptToolsCommand } from './terminals/pr
 import { webFetchText, webSearchResults } from './tools/web'
 import { myPromptBrief, myPromptPath, promptSectionTool } from './engine/my-prompt'
 import { setEffortSource, setThinkingSource } from './engine/effort'
+import { setFreebuffGuardFile } from './terminals/freebuff-guard'
 import { DEFAULT_DUO_PROFILE, type DuoProfile } from '../shared/duo'
 import { tool as aiTool } from 'ai'
 import { z } from 'zod'
@@ -98,6 +99,8 @@ async function main(): Promise<void> {
   process.once('exit', () => removeBridgeInfoIfOwned(kitDir))
 
   const db = openDatabase(join(dataDir, 'deskmates.db'))
+  // Freebuff refused Deskmates before: keep it blocked across restarts (terminals/freebuff-guard.ts).
+  setFreebuffGuardFile(join(dataDir, 'freebuff-block.json'))
   const repos = createRepos(db)
   // Every agent's instructions carry the effort level the user picked next to the model.
   setEffortSource(() => repos.settings.get().effort)

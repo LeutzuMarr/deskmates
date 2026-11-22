@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { RefObject } from 'react'
 import { Quote } from 'lucide-react'
 import { QUOTE_EVENT, quoted } from '../lib/quote'
@@ -43,7 +44,8 @@ export function QuoteSelection({ root }: { root: RefObject<HTMLElement | null> }
     }
   }, [root])
   if (!spot) return null
-  return (
+  // On the page itself: inside the chat, a transformed parent would shift a fixed position.
+  return createPortal(
     <button
       type="button"
       className="quote-btn"
@@ -58,6 +60,7 @@ export function QuoteSelection({ root }: { root: RefObject<HTMLElement | null> }
     >
       <Quote size={13} aria-hidden="true" />
       Quote
-    </button>
+    </button>,
+    document.body
   )
 }

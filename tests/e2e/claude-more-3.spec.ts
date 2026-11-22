@@ -93,6 +93,10 @@ test('incognito, research and web switches, quotes, long pastes and chat search'
     await clickRobust(page.getByRole('button', { name: 'Send', exact: true }))
     await expect(page.getByText('Hello from an incognito chat.')).toBeVisible({ timeout: 60000 })
     await expect(page.getByRole('note').filter({ hasText: 'Incognito chat' })).toBeVisible()
+    // A short message stays on one line (it used to wrap after every word, even inside one).
+    await page.waitForTimeout(400)
+    const bubble = await page.locator('.user-bubble', { hasText: 'Hello there' }).boundingBox()
+    expect(bubble!.height).toBeLessThan(52)
     expect(systemOf(fake.requests[0])).toContain('Incognito chat')
     expect(toolNames(fake.requests[0])).not.toContain('conversation_search')
     await page.screenshot({ path: join(SCREENS_DIR, 'three-02-incognito-chat.png') })
