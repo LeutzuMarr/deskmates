@@ -87,13 +87,26 @@ export function freebuffModelLabel(id: string): string {
   return `${model.name} · ${freebuffCostLabel(model.cost)}${model.note ? ` · ${model.note}` : ''}`
 }
 
+/** Freebuff's reasoning levels, shown after a model's name ("Beam 1.0 • high"). Tab changes them in
+ *  the picker; they aren't part of the model's name. */
+const REASONING = /\s+•\s+(?:minimal|low|medium|high|xhigh|max)(?![\w.])/gi
+
+/** What's inside a card row: the text between its left and right border, without the picker's
+ *  scrollbar, which is drawn just right of the border ("│▄"). */
+function cardRow(line: string): string {
+  const left = line.indexOf('│')
+  const right = line.lastIndexOf('│')
+  return right > left ? line.slice(left + 1, right).trim() : line.slice(left + 1).trim()
+}
+
 /**
  * The model cards on a screen of Freebuff's /model picker. Each card is a box whose first row is
- * "› Name · tagline · tags" (the › marks the highlighted one) and whose second row is the cost
- * ("5x"), "Paid plan", or something else (a warning) for free models.
+ * "› Name • reasoning · tagline · tags" (the › marks the highlighted one; a long tagline wraps onto
+ * the next row after a trailing "·"). A row of its own gives the cost: "5x" (sometimes followed by
+ * "· May use data…"), "Paid plan", or something else (a notice) for free models. The highlighted
+ * card also shows a description, which is skipped.
  */
 export function parsePickerCards(screen: string): FreebuffModel[] {
-  const rows = screen.split('\n').map((line) => line.replace(/^\s*│|│\s*$/g, '').trim())
   const lines = screen.split('\n')
   const cards: FreebuffModel[] = []
   // Only the boxes under the picker's own key-help line are model cards: Freebuff's input box and
@@ -101,15 +114,31 @@ export function parsePickerCards(screen: string): FreebuffModel[] {
   const start = lines.findIndex((line) => /choose model/.test(line))
   for (let i = Math.max(0, start); i < lines.length; i++) {
     if (!/^\s*[┌╭]/.test(lines[i]!)) continue
-    const first = rows[i + 1]
-    if (!first || !lines[i + 1]!.includes('│')) continue
+    const body: string[] = []
+    for (let j = i + 1; j < lines.length && lines[j]!.includes('│') && !/^\s*[└╰]/.test(lines[j]!); j++) body.push(cardRow(lines[j]!))
+    let first = body[0]
+    if (!first) continue
     if (/^▍|for commands|Enter a coding task/i.test(first)) break
-    const segments = first.replace(/^›\s*/, '').split(/\s+·\s+/).map((part) => part.trim()).filter(Boolean)
+    let rest = body.slice(1)
+    if (/·$/.test(first) && rest[0]) {
+      first = `${first} ${rest[0]}`
+      rest = rest.slice(1)
+    }
+    const segments = first
+      .replace(/^›\s*/, '')
+      .replace(REASONING, '')
+      .split(/\s+·\s+|\s+·$/)
+      .map((part) => part.trim())
+      .filter(Boolean)
     const name = segments[0]
     if (!name) continue
-    const second = lines[i + 2]?.includes('│') && !/^\s*[└╰]/.test(lines[i + 2]!) ? rows[i + 2]!.trim() : ''
-    const multiplier = /^(\d+(?:\.\d+)?)\s*x\b/i.exec(second)
-    const cost = multiplier ? `${multiplier[1]}x` : /paid/i.test(second) ? 'Paid plan' : null
+    let cost: string | null = null
+    for (const row of rest) {
+      const multiplier = /^(\d+(?:\.\d+)?)\s*x(?!\w)/i.exec(row)
+      if (multiplier) cost = `${multiplier[1]}x`
+      else if (/^paid plan(?!\w)/i.test(row)) cost = 'Paid plan'
+      if (cost) break
+    }
     const note = segments.slice(1).join(' · ')
     cards.push(note ? { name, cost, note } : { name, cost })
   }

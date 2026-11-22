@@ -18,6 +18,7 @@ import type { ToolSet } from 'ai'
 import { parseClientFile, type GoogleAuth } from '../google/auth'
 import { THINKING_MODES, type When } from '../../shared/protocol'
 import { randomInt, randomUUID } from 'node:crypto'
+import { homedir } from 'node:os'
 import { basename, join, resolve, sep } from 'node:path'
 import { designFolder, listDesignFiles, readDesign, starterHtml, writeDesign } from '../designs/files'
 import type { EngineService, PcService, RunService, ScheduleService } from '../bots/services'
@@ -60,6 +61,8 @@ const TERMINALS_NOT_SET_UP = "Terminal agents aren't set up on this computer yet
 
 /** How often Freebuff's picker may be read at most: each read drives Freebuff's /model screen. */
 const FREEBUFF_MODELS_MIN_GAP_MS = 60_000
+/** How long after launch Deskmates reads Freebuff's model list. */
+const FREEBUFF_MODELS_STARTUP_DELAY_MS = 8_000
 /** Shown when a skills/plugins.* call needs the extensions machinery and it isn't wired up yet. */
 const SKILLS_NOT_SET_UP = "Skills and plugins aren't set up on this computer yet."
 /** Shown when a connectors.* call needs the MCP machinery and it isn't wired up yet. */
@@ -130,19 +133,22 @@ export function createHandlers(services: HandlerServices): Handlers {
   /** A task's ratings, without the reply text kept for matching. */
   const feedbackOf = (id: string) => Object.fromEntries(Object.entries(repos.tasks.feedback(id)).map(([itemId, f]) => [itemId, { rating: f.rating, comment: f.comment, start: f.text.slice(0, 200) }]))
 
-  // Freebuff's model list: the last one read off its picker (saved across launches), refreshed in the
-  // background whenever the picker is opened and an idle Freebuff is running.
+  // Freebuff's model list: the last one read off its picker (saved across launches), read fresh once
+  // each time Deskmates opens, and again in the background whenever the picker is opened and an idle
+  // Freebuff is running.
   const savedFreebuffModels = repos.settings.getExtra<FreebuffModelList | null>('freebuffModels', null)
   if (savedFreebuffModels?.models.length) setFreebuffModels(savedFreebuffModels.models)
   let freebuffModelsAt = savedFreebuffModels?.updatedAt ?? 0
   let freebuffModelsReading: Promise<void> | null = null
   const currentFreebuffModels = (): FreebuffModelList => ({ models: freebuffModels(), updatedAt: freebuffModelsAt })
-  const refreshFreebuffModels = (): Promise<void> => {
-    if (freebuffModelsReading || !services.terminals || Date.now() - freebuffModelsAt < FREEBUFF_MODELS_MIN_GAP_MS) return freebuffModelsReading ?? Promise.resolve()
+  /** `startIn`: a folder to start a hidden Freebuff in for the read when none is running idle. */
+  const refreshFreebuffModels = (startIn?: string): Promise<void> => {
+    if (freebuffModelsReading || !services.terminals) return freebuffModelsReading ?? Promise.resolve()
+    if (!startIn && Date.now() - freebuffModelsAt < FREEBUFF_MODELS_MIN_GAP_MS) return Promise.resolve()
     const terminals = services.terminals
     freebuffModelsReading = (async () => {
       try {
-        const read = await terminals.freebuffModels()
+        const read = await terminals.freebuffModels(startIn)
         if (!read || read.length === 0) return
         const before = JSON.stringify(freebuffModels())
         setFreebuffModels(read)
@@ -157,6 +163,11 @@ export function createHandlers(services: HandlerServices): Handlers {
       }
     })()
     return freebuffModelsReading
+  }
+  // The fresh read at launch: a few seconds in, so the app opens first, and only where Freebuff is
+  // installed and signed in to on this PC (never in the e2e tests' sandboxed homes).
+  if (services.terminals && process.platform === 'win32' && !process.env.DESKMATES_NO_HOME_CONFIG && !process.env.VITEST && existsSync(join(homedir(), '.config', 'manicode', 'credentials.json'))) {
+    setTimeout(() => void refreshFreebuffModels(join(dataDir, 'freebuff-models')), FREEBUFF_MODELS_STARTUP_DELAY_MS).unref?.()
   }
 
   const requireRemote = (): RemoteAccess => {
