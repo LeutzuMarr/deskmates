@@ -358,8 +358,6 @@ export function stepWords(toolName: string, rawInput: unknown): StepWords {
     case 'delegate':
     case 'task':
       return words('Handing off', 'Handed off', clip(str(input.description ?? input.task), 60) || 'a subtask')
-    case 'read_prompt_section':
-      return words('Reading', 'Read', 'its instructions')
 
     // Design and documents
     case 'export_video':

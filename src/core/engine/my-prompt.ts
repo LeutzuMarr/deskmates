@@ -17,7 +17,7 @@ import { z } from 'zod'
 import { promptsDir } from './instructions'
 import { GROUNDING_RULES } from './grounding'
 import { parseLooseJson } from './loose-json'
-import { currentEffort, effortLines, effortPlainLine, effortTable } from './effort'
+import { currentEffort, currentThinking, effortLines, effortPlainLine, effortTable, thinkingPlainLine, thinkingTagValue } from './effort'
 import type { EffortLevel } from '../../shared/effort'
 
 /** The operating prompt, newest first: the first one present is used. */
@@ -163,9 +163,17 @@ function preamble(loaded: Loaded, effort: EffortLevel): string {
   const head = loaded.lines.slice(0, loaded.sections[0]!.from - 1).join('\n').trim()
   // The tag may carry a namespace (<x:reasoning_effort>); the file's own spelling is kept.
   const tag = /(<(?:[\w-]+:)?reasoning_effort>)[^<]*(<\/(?:[\w-]+:)?reasoning_effort>)/
-  if (!tag.test(head)) return effortLines(effort, loaded.path)
+  // The extended-thinking switch sets <thinking_mode> the same way ('auto' keeps the file's value).
+  const thinking = currentThinking()
+  const thinkingValue = thinkingTagValue(thinking)
+  const thinkingLine = thinkingPlainLine(thinking)
+  const withThinking = (text: string): string => {
+    const thinkingTag = /(<(?:[\w-]+:)?thinking_mode>)[^<]*(<\/(?:[\w-]+:)?thinking_mode>)/
+    return thinkingValue && thinkingTag.test(text) ? text.replace(thinkingTag, (_all, open: string, close: string) => `${open}${thinkingValue}${close}`) : text
+  }
+  if (!tag.test(head)) return [effortLines(effort, loaded.path), thinkingLine].filter(Boolean).join('\n')
   const value = effortTable(loaded.path)[effort]
-  return `${head.replace(tag, (_all, open: string, close: string) => `${open}${value}${close}`)}\n\n${effortPlainLine(effort)}`
+  return [withThinking(head.replace(tag, (_all, open: string, close: string) => `${open}${value}${close}`)), '', effortPlainLine(effort), thinkingLine].filter((line, i) => line !== '' || i === 1).join('\n')
 }
 
 export function myPromptBrief(readHow: 'tool' | 'file' | 'none', path = myPromptPath(), options: { promptTools?: boolean | 'mcp'; effort?: EffortLevel } = {}): string | null {

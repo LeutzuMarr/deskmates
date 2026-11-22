@@ -11,6 +11,7 @@ import { Conversation } from '../components/Conversation'
 import { FreebuffStatusLine } from '../components/FreebuffStatusLine'
 import { DiffChip } from '../components/DiffChip'
 import { BrowserSurface, DockBrowserButton } from '../components/BrowserPanel'
+import { ArtifactPanel } from '../components/ArtifactPanel'
 import type { ChangeStats, FileChange } from '../../../shared/protocol'
 
 /** Provider and folder pairs whose agent has already run once since the app opened. */
@@ -25,6 +26,13 @@ export function TaskView({ projectId, taskId }: { projectId: string; taskId: str
   const defaultModel = useStore((s) => s.settings?.defaultModel ?? null)
   const browserOpen = useStore((s) => s.browserOpen)
   const setBrowserOpen = useStore((s) => s.setBrowserOpen)
+  const artifactOpen = useStore((s) => s.artifact?.taskId === taskId)
+  const setArtifactHost = useStore((s) => s.setArtifactHost)
+  // This view has the artifact panel: artifacts in its chat show as cards that open it.
+  useEffect(() => {
+    setArtifactHost(taskId)
+    return () => setArtifactHost(null)
+  }, [taskId, setArtifactHost])
   const [panelOpen, setPanelOpen] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [draft, setDraft] = useState('')
@@ -166,7 +174,7 @@ export function TaskView({ projectId, taskId }: { projectId: string; taskId: str
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1">
         <Conversation
           editable
           taskId={taskId}
@@ -187,6 +195,9 @@ export function TaskView({ projectId, taskId }: { projectId: string; taskId: str
             </>
           }
         />
+
+        {/* The artifact the user opened from the chat, beside it. */}
+        {artifactOpen && <ArtifactPanel timeline={timeline} folder={project?.folder ?? null} />}
 
         {/* Deskmates' browser beside the chat: watch the agent work on a site, or sign in for it. */}
         {browserOpen && (

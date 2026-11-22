@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, useId, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
 import type { ClipboardEvent, DragEvent, KeyboardEvent } from 'react'
-import { ArrowUp, Paperclip, Square, X } from 'lucide-react'
+import { ArrowUp, FileText, Paperclip, Square, X } from 'lucide-react'
 import { Glass } from 'glisse'
 import { core } from '../lib/rpc'
 import { useStore } from '../lib/store'
@@ -9,6 +9,7 @@ import type { Selection } from '../lib/design'
 import { FOCUS_COMPOSER_EVENT } from '../lib/shortcuts'
 import { ModelPicker } from './ModelPicker'
 import { EffortPicker } from './EffortPicker'
+import { DictationButton } from './DictationButton'
 import { ContextMeter } from './ContextMeter'
 import { BUILT_IN_COMMANDS, runBuiltIn } from '../lib/commands'
 
@@ -36,6 +37,9 @@ interface ComposerProps {
   /** Placeholder while idle. */
   placeholder?: string
 }
+
+/** Files a message carries as documents the model reads. */
+const DOCUMENT_EXTENSIONS = /\.(pdf|docx|xlsx|xlsm|pptx|txt|md|markdown|csv|tsv|json|html?|xml|ya?ml|jsx?|tsx?|py|java|c|cpp|h|cs|go|rs|rb|php|sql|css|log|ini|toml)$/i
 
 export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
   { projectId, taskId, autoFocus, selection, onClearSelection, seed, placeholder },
@@ -197,15 +201,18 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const [images, setImages] = useState<Array<{ dataUrl: string; name: string }>>([])
   const imageInputRef = useRef<HTMLInputElement>(null)
   const isImage = (file: File): boolean => /^image\/(png|jpeg|gif|webp)$/.test(file.type)
+  // Documents the model reads as text (Word, Excel, PowerPoint, PDF, text and code), as Claude takes them.
+  const isDocument = (file: File): boolean => DOCUMENT_EXTENSIONS.test(file.name) || file.type.startsWith('text/')
   const attachImages = (files: File[]): void => {
     const room = 6 - images.length
     if (room <= 0) {
-      showToast('A message can carry at most 6 images.')
+      showToast('A message can carry at most 6 attachments.')
       return
     }
     for (const file of files.slice(0, room)) {
-      if (file.size > 8 * 1024 * 1024) {
-        showToast(`${file.name || 'That image'} is larger than 8 MB.`)
+      const limit = isImage(file) ? 8 : 25
+      if (file.size > limit * 1024 * 1024) {
+        showToast(`${file.name || 'That file'} is larger than ${limit} MB.`)
         continue
       }
       const reader = new FileReader()
@@ -223,9 +230,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     event.preventDefault()
     // Pictures are attached for the model to see; other files go in as their paths.
     const all = Array.from(event.dataTransfer.files)
-    const pictures = all.filter(isImage)
+    const pictures = all.filter((file) => isImage(file) || isDocument(file))
     if (pictures.length) attachImages(pictures)
-    const others = all.filter((file) => !isImage(file))
+    const others = all.filter((file) => !isImage(file) && !isDocument(file))
     if (others.length) {
       const list = new DataTransfer()
       others.forEach((file) => list.items.add(file))
@@ -451,8 +458,15 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         {images.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-2 px-1 pt-1" aria-label="Attached images">
             {images.map((image, index) => (
-              <div key={`${index}-${image.name}`} className="attach-thumb">
-                <img src={image.dataUrl} alt={image.name} />
+              <div key={`${index}-${image.name}`} className={image.dataUrl.startsWith('data:image/') ? 'attach-thumb' : 'attach-thumb attach-file'} title={image.name}>
+                {image.dataUrl.startsWith('data:image/') ? (
+                  <img src={image.dataUrl} alt={image.name} />
+                ) : (
+                  <span className="attach-file-name">
+                    <FileText size={14} aria-hidden="true" />
+                    <span className="truncate">{image.name}</span>
+                  </span>
+                )}
                 <button
                   type="button"
                   className="attach-thumb-remove"
@@ -500,8 +514,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             <button
               type="button"
               className="copy-btn h-8 w-8 justify-center p-0"
-              aria-label="Attach images"
-              title="Attach images (or paste a screenshot)"
+              aria-label="Attach files"
+              title="Attach images or documents (or paste a screenshot)"
               onClick={() => imageInputRef.current?.click()}
             >
               <Paperclip size={15} aria-hidden="true" />
@@ -509,12 +523,21 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             <input
               ref={imageInputRef}
               type="file"
-              accept="image/png,image/jpeg,image/gif,image/webp"
+              accept="image/png,image/jpeg,image/gif,image/webp,.pdf,.docx,.xlsx,.xlsm,.pptx,.txt,.md,.csv,.json,.html,.xml,.yaml,.yml,.js,.ts,.tsx,.jsx,.py,.java,.c,.cpp,.h,.cs,.go,.rs,.rb,.php,.sql,.css,.log,text/*"
               multiple
               className="hidden"
               onChange={(event) => {
                 attachImages(Array.from(event.target.files ?? []))
                 event.target.value = ''
+              }}
+            />
+            <DictationButton
+              disabled={false}
+              onText={(words) => {
+                const current = textareaRef.current?.value ?? text
+                const joined = current && !/\s$/.test(current) ? `${current} ${words}` : `${current}${words}`
+                setText(joined)
+                textareaRef.current?.focus()
               }}
             />
             <ModelPicker projectId={projectId} />

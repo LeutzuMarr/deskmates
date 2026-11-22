@@ -20,6 +20,7 @@
  * its screen, its browser, its on-disk files — refuses to run (see `guardPcTools` below) instead
  * of colliding with whatever the human is doing on the same PC.
  */
+import { guideInstructions } from '../engine/guides'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { myPromptBrief, promptSectionTool } from '../engine/my-prompt'
 import { currentEffort, effortProviderOptions } from '../engine/effort'
@@ -363,7 +364,8 @@ export class BotRunner implements RunService {
           `${PROVIDER_LABELS[provider]} runs through a local CLI session, which can't drive this bot's PC. Pick an API-backed model for this bot instead.`
         )
       }
-      const instructions = buildBotInstructions(bot, new Date(now()), { provider, modelId }, this.deps.skills, Boolean(this.deps.promptToolsFor))
+      // The user's guides (Chrome, research, visuals) the task needs, in full, ahead of any skill.
+      const instructions = [buildBotInstructions(bot, new Date(now()), { provider, modelId }, this.deps.skills, Boolean(this.deps.promptToolsFor)), guideInstructions(run.id, run.task)].filter(Boolean).join('\n\n')
 
       const pc = await this.deps.host.start(bot.id)
       if (pc.state !== 'running') throw new Error("This bot's PC didn't start.")

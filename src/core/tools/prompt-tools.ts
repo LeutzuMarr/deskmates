@@ -23,7 +23,7 @@ import { displayBody, imageGallery, saveWidget, visualPage, widgetPage } from '.
 import { WIDGET_TOOL_NAMES } from '../../shared/widgets'
 import { claudeDocsImplementations } from './claude-docs'
 import { fableImplementations } from './fable-tools'
-import { visualizeGuide } from '../engine/guides'
+import { guideGate, markGuideGiven, visualizeGuide } from '../engine/guides'
 import { join } from 'node:path'
 
 const USER_AGENT = 'Deskmates/1.0 (desktop assistant)'
@@ -382,18 +382,26 @@ function implementations(ctx: ToolContext, base: ToolSet): Record<string, Run> {
       return ctx.connectors.readResource(str(input.source), str(input.uri))
     },
 
-    mcp__visualize__read_me: async (input) =>
-      visualizeGuide(Array.isArray(input.modules) ? input.modules.map(str) : []) ??
-      [
+    mcp__visualize__read_me: async (input) => {
+      const guide = visualizeGuide(Array.isArray(input.modules) ? input.modules.map(str) : [])
+      if (guide) {
+        markGuideGiven(ctx.taskId, 'visualize')
+        return guide
+      }
+      return [
         'Widgets you send with mcp__visualize__show_widget are drawn in the chat in a sandboxed frame that fits their height.',
         '- Send SVG (starting with <svg) or an HTML fragment; no <html>, <head> or <body> needed.',
         '- Scripts run after the widget loads. Libraries may come from https CDNs (cdnjs, jsdelivr, unpkg). Nothing is sent anywhere else.',
         '- Theme with these CSS variables so it matches light and dark mode: --card, --ink, --muted, --faint, --rule, --accent, --accent-soft, --good, --bad. The background is transparent.',
         '- Keep it compact (it sits in a chat column about 700px wide) and readable at 360px.',
         '- sendPrompt is not available; links open in the browser.'
-      ].join('\n'),
+      ].join('\n')
+    },
     mcp__visualize__show_widget: async (input) => {
       if (!ctx.dataDir) throw new Error('Widgets are not set up in this run.')
+      // The user's Visualizer guide comes first: a widget drawn without it is held back once.
+      const gate = guideGate(ctx.taskId, 'visualize', /^\s*<svg/i.test(str(input.widget_code)) ? ['diagram', 'art'] : ['interactive', 'chart', 'mockup'])
+      if (gate) return gate
       const code = str(input.widget_code)
       const title = str(input.title) || 'Widget'
       return saveWidget(ctx.dataDir, title, visualPage(title, code))

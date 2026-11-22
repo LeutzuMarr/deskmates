@@ -31,8 +31,65 @@ export function decodeImage(image: ImageAttachment): { mediaType: string; base64
   return { mediaType: match[1]!, base64, bytes }
 }
 
-/** The user message to store: text and image parts for an API model. */
-export function userMessageWithImages(text: string, images: ImageAttachment[]): ModelMessage {
+// ---- Documents (PDF, Word, Excel, PowerPoint, text and code files) ----
+
+/** At most this many characters of one document's text go to the model. */
+export const MAX_DOCUMENT_CHARS = 150_000
+export const MAX_DOCUMENT_BYTES = 25 * 1024 * 1024
+
+const ANY_DATA_URL = /^data:([\w.+-]+\/[\w.+-]+)?(?:;[\w-]+=[^;,]+)*;base64,([A-Za-z0-9+/=\s]*)$/
+
+/** Whether an attachment is a picture (an image part) rather than a document. */
+export function isImageAttachment(attachment: ImageAttachment): boolean {
+  return DATA_URL.test(attachment.dataUrl.trim())
+}
+
+/** The bytes of any attached file. */
+export function decodeDocument(attachment: ImageAttachment): Buffer {
+  const match = ANY_DATA_URL.exec(attachment.dataUrl.trim())
+  if (!match) throw new Error(`${attachment.name ?? 'That file'} couldn't be read.`)
+  const data = Buffer.from(match[2]!.replace(/\s+/g, ''), 'base64')
+  if (data.length > MAX_DOCUMENT_BYTES) throw new Error(`${attachment.name ?? 'A file'} is larger than ${MAX_DOCUMENT_BYTES / 1024 / 1024} MB.`)
+  return data
+}
+
+/** How a document travels in a message: one text part the timeline shows as a file chip. */
+export function documentPart(name: string, text: string): string {
+  const clean = name.replace(/["<>\n]/g, "'").slice(0, 200)
+  const cut = text.length > MAX_DOCUMENT_CHARS
+  return `<document name="${clean}">\n${cut ? `${text.slice(0, MAX_DOCUMENT_CHARS)}\n[… the rest of the file (${text.length - MAX_DOCUMENT_CHARS} more characters) was left out]` : text}\n</document>`
+}
+
+const DOCUMENT_PART = /^<document name="([^"]*)">/
+
+/** The file name of a document part, or null for ordinary text. */
+export function documentName(text: string): string | null {
+  return DOCUMENT_PART.exec(text)?.[1] ?? null
+}
+
+/** For a command-line agent: saves attached documents in the project and names their paths. */
+export function textWithSavedDocuments(text: string, documents: ImageAttachment[], projectFolder: string): string {
+  if (documents.length === 0) return text
+  const dir = join(projectFolder, '.deskmates', 'attachments')
+  mkdirSync(dir, { recursive: true })
+  const paths = documents.map((doc) => {
+    const name = (doc.name ?? 'file').replace(/[\\/:*?"<>|]/g, '_').slice(0, 120) || 'file'
+    const file = join(dir, `${randomUUID().slice(0, 6)}-${name}`)
+    writeFileSync(file, decodeDocument(doc))
+    return file
+  })
+  return `${text}\n\nAttached file${paths.length > 1 ? 's' : ''} (read ${paths.length > 1 ? 'them' : 'it'}):\n${paths.map((p) => `- ${p}`).join('\n')}`
+}
+
+/** The user message to store: text, image and document parts for an API model. */
+export function userMessageWithImages(text: string, images: ImageAttachment[], documents: string[] = []): ModelMessage {
+  if (documents.length > 0) {
+    const parts = images.map((image) => {
+      const { mediaType, base64 } = decodeImage(image)
+      return { type: 'image' as const, image: base64, mediaType }
+    })
+    return { role: 'user', content: [{ type: 'text', text }, ...documents.map((doc) => ({ type: 'text' as const, text: doc })), ...parts] }
+  }
   if (images.length === 0) return { role: 'user', content: text }
   if (images.length > MAX_IMAGES) throw new Error(`Attach at most ${MAX_IMAGES} images to one message.`)
   const parts = images.map((image) => {

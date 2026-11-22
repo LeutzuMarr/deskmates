@@ -3,33 +3,100 @@
  * Also provides pendingApprovals and danglingToolCalls helpers.
  */
 import type { ModelMessage } from 'ai'
-import type { TimelineItem, ToolItem } from '../../shared/protocol'
+import type { ReplySource, TimelineItem, ToolItem } from '../../shared/protocol'
 import type { StoredMessage } from '../store/repos'
 
-/** Builds a timeline of items from stored messages. */
-export function buildTimeline(stored: StoredMessage[]): TimelineItem[] {
+const FETCH_TOOLS = /^(WebFetch|web_fetch|fetch_url|browser_open)$/
+const SEARCH_TOOLS = /^(WebSearch|web_search)$/
+
+/** A tool output's value as data: search results come back as arrays, sometimes as JSON text. */
+function outputValue(output: unknown): unknown {
+  const value = output && typeof output === 'object' && 'value' in (output as object) ? (output as { value: unknown }).value : output
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value)
+    } catch {
+      return value
+    }
+  }
+  return value
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return ''
+  }
+}
+
+interface TurnSources {
+  end: number
+  fetched: Map<string, string>
+  found: Map<string, string>
+}
+
+/**
+ * The sources of each turn's answer: the pages it read (fetches) and the search results its reply
+ * points at, put under the turn's last reply as Claude shows them.
+ */
+function attachSources(items: TimelineItem[], turns: TurnSources[]): void {
+  let start = 0
+  for (const turn of turns) {
+    const replies = items.slice(start, turn.end).filter((item): item is Extract<TimelineItem, { kind: 'assistant' }> => item.kind === 'assistant')
+    start = turn.end
+    const last = replies.at(-1)
+    if (!last) continue
+    const said = replies.map((r) => r.text).join('\n').toLowerCase()
+    const sources = new Map<string, string>(turn.fetched)
+    for (const [url, title] of turn.found) {
+      const host = hostOf(url)
+      if (said.includes(url.toLowerCase()) || (host && said.includes(host))) sources.set(url, sources.get(url) || title)
+    }
+    const list: ReplySource[] = [...sources]
+      .filter(([url]) => /^https?:\/\//i.test(url))
+      .slice(0, 10)
+      .map(([url, title]) => ({ url, title: title || hostOf(url) || url }))
+    if (list.length) last.sources = list
+  }
+}
+
+/**
+ * Builds a timeline of items from stored messages. `forks` are the positions that have versions
+ * (TasksRepo.forks), so an edited message shows its ‹ 1/2 › switcher.
+ */
+export function buildTimeline(stored: StoredMessage[], forks?: Map<number, { index: number; count: number }>): TimelineItem[] {
   const items: TimelineItem[] = []
   // Map toolCallId → ToolItem for mutation during processing
   const toolMap = new Map<string, ToolItem>()
+  // Each turn's pages read and search results, for the sources under its answer.
+  const turns: TurnSources[] = []
+  let turn: TurnSources = { end: 0, fetched: new Map(), found: new Map() }
+  const fetchUrls = new Map<string, string>()
 
   for (let i = 0; i < stored.length; i++) {
     const { message, at } = stored[i]
     const msg = message as ModelMessage
 
     if (msg.role === 'user') {
+      turn.end = items.length
+      turns.push(turn)
+      turn = { end: 0, fetched: new Map(), found: new Map() }
       // Join text parts
-      const parts = Array.isArray(msg.content)
-        ? msg.content
-            .filter((p: any) => p.type === 'text')
-            .map((p: any) => p.text ?? p.value ?? '')
+      const texts: string[] = Array.isArray(msg.content)
+        ? msg.content.filter((p: any) => p.type === 'text').map((p: any) => String(p.text ?? p.value ?? ''))
         : [String(msg.content)]
+      // Attached documents are their own text parts: shown as file chips, not as the message.
+      const files = texts.map((t) => /^<document name="([^"]*)">/.exec(t)?.[1]).filter((name): name is string => name !== undefined)
+      const parts = texts.filter((t) => !t.startsWith('<document name="'))
       // Pictures sent with the message, shown as thumbnails above its text.
       const images = Array.isArray(msg.content)
         ? msg.content
             .filter((p: any) => p.type === 'image' && typeof p.image === 'string')
             .map((p: any) => `data:${p.mediaType ?? 'image/png'};base64,${p.image}`)
         : []
-      items.push({ kind: 'user', id: `m${i}`, at, text: parts.join('\n'), ...(images.length ? { images } : {}) })
+      const versions = forks?.get(i)
+      items.push({ kind: 'user', id: `m${i}`, at, text: parts.join('\n'), position: i, ...(images.length ? { images } : {}), ...(files.length ? { files } : {}), ...(versions && versions.count > 1 ? { versions } : {}) })
     } else if (msg.role === 'assistant') {
       // CLI-backed providers (OpenCode/agy) store their reply as a plain string.
       const content =
@@ -60,6 +127,7 @@ export function buildTimeline(stored: StoredMessage[]): TimelineItem[] {
           }
           items.push(toolItem)
           toolMap.set(tc.toolCallId, toolItem)
+          if (FETCH_TOOLS.test(String(tc.toolName)) && typeof tc.input?.url === 'string') fetchUrls.set(tc.toolCallId, tc.input.url)
         } else if ((part as any).type === 'tool-approval-request') {
           const req = part as any
           if (!req.isAutomatic) {
@@ -93,6 +161,16 @@ export function buildTimeline(stored: StoredMessage[]): TimelineItem[] {
               // text, json, content
               existing.state = 'done'
               existing.output = output?.value ?? output
+              const url = fetchUrls.get(tr.toolCallId)
+              if (url) {
+                const value = outputValue(output) as { title?: unknown } | string
+                turn.fetched.set(url, typeof value === 'object' && value && typeof value.title === 'string' ? value.title : '')
+              }
+              if (SEARCH_TOOLS.test(String(existing.toolName))) {
+                const value = outputValue(output) as unknown
+                const list = Array.isArray(value) ? value : Array.isArray((value as { results?: unknown })?.results) ? (value as { results: unknown[] }).results : []
+                for (const r of list as Array<{ url?: unknown; title?: unknown }>) if (typeof r?.url === 'string') turn.found.set(r.url, typeof r.title === 'string' ? r.title : '')
+              }
             }
           }
         } else if ((part as any).type === 'tool-approval-response') {
@@ -114,6 +192,9 @@ export function buildTimeline(stored: StoredMessage[]): TimelineItem[] {
     }
   }
 
+  turn.end = items.length
+  turns.push(turn)
+  attachSources(items, turns)
   return items
 }
 

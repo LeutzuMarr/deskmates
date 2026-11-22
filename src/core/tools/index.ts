@@ -19,6 +19,7 @@ import { screenControlTools } from './screen-control'
 import { chromeTools } from './chrome'
 import { sharedChrome } from '../chrome/service'
 import { guideTools } from '../engine/guides'
+import { knowledgeTools } from './knowledge'
 import { join } from 'node:path'
 
 /** Merges every tool group into one ToolSet for a run. Built fresh per run via TaskRunner. */
@@ -77,6 +78,8 @@ export function buildTools(ctx: ToolContext): ToolSet {
     }
     // The Chrome and research instructions, read only when a task needs them.
     Object.assign(all, guideTools(ctx.taskId))
+    // The files the user added to the project's knowledge.
+    if (ctx.knowledge) Object.assign(all, knowledgeTools(ctx.knowledge))
     Object.assign(all, promptTools(ctx, all))
   }
   return all

@@ -11,9 +11,11 @@ import { freebuffModels, setFreebuffModels, type FreebuffModelList } from '../..
 import { removeWidgetsOf } from '../tools/widgets'
 import { promptToolInfos, runTool } from '../tools/shared-prompt-tools'
 import { findFiles } from '../fs/find-files'
+import { documentText } from '../tools/office'
+import { SystemDictation, dictationMode, transcribeAudio } from '../engine/dictation'
 import type { ToolSet } from 'ai'
 import { parseClientFile, type GoogleAuth } from '../google/auth'
-import type { When } from '../../shared/protocol'
+import { THINKING_MODES, type When } from '../../shared/protocol'
 import { randomInt, randomUUID } from 'node:crypto'
 import { basename, join, resolve, sep } from 'node:path'
 import { designFolder, listDesignFiles, readDesign, starterHtml, writeDesign } from '../designs/files'
@@ -123,6 +125,9 @@ export interface HandlerServices {
 /** Implements every method of RpcMethods. Handlers emit bus events the UI listens to. */
 export function createHandlers(services: HandlerServices): Handlers {
   const { repos, bus, runner, changes, models, keys, version, dataDir, agentKit, onDesignWritten } = services
+  const systemDictation = new SystemDictation()
+  /** A task's ratings, without the reply text kept for matching. */
+  const feedbackOf = (id: string) => Object.fromEntries(Object.entries(repos.tasks.feedback(id)).map(([itemId, f]) => [itemId, { rating: f.rating, comment: f.comment }]))
 
   // Freebuff's model list: the last one read off its picker (saved across launches), refreshed in the
   // background whenever the picker is opened and an idle Freebuff is running.
@@ -222,6 +227,9 @@ export function createHandlers(services: HandlerServices): Handlers {
       }
       if (patch.effort !== undefined && !isEffortLevel(patch.effort)) {
         throw new Error(`effort must be one of: ${EFFORT_LEVELS.join(', ')}.`)
+      }
+      if (patch.thinking !== undefined && !THINKING_MODES.includes(patch.thinking)) {
+        throw new Error(`thinking must be one of: ${THINKING_MODES.join(', ')}.`)
       }
       if (patch.phoneAccess !== undefined && typeof patch.phoneAccess !== 'boolean') {
         throw new Error('phoneAccess must be true or false.')
@@ -356,8 +364,51 @@ export function createHandlers(services: HandlerServices): Handlers {
 
     'tasks.queued': (params: { id: string }) => runner.queuedMessages(params.id),
     'tasks.context': (params: { id: string }) => runner.contextUse(params.id),
-    'tasks.resend': async (params: { id: string; text?: string }) => {
-      await runner.resend(params.id, params.text)
+    'tasks.resend': async (params: { id: string; text?: string; position?: number }) => {
+      await runner.resend(params.id, params.text, typeof params.position === 'number' ? params.position : undefined)
+      return null
+    },
+    'tasks.switchVersion': (params: { id: string; position: number; index: number }) => {
+      runner.switchVersion(params.id, params.position, params.index)
+      return null
+    },
+    'tasks.feedback': (params: { id: string }) => feedbackOf(params.id),
+    'tasks.setFeedback': (params: { id: string; itemId: string; rating: 'up' | 'down' | null; comment?: string; text?: string }) => {
+      if (params.rating !== null && params.rating !== 'up' && params.rating !== 'down') throw new Error('A rating is up, down or null.')
+      repos.tasks.setFeedback(params.id, params.itemId, params.rating, params.comment ?? '', params.text ?? '')
+      return feedbackOf(params.id)
+    },
+    'knowledge.list': (params: { projectId: string }) => repos.knowledge.list(params.projectId),
+    'knowledge.add': async (params: { projectId: string; name: string; dataBase64: string }) => {
+      repos.projects.require(params.projectId)
+      const data = Buffer.from(params.dataBase64, 'base64')
+      if (data.length > 30 * 1024 * 1024) throw new Error(`${params.name} is over 30 MB; add a smaller file.`)
+      const text = (await documentText(params.name, data)).trim()
+      if (!text) throw new Error(`${params.name} has no text Deskmates can read.`)
+      repos.knowledge.add(params.projectId, basename(params.name), text.slice(0, 2_000_000), data.length)
+      const files = repos.knowledge.list(params.projectId)
+      bus.emit({ type: 'knowledge.updated', projectId: params.projectId, files })
+      return files
+    },
+    'knowledge.delete': (params: { projectId: string; id: string }) => {
+      repos.knowledge.delete(params.id, params.projectId)
+      const files = repos.knowledge.list(params.projectId)
+      bus.emit({ type: 'knowledge.updated', projectId: params.projectId, files })
+      return files
+    },
+    'dictation.mode': () => dictationMode(keys),
+    'dictation.transcribe': (params: { audioBase64: string; mediaType: string }) => transcribeAudio(keys, params.audioBase64, params.mediaType),
+    'dictation.start': () => {
+      systemDictation.start({
+        onText: (text) => bus.emit({ type: 'dictation.text', text }),
+        onError: (error) => bus.emit({ type: 'dictation.state', listening: false, error }),
+        onReady: (language) => bus.emit({ type: 'dictation.state', listening: true, language }),
+        onEnd: () => bus.emit({ type: 'dictation.state', listening: false })
+      })
+      return null
+    },
+    'dictation.stop': () => {
+      systemDictation.stop()
       return null
     },
     'tasks.suggestion': (params: { id: string }) => runner.suggestion(params.id),

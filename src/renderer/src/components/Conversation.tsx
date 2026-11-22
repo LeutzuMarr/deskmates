@@ -9,14 +9,15 @@ import { BrandMark } from './Mascot'
 import { CopyButton } from './CopyButton'
 import { ReadAloudButton } from './ReadAloudButton'
 import { Thinking } from './Thinking'
-import { ArrowDown, Pencil, RotateCcw } from 'lucide-react'
+import { ArrowDown, FileText, Pencil, RotateCcw } from 'lucide-react'
 import { core } from '../lib/rpc'
 import { useStore } from '../lib/store'
 import { formatElapsed, awaitingFirstOutput } from '../lib/format'
 import { WorkingLine, WorkingPill } from './Working'
 import { currentActivity } from '../lib/steps'
 import type { StartingNotice } from '../lib/format'
-import type { TimelineItem, ToolItem } from '../../../shared/protocol'
+import type { ReplyFeedback, TimelineItem, ToolItem } from '../../../shared/protocol'
+import { FeedbackButtons, SourcesChip, VersionSwitcher } from './ReplyExtras'
 
 interface ConversationProps {
   /** A task id in 'task' mode (the default), a bot run id in 'run' mode. */
@@ -42,15 +43,15 @@ interface ConversationProps {
   editable?: boolean
 }
 
-/** The last message, edited in place: Enter sends the new text in its place, Esc cancels. */
-function EditBubble({ taskId, text, onDone }: { taskId: string; text: string; onDone: () => void }) {
+/** A message edited in place: Enter sends the new text in its place (the old one stays as a version), Esc cancels. */
+function EditBubble({ taskId, text, position, onDone }: { taskId: string; text: string; position?: number; onDone: () => void }) {
   const [draft, setDraft] = useState(text)
   const showToast = useStore((st) => st.showToast)
   const save = async (): Promise<void> => {
     const next = draft.trim()
     if (!next) return
     try {
-      await core.call('tasks.resend', { id: taskId, text: next })
+      await core.call('tasks.resend', { id: taskId, text: next, ...(typeof position === 'number' ? { position } : {}) })
       onDone()
     } catch (error) {
       showToast(`Couldn't send the edited message: ${error instanceof Error ? error.message : String(error)}`)
@@ -126,6 +127,19 @@ function turnText(timeline: TimelineItem[], i: number): string {
 export function Conversation({ taskId, mode = 'task', timeline, running, emptyHint, contentClassName, pill = true, starting = null, dock, editable = false }: ConversationProps) {
   const [editing, setEditing] = useState<string | null>(null)
   const showToast = useStore((st) => st.showToast)
+  // Thumbs up and down on this task's replies.
+  const [feedback, setFeedback] = useState<Record<string, ReplyFeedback>>({})
+  useEffect(() => {
+    if (mode !== 'task') return
+    let live = true
+    core
+      .call('tasks.feedback', { id: taskId })
+      .then((all) => live && setFeedback(all))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [taskId, mode])
   const retry = async (): Promise<void> => {
     try {
       await core.call('tasks.resend', { id: taskId })
@@ -202,12 +216,12 @@ export function Conversation({ taskId, mode = 'task', timeline, running, emptyHi
   while (i < timeline.length) {
     const item = timeline[i]
     if (item.kind === 'user') {
-      // Only the latest message can be edited, and only between replies, as in Claude.
-      const canEdit = editable && !running && i === lastUserIdx
+      // Any message can be edited between replies, as in Claude: the old one stays as a version.
+      const canEdit = editable && !running
       nodes.push(
         <div key={item.id} className="msg-row flex items-start justify-end gap-1">
           {editing === item.id ? (
-            <EditBubble taskId={taskId} text={item.text} onDone={() => setEditing(null)} />
+            <EditBubble taskId={taskId} text={item.text} position={item.position} onDone={() => setEditing(null)} />
           ) : (
             <>
               {canEdit && (
@@ -224,7 +238,20 @@ export function Conversation({ taskId, mode = 'task', timeline, running, emptyHi
                     ))}
                   </div>
                 )}
+                {item.files && item.files.length > 0 && (
+                  <div className="sent-files" aria-label="Files you sent">
+                    {item.files.map((name, index) => (
+                      <span key={`${index}-${name}`} className="sent-file" title={name}>
+                        <FileText size={13} aria-hidden="true" />
+                        <span className="truncate">{name}</span>
+                      </span>
+                    ))}
+                  </div>
+                )}
                 <div className="user-bubble whitespace-pre-wrap">{item.text}</div>
+                {item.versions && typeof item.position === 'number' && (
+                  <VersionSwitcher taskId={taskId} position={item.position} index={item.versions.index} count={item.versions.count} disabled={running} />
+                )}
               </div>
             </>
           )}
@@ -269,10 +296,12 @@ export function Conversation({ taskId, mode = 'task', timeline, running, emptyHi
               const replies = quickReplies(item.text)
               return replies ? <QuickReplyCard key={item.id} taskId={taskId} replies={replies} running={running} /> : null
             })()}
+            {finished && item.sources && item.sources.length > 0 && <SourcesChip sources={item.sources} />}
             {finished && (
-              <div className={`mt-1.5 flex items-center gap-1 ${isLast ? '' : 'msg-action'}`}>
+              <div className={`mt-1.5 flex flex-wrap items-center gap-1 ${isLast || feedback[item.id] ? '' : 'msg-action'}`}>
                 <CopyButton text={() => turnText(timeline, at)} label="Copy reply" showLabel />
                 <ReadAloudButton text={() => turnText(timeline, at)} />
+                {mode === 'task' && <FeedbackButtons taskId={taskId} itemId={item.id} text={() => turnText(timeline, at)} current={feedback[item.id]} onChange={setFeedback} />}
                 {isLast && editable && !running && (
                   <button type="button" className="copy-btn" aria-label="Retry this reply" title="Retry" onClick={() => void retry()}>
                     <RotateCcw size={12} aria-hidden="true" />

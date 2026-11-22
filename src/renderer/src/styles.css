@@ -1305,3 +1305,252 @@ dialog:modal {
   border: 1px solid var(--rule);
   object-fit: cover;
 }
+
+/* ---- Edit versions (‹ 1 / 2 ›) ---- */
+.version-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+.version-switcher button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-muted);
+  cursor: pointer;
+}
+.version-switcher button:hover:not(:disabled) {
+  background: var(--oat);
+  color: var(--ink);
+}
+.version-switcher button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* ---- Thumbs down reason ---- */
+.feedback-form {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--rule);
+  border-radius: 16px;
+  background: var(--card);
+}
+.feedback-form textarea {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--canvas);
+  color: var(--ink);
+  font-size: 13px;
+  padding: 6px 8px;
+  outline: none;
+}
+.feedback-form textarea:focus {
+  border-color: var(--ink-muted);
+}
+
+/* ---- Sources under a reply ---- */
+.sources {
+  margin-top: 6px;
+}
+.sources-list {
+  margin-top: 4px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 6px;
+  list-style: none;
+  padding: 0;
+}
+.sources-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  background: var(--card);
+  padding: 7px 10px;
+}
+.sources-list li:hover {
+  background: var(--oat);
+}
+.sources-list a {
+  min-width: 0;
+  flex: 1;
+  text-decoration: none;
+}
+.sources-n {
+  flex-shrink: 0;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--oat);
+  color: var(--ink-muted);
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+}
+
+/* ---- Artifacts: the card in the chat and the panel beside it ---- */
+.artifact-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  max-width: 460px;
+  padding: 10px 14px;
+  border: 1px solid var(--rule);
+  border-radius: 16px;
+  background: var(--card);
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.artifact-card:hover,
+.artifact-card.is-open {
+  background: var(--oat);
+}
+.artifact-card.is-open {
+  border-color: var(--ink-muted);
+}
+.artifact-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  background: var(--canvas);
+  border: 1px solid var(--rule);
+  color: var(--ink-muted);
+}
+.artifact-panel {
+  display: flex;
+  flex-direction: column;
+  width: 46%;
+  min-width: 380px;
+  max-width: 900px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--rule);
+  background: var(--canvas);
+}
+.artifact-panel.is-wide {
+  width: 64%;
+  max-width: none;
+}
+.artifact-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 10px 10px 16px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--card);
+}
+.artifact-versions {
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--canvas);
+  color: var(--ink);
+  font-size: 12px;
+  padding: 4px 6px;
+  margin-right: 4px;
+}
+.artifact-note {
+  padding: 6px 16px;
+  font-size: 12px;
+  color: var(--ink-muted);
+  background: var(--manilla);
+}
+.artifact-frame {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+  background: #fff;
+}
+@media (max-width: 900px) {
+  .artifact-panel {
+    position: absolute;
+    inset: 0 0 0 auto;
+    width: 100%;
+    min-width: 0;
+    z-index: 30;
+  }
+}
+
+/* ---- Project knowledge drop zone ---- */
+.knowledge-drop {
+  border: 1px dashed var(--rule);
+  border-radius: 20px;
+  padding: 12px;
+}
+.knowledge-drop.is-dragging {
+  border-color: var(--ink-muted);
+  background: var(--oat);
+}
+
+/* ---- Dictation ---- */
+.copy-btn.dictating {
+  color: var(--brick);
+  background: color-mix(in srgb, var(--brick) 12%, transparent);
+  animation: dictating-pulse 1.4s ease-in-out infinite;
+}
+@keyframes dictating-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--brick) 35%, transparent); }
+  50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--brick) 0%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .copy-btn.dictating { animation: none; }
+}
+
+/* ---- Documents attached to a message ---- */
+.attach-thumb.attach-file {
+  width: auto;
+  max-width: 220px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  padding: 0 28px 0 10px;
+}
+.attach-file-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--ink);
+}
+.sent-files {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.sent-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 240px;
+  padding: 6px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  background: var(--card);
+  font-size: 12px;
+  color: var(--ink);
+}

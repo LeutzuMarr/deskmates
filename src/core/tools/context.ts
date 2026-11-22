@@ -75,6 +75,8 @@ export interface ToolContext {
   google?: GoogleAuth
   /** Past chats in Deskmates, for conversation_search, recent_chats and read_conversation. */
   chats?: ChatHistory
+  /** The project's knowledge files as text, for project_knowledge_search. */
+  knowledge?: () => Array<{ name: string; text: string }>
   /** Stops the run (so a browser wait doesn't outlive it). */
   signal?: AbortSignal
   onPlan(items: PlanItem[]): void

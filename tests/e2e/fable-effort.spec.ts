@@ -70,11 +70,11 @@ test('the Fable prompt, the effort button and a prompt widget reach a real run',
 
     // The effort chip sits next to the model; pick High.
     const chip = page.getByRole('button', { name: /^Effort: / })
-    await expect(chip).toHaveAccessibleName('Effort: Medium')
+    await expect(chip).toHaveAccessibleName(/^Effort: Medium/)
     await clickRobust(chip)
     await page.screenshot({ path: join(SCREENS_DIR, 'fable-01-effort-menu.png') })
     await clickRobust(page.getByRole('option', { name: /^High/ }))
-    await expect(chip).toHaveAccessibleName('Effort: High')
+    await expect(chip).toHaveAccessibleName(/^Effort: High/)
 
     await page.getByLabel('Message').fill('Chart my tea this week')
     await clickRobust(page.getByRole('button', { name: 'Send', exact: true }))
