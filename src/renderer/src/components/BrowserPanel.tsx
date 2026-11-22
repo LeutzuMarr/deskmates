@@ -114,9 +114,9 @@ export function DockBrowserButton(): ReactNode {
   const browser = useStore((s) => s.browser)
   const waiting = (browser?.asks.length ?? 0) > 0
   return (
-    <button type="button" aria-pressed={open} className="btn btn-outline relative" onClick={() => setOpen(!open)} title={open ? 'Hide the browser' : "Show Deskmates' browser beside the chat"}>
-      <Globe size={14} aria-hidden="true" className="mr-1.5" />
-      Browser
+    <button type="button" aria-pressed={open} aria-label="Browser" className="btn btn-outline relative" onClick={() => setOpen(!open)} title={open ? 'Hide the browser' : "Show Deskmates' browser beside the chat"}>
+      <Globe size={14} aria-hidden="true" className="hdr-icon mr-1.5" />
+      <span className="hdr-label">Browser</span>
       {(browser?.busy || waiting) && (
         <span aria-hidden="true" className={`absolute right-1 top-1 h-2 w-2 rounded-full ${waiting ? 'bg-clay' : 'bg-olive'} ${browser?.busy && !waiting ? 'animate-pulse' : ''}`} />
       )}

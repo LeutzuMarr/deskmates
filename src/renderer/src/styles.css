@@ -1554,3 +1554,22 @@ dialog:modal {
   font-size: 12px;
   color: var(--ink);
 }
+
+/* ---- Task header: buttons become icons when the chat is narrow, so the title keeps its room ---- */
+.task-header {
+  container-type: inline-size;
+  container-name: task-header;
+}
+@container task-header (max-width: 820px) {
+  .task-header .hdr-label {
+    display: none;
+  }
+  .task-header .hdr-icon {
+    margin-right: 0;
+  }
+}
+
+/* The thumbs-down question goes under the reply's buttons, not between them. */
+.feedback-form {
+  order: 99;
+}

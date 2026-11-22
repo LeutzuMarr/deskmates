@@ -303,6 +303,9 @@ export interface KnowledgeFile {
 export interface ReplyFeedback {
   rating: 'up' | 'down'
   comment: string
+  /** The start of the reply it was given on: after switching versions, the same place in the
+   *  chat can hold another reply, which this rating isn't about. */
+  start?: string
 }
 
 /** A web page an answer used, for the sources under a reply. */

@@ -123,6 +123,8 @@ export class TaskRunner {
   private readonly runs = new Map<string, RunState>()
   private readonly queued = new Map<string, string[]>()
   private readonly suggestions = new Map<string, string>()
+  /** Tasks whose next turn replaces an edited or retried message (for command-line agents). */
+  private readonly replacedTurns = new Set<string>()
   /** Chats still titled with the gist of their first message, waiting for a summary title. */
   private readonly autoTitles = new Map<string, { title: string; message: string }>()
   private readonly contexts = new Map<string, { used: number; window: number }>()
@@ -283,6 +285,12 @@ export class TaskRunner {
     // What was there is kept as a version the user can flip back to (‹ 1/2 ›).
     const previous = tasks.forkAt(taskId, at)
     if (previous === null) throw new Error('That message is not one of yours, so it cannot be edited.')
+    try {
+      const project = this.deps.repos.projects.require(tasks.require(taskId).projectId)
+      if (this.deps.models.resolve(project.model).cli) this.replacedTurns.add(taskId)
+    } catch {
+      // No model picked yet: the send below says so.
+    }
     const next = text?.trim() || previous.text
     tasks.update(taskId, { status: 'idle', error: null, plan: [] })
     await this.send(taskId, next, previous.images, previous.documents)
@@ -767,7 +775,12 @@ export class TaskRunner {
     // before every question. It is also what makes the second prompt in a session cheap: the model
     // already has the brief and only has to read the new message.
     // The user's guides (Chrome, research, visuals) the message needs, named for the agent to read first.
-    const prompt = `${userText.trim()}${guideReminder(userText)}`
+    // A command-line agent keeps its own session, which still holds the message the user replaced
+    // (Edit or Retry): tell it so, or it answers both.
+    const replaced = this.replacedTurns.delete(taskId)
+      ? "[Deskmates: the user replaced their previous message with the one below (or asked for a new answer to it). Forget your earlier answer to it and anything you did for it, and answer this one fresh.]\n\n"
+      : ''
+    const prompt = `${replaced}${userText.trim()}${guideReminder(userText)}`
 
     const live = new LiveTimeline(taskId, bus, () => Date.now())
     const result = await terminals.execute(

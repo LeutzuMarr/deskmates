@@ -43,7 +43,12 @@ export function DictationButton({ onText, disabled }: { onText: (text: string) =
   // Stop listening when the message box goes away.
   useEffect(
     () => () => {
-      recorder.current?.state === 'recording' && recorder.current.stop()
+      // Gone mid-recording: free the microphone and drop the recording (no box to type it into).
+      const rec = recorder.current
+      if (rec?.state === 'recording') {
+        rec.onstop = () => rec.stream.getTracks().forEach((track) => track.stop())
+        rec.stop()
+      }
       if (mode.current === 'system') void core.call('dictation.stop', {}).catch(() => undefined)
     },
     []
