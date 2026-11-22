@@ -243,7 +243,7 @@ function Thread({ duo }: { duo: DuoState }): ReactNode {
               >
                 <X size={13} />
               </button>
-              <div className="flex flex-col items-end">
+              <div className="flex max-w-[80%] flex-col items-end">
                 <div className="user-bubble whitespace-pre-wrap opacity-60">{q.text}</div>
                 <span className="mt-0.5 text-[11px] text-ink-faint">Queued · goes in when Duo finishes</span>
               </div>

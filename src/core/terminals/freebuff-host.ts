@@ -11,6 +11,8 @@ const IDLE_PLACEHOLDER = /Enter a coding task or \/ for commands/
 /** Both placeholders Freebuff shows in an empty input box: idle, and while a turn runs. */
 const ANY_PLACEHOLDER = /Enter a coding task or \/ for commands|Add to the current task \(\/ for commands\)/i
 const SURVEY = /quick question \d+\/\d+/i
+/** Freebuff's own lines, never the model's: its keyboard hint and a dismissed survey's note. */
+const FREEBUFF_CHROME = /for history · \? for help|Not now: we'll ask again|quick question \d+\/\d+/i
 const RETRY = /Enter: retry/
 
 /** The /model picker's key help line, shown while it is open. */
@@ -137,6 +139,7 @@ export function extractReply(screen: string, prompt: string, skipEchoes = 0): { 
     }
     // The ad card or the input box: the reply is over (or still being written).
     if (/^\s*[╭┌]/.test(lines[i]) || IDLE_PLACEHOLDER.test(lines[i])) break
+    if (FREEBUFF_CHROME.test(lines[i])) continue
     body.push(clean(lines[i]))
   }
   while (body.length && !body[0]) body.shift()
@@ -163,6 +166,7 @@ export function latestReply(screen: string): string | null {
   const body: string[] = []
   for (let i = footer - 1; i >= 0; i--) {
     if (lines[i].includes('⎘') || /^\s*[╭┌╰└│]/.test(lines[i])) break
+    if (FREEBUFF_CHROME.test(lines[i])) continue
     body.unshift(clean(lines[i]))
   }
   while (body.length && !body[0]) body.shift()
@@ -176,7 +180,7 @@ function lastChatLine(screen: string): string | null {
   const lines = screen.split('\n')
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i]
-    if (/^\s*[╭┌╰└│]/.test(line) || BUSY.test(line) || / left · /.test(line) || /\/model to change/.test(line)) continue
+    if (/^\s*[╭┌╰└│]/.test(line) || BUSY.test(line) || / left · /.test(line) || /\/model to change/.test(line) || FREEBUFF_CHROME.test(line)) continue
     const text = clean(line)
     if (text) return text.slice(0, 120)
   }
@@ -224,7 +228,7 @@ export function groupWork(lines: string[]): string[] {
   let joinable = false
   for (const raw of lines) {
     const line = raw.trim()
-    if (!line || BUSY.test(line)) {
+    if (!line || BUSY.test(line) || FREEBUFF_CHROME.test(line)) {
       joinable = false
       continue
     }
@@ -665,8 +669,10 @@ export class FreebuffHost {
         const fallback = reply ? null : latestReply(screen)
         if (fallback) return fallback
         if (fallback === '' && lastText) return lastText
-        // Idle with no footer at all (an error card, say): give it a while, then hand back what was seen.
-        if (Date.now() - this.screenAt > IDLE_GIVE_UP_MS) return lastText || (lastChatLine(screen) ?? '')
+        // Idle with no footer at all (an error card, say): give it a while, then hand back what was
+        // seen of the reply. Never some other line of the screen: that was Freebuff's own text (its
+        // keyboard hint, a survey's "Not now"), passed off as the answer.
+        if (Date.now() - this.screenAt > IDLE_GIVE_UP_MS) return lastText
       }
     }
   }

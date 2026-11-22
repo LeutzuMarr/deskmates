@@ -886,6 +886,10 @@ export interface RpcMethods {
   /** What the hidden Freebuff behind the Work tab shows about its session (model, minutes left,
    *  hours left today, context use) for `folder`, or for any running one. Null when none runs yet. */
   'freebuff.status': { params: { folder?: string }; result: FreebuffStatus | null }
+  /** Whether Deskmates stopped using Freebuff because Freebuff refused its requests. */
+  'freebuff.block': { params: Record<string, never>; result: { reason: string; at: number } | null }
+  /** Lets Deskmates send to Freebuff again (the user's choice; another refusal blocks it again). */
+  'freebuff.unblock': { params: Record<string, never>; result: null }
   /** The Freebuff models Deskmates knows, cheapest first, with their cost. Also starts a fresh read
    *  of Freebuff's picker when an idle Freebuff runs; a changed list arrives as 'freebuff.models'. */
   'freebuff.models': { params: Record<string, never>; result: FreebuffModelList }

@@ -11,6 +11,7 @@ import { freebuffModels, setFreebuffModels, type FreebuffModelList } from '../..
 import { removeWidgetsOf } from '../tools/widgets'
 import { promptToolInfos, runTool } from '../tools/shared-prompt-tools'
 import { findFiles } from '../fs/find-files'
+import { freebuffBlock, unblockFreebuff } from '../terminals/freebuff-guard'
 import { documentText } from '../tools/office'
 import { SystemDictation, dictationMode, transcribeAudio } from '../engine/dictation'
 import type { ToolSet } from 'ai'
@@ -324,6 +325,11 @@ export function createHandlers(services: HandlerServices): Handlers {
     'tasks.list': (params: { projectId: string }) => repos.tasks.list(params.projectId),
 
     'tasks.search': (params: { query: string }) => repos.tasks.search(String(params.query ?? '')),
+    'freebuff.block': () => freebuffBlock(),
+    'freebuff.unblock': () => {
+      unblockFreebuff()
+      return null
+    },
     'tasks.create': (params: { projectId: string; incognito?: boolean }) => {
       repos.projects.require(params.projectId)
       const task = repos.tasks.create(params.projectId, 'New task', params.incognito === true)

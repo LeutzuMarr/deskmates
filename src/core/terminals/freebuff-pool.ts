@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { FREEBUFF_CURRENT_MODEL, type FreebuffModel, type FreebuffStatus } from '../../shared/freebuff'
 import type { TimelineItem } from '../../shared/protocol'
 import { FreebuffHost, StoppedError, isWorkLine } from './freebuff-host'
+import { THIRD_PARTY_REFUSAL, blockFreebuff, blockedMessage, freebuffBlock, freebuffTurnError } from './freebuff-guard'
 import type { CliRunOptions, CliRunResult } from './managed'
 
 /** Prompts longer than this go through a file: they are typed key by key into Freebuff's input. */
@@ -22,6 +23,17 @@ export class FreebuffPool {
 
   async execute(folder: string, prompt: string, model: string | undefined, runOptions: CliRunOptions = {}): Promise<CliRunResult> {
     if (runOptions.signal?.aborted) return { text: '', stopped: true }
+    // Freebuff refused Deskmates before: send nothing, or every try adds a strike to the account.
+    const blocked = freebuffBlock()
+    if (blocked) return { text: '', error: blockedMessage(blocked) }
+    const turnStarted = Date.now()
+    /** Freebuff's own error for this turn, from its chat log; a refusal blocks Freebuff from here on. */
+    const turnError = (): string | null => {
+      const error = freebuffTurnError(folder, turnStarted)
+      if (!error) return null
+      if (THIRD_PARTY_REFUSAL.test(error)) return blockedMessage(blockFreebuff(error))
+      return `Freebuff couldn't answer: ${error}`
+    }
     const host = this.hostFor(folder, runOptions.trustAgents === true)
     this.lastFolder = folder
     const onAbort = (): void => host.cancel()
@@ -50,6 +62,12 @@ export class FreebuffPool {
 
       const steps = new ActivitySteps(activityId, (item) => runOptions.onItem?.(item))
       const reply = await host.ask(request, (items) => steps.reportAll(items))
+      // An error card on Freebuff's screen isn't an answer: what it says is in Freebuff's own log.
+      const refused = turnError()
+      if (refused) {
+        steps.finish()
+        return { text: '', error: refused }
+      }
       this.instructed.add(host)
       steps.finish()
       // Freebuff's prose was shown as chat text while it worked, its summary included; the reply only
@@ -58,7 +76,7 @@ export class FreebuffPool {
       return { text: reply }
     } catch (error) {
       if (error instanceof StoppedError || runOptions.signal?.aborted) return { text: '', stopped: true }
-      return { text: '', error: error instanceof Error ? error.message : String(error) }
+      return { text: '', error: turnError() ?? (error instanceof Error ? error.message : String(error)) }
     } finally {
       runOptions.signal?.removeEventListener('abort', onAbort)
       for (const file of cleanup) rmSync(file, { force: true })

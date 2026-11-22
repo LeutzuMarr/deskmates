@@ -59,6 +59,48 @@ function CustomStyleField({ initial }: { initial: string }) {
   )
 }
 
+/**
+ * Shown when Freebuff refused Deskmates' requests (and counted strikes on the account): Deskmates
+ * stopped sending to Freebuff; the user can let it try again.
+ */
+function FreebuffBlockNotice() {
+  const showToast = useStore((s) => s.showToast)
+  const [block, setBlock] = useState<{ reason: string; at: number } | null>(null)
+  useEffect(() => {
+    core
+      .call('freebuff.block', {})
+      .then(setBlock)
+      .catch(() => setBlock(null))
+  }, [])
+  if (!block) return null
+  return (
+    <section className="mt-6 rounded-3xl border border-[color:var(--brick)]/50 bg-card p-4" role="alert">
+      <h2 className="text-[14px] font-medium text-ink">Deskmates stopped using Freebuff</h2>
+      <p className="mt-1.5 text-[13px] leading-relaxed text-ink-muted">
+        On {new Date(block.at).toLocaleString()} Freebuff refused a request from Deskmates: <q>{block.reason}</q> Deskmates sends nothing to Freebuff now (scheduled tasks included), so no more strikes are added. Projects on Freebuff need another model, or use Freebuff in its own app.
+      </p>
+      <div className="mt-3 flex justify-end">
+        <button
+          type="button"
+          className="btn btn-outline"
+          onClick={() => {
+            if (!window.confirm('Let Deskmates send requests to Freebuff again? If Freebuff still refuses them, it may add another strike to your account, and Deskmates will stop again.')) return
+            core
+              .call('freebuff.unblock', {})
+              .then(() => {
+                setBlock(null)
+                showToast('Deskmates can use Freebuff again.')
+              })
+              .catch((error: unknown) => showToast(`Couldn't change that: ${error instanceof Error ? error.message : String(error)}`))
+          }}
+        >
+          Let Deskmates use Freebuff again
+        </button>
+      </div>
+    </section>
+  )
+}
+
 export function SettingsView() {
   const settings = useStore((s) => s.settings)
   const keyStatus = useStore((s) => s.keyStatus)
@@ -340,6 +382,8 @@ export function SettingsView() {
     <main className="scroll-area h-full overflow-y-auto">
       <div className="mx-auto w-full max-w-[720px] px-8 py-8">
         <h1 className="font-serif text-[24px] leading-tight">Settings</h1>
+
+        <FreebuffBlockNotice />
 
         <section className="mt-8">
           <h2 className="caption">AI providers</h2>
