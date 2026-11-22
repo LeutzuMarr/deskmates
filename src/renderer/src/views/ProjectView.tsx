@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ScheduledList } from '../components/ScheduledList'
 import { useStore } from '../lib/store'
+import { Ghost } from 'lucide-react'
 import { Composer } from '../components/Composer'
 import { TaskStatusMark } from '../components/TaskStatusMark'
 import { FreebuffStatusLine } from '../components/FreebuffStatusLine'
@@ -99,6 +100,8 @@ export function ProjectView({ projectId }: { projectId: string }) {
   const tasks = useStore((s) => s.tasksByProject[projectId])
   const navigate = useStore((s) => s.navigate)
   const showToast = useStore((s) => s.showToast)
+  const incognitoNext = useStore((s) => s.incognitoNext)
+  const setIncognitoNext = useStore((s) => s.setIncognitoNext)
 
   const defaultModel = useStore((s) => s.settings?.defaultModel ?? null)
 
@@ -150,7 +153,24 @@ export function ProjectView({ projectId }: { projectId: string }) {
 
       <div className="scroll-area min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[720px] px-8 py-10">
-          <h2 className="font-serif text-[32px] leading-[1.15]">What should we work on?</h2>
+          <div className="flex items-start justify-between gap-4">
+            <h2 className="font-serif text-[32px] leading-[1.15]">{incognitoNext ? 'Incognito chat' : 'What should we work on?'}</h2>
+            <button
+              type="button"
+              className={`btn btn-outline shrink-0 ${incognitoNext ? 'is-on' : ''}`}
+              aria-pressed={incognitoNext}
+              title={incognitoNext ? 'Turn incognito off' : 'Start an incognito chat: not kept, not in search or memory'}
+              onClick={() => setIncognitoNext(!incognitoNext)}
+            >
+              <Ghost size={14} aria-hidden="true" className="mr-1.5" />
+              Incognito
+            </button>
+          </div>
+          {incognitoNext && (
+            <p className="mt-2 text-[13px] text-ink-muted">
+              This chat won't be kept: it is deleted when you leave it, and it stays out of chat search and memory.
+            </p>
+          )}
           <div className="mt-10">
             <Composer projectId={projectId} autoFocus />
           </div>

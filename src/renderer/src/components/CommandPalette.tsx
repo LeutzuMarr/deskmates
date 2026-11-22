@@ -14,8 +14,10 @@ import {
   Search,
   Settings,
   Sun,
-  Terminal
+  Terminal,
+  TextSearch
 } from 'lucide-react'
+import { core } from '../lib/rpc'
 import { useStore } from '../lib/store'
 import type { Tab } from '../lib/store'
 import { setPrefs, getPrefs } from '../lib/prefs'
@@ -23,7 +25,7 @@ import { startNewTask } from '../lib/shortcuts'
 
 interface Entry {
   id: string
-  group: 'Actions' | 'Tasks' | 'Projects' | 'Designs' | 'Bots'
+  group: 'Actions' | 'Tasks' | 'Projects' | 'Designs' | 'Bots' | 'In chats'
   label: string
   detail?: string
   shortcut?: string
@@ -46,6 +48,41 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   const bots = useStore((s) => s.bots)
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
+  // What the chats say, searched in their messages (Claude's chat search), not just their titles.
+  const [chatHits, setChatHits] = useState<Entry[]>([])
+  useEffect(() => {
+    const q = query.trim()
+    if (!open || q.length < 3) {
+      setChatHits([])
+      return
+    }
+    let live = true
+    const timer = window.setTimeout(() => {
+      core
+        .call('tasks.search', { query: q })
+        .then((hits) => {
+          if (!live) return
+          setChatHits(
+            hits.slice(0, MAX_PER_GROUP).map((hit) => ({
+              id: `chat-${hit.taskId}`,
+              group: 'In chats' as const,
+              label: hit.title.trim() || 'Untitled task',
+              detail: hit.snippet,
+              Icon: TextSearch,
+              run: () => {
+                useStore.getState().setTab('work')
+                useStore.getState().navigate({ name: 'task', projectId: hit.projectId, taskId: hit.taskId })
+              }
+            }))
+          )
+        })
+        .catch(() => live && setChatHits([]))
+    }, 180)
+    return () => {
+      live = false
+      window.clearTimeout(timer)
+    }
+  }, [query, open])
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
@@ -147,12 +184,15 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   const visible = useMemo(() => {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean)
     const counts: Record<string, number> = {}
-    return entries.filter((entry) => {
+    const named = entries.filter((entry) => {
       if (!matches(entry, words)) return false
       counts[entry.group] = (counts[entry.group] ?? 0) + 1
       return counts[entry.group] <= MAX_PER_GROUP
     })
-  }, [entries, query])
+    // A chat already listed by its title isn't listed again for its words.
+    const listed = new Set(named.map((entry) => entry.id.replace(/^task-/, 'chat-')))
+    return [...named, ...chatHits.filter((hit) => !listed.has(hit.id))]
+  }, [entries, query, chatHits])
 
   useEffect(() => {
     setActive(0)
@@ -226,7 +266,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
             ref={inputRef}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search tasks, projects, designs, bots or commands"
+            placeholder="Search chats, projects, designs, bots or commands"
             aria-label="Search"
             role="combobox"
             aria-expanded="true"

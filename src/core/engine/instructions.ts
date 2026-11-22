@@ -96,6 +96,10 @@ export interface BuildInstructionsInput {
   knowledge?: Array<{ name: string; text: string }>
   /** Recent thumbs-down replies in this project with the user's reason, newest first. */
   criticism?: Array<{ comment: string; text: string }>
+  /** An incognito chat: no memories in, none saved, no past chats. */
+  incognito?: boolean
+  /** The user turned Research on for this message. */
+  research?: boolean
   projectInstructions: string | null
   now: Date
   model: { provider: ProviderId; modelId: string }
@@ -306,7 +310,9 @@ function pushUserContext(parts: string[], input: BuildInstructionsInput): void {
 
   // 8. Saved memories
   parts.push('')
-  if (memories.length > 0) {
+  if (input.incognito) {
+    parts.push('Incognito chat: the user chose not to keep this chat. It is deleted when they leave it and is not in their chat history. Do not save memories (no memory tools) and do not look up or refer to their past chats or saved memories.')
+  } else if (memories.length > 0) {
     parts.push('Saved memories:')
     for (const m of memories) {
       parts.push(`- [${m.id}] ${m.content}`)
@@ -337,8 +343,18 @@ function pushUserContext(parts: string[], input: BuildInstructionsInput): void {
     parts.push(input.skills.map((name) => `- ${name}`).join('\n'))
   }
 
+  // 8.6 Web search and Research, the switches in the message box
+  if (settings.webSearch === false) {
+    parts.push('')
+    parts.push("Web search is off (the user's switch in the message box): don't search or read the web. Answer from what you know and the project's files, and say when something may be out of date.")
+  }
+  if (input.research) {
+    parts.push('')
+    parts.push("Research is on for this message (the user's switch in the message box): research it thoroughly from many sources, following the research instructions (ask your clarifying questions first if they say so, then launch the research agent with launch_extended_search_task, or search widely yourself where that isn't available), and end with the sources.")
+  }
+
   // 8.7 Response style, chosen in Settings
-  const style = RESPONSE_STYLES[settings.responseStyle ?? 'normal']
+  const style = settings.responseStyle === 'custom' ? (settings.customStyle?.trim() ? `Custom, in the user's own words: ${settings.customStyle.trim()}` : null) : RESPONSE_STYLES[settings.responseStyle ?? 'normal']
   if (style) {
     parts.push('')
     parts.push(`Response style (the user chose it; it applies to every reply): ${style}`)

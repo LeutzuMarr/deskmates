@@ -165,6 +165,7 @@ const toTask = (r: Row): Task => ({
   autoApprove: JSON.parse(r.auto_approve as string) as string[],
   error: (r.error as string | null) ?? null,
   pinned: Number(r.pinned ?? 0) === 1,
+  incognito: Number(r.incognito ?? 0) === 1,
   createdAt: r.created_at as number,
   updatedAt: r.updated_at as number
 })
@@ -191,13 +192,49 @@ export class TasksRepo {
     return task
   }
 
-  create(projectId: string, title = 'New task'): Task {
+  create(projectId: string, title = 'New task', incognito = false): Task {
     const now = Date.now()
     const id = randomUUID()
     this.db
-      .prepare("INSERT INTO tasks (id, project_id, title, status, created_at, updated_at) VALUES (?, ?, ?, 'idle', ?, ?)")
-      .run(id, projectId, title, now, now)
+      .prepare("INSERT INTO tasks (id, project_id, title, status, created_at, updated_at, incognito) VALUES (?, ?, ?, 'idle', ?, ?, ?)")
+      .run(id, projectId, title, now, now, incognito ? 1 : 0)
     return this.require(id)
+  }
+
+  /** Incognito chats left from the last time Deskmates ran: they are never kept. Returns their ids. */
+  deleteIncognito(): string[] {
+    const rows = this.db.prepare('SELECT id FROM tasks WHERE incognito = 1').all() as Array<{ id: string }>
+    this.db.prepare('DELETE FROM tasks WHERE incognito = 1').run()
+    return rows.map((r) => r.id)
+  }
+
+  /**
+   * Chats whose messages contain `query` (case-insensitive), newest first, with the matching line.
+   * Incognito chats are left out.
+   */
+  search(query: string, limit = 30): Array<{ taskId: string; projectId: string; title: string; snippet: string; updatedAt: number }> {
+    const needle = query.trim().toLowerCase()
+    if (needle.length < 2) return []
+    const rows = this.db
+      .prepare(
+        "SELECT t.id, t.project_id, t.title, t.updated_at, m.body FROM messages m JOIN tasks t ON t.id = m.task_id WHERE t.incognito = 0 AND instr(lower(m.body), ?) > 0 ORDER BY t.updated_at DESC, m.seq LIMIT 400"
+      )
+      .all(needle) as Array<{ id: string; project_id: string; title: string; updated_at: number; body: string }>
+    const out = new Map<string, { taskId: string; projectId: string; title: string; snippet: string; updatedAt: number }>()
+    for (const row of rows) {
+      if (out.has(row.id)) continue
+      const message = JSON.parse(row.body) as ModelMessage
+      if (message.role !== 'user' && message.role !== 'assistant') continue
+      const content = message.content as unknown
+      const text = typeof content === 'string' ? content : Array.isArray(content) ? (content as Array<{ type?: string; text?: string }>).filter((p) => p.type === 'text').map((p) => p.text ?? '').join('\n') : ''
+      const at = text.toLowerCase().indexOf(needle)
+      if (at === -1) continue
+      const start = Math.max(0, at - 50)
+      const snippet = `${start > 0 ? '…' : ''}${text.slice(start, at + needle.length + 90).replace(/\s+/g, ' ').trim()}${at + needle.length + 90 < text.length ? '…' : ''}`
+      out.set(row.id, { taskId: row.id, projectId: row.project_id, title: row.title, snippet, updatedAt: row.updated_at })
+      if (out.size >= limit) break
+    }
+    return [...out.values()]
   }
 
   update(id: string, patch: TaskPatch): Task {

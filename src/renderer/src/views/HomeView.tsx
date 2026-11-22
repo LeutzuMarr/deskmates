@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { PendingStarts } from '../components/ScheduledList'
-import { ChevronDown, Clapperboard, Code2, Folder, FolderPlus, PenTool } from 'lucide-react'
+import { ChevronDown, Clapperboard, Code2, Folder, FolderPlus, Ghost, PenTool } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useStore } from '../lib/store'
 import { BrandMark } from '../components/Mascot'
@@ -73,6 +73,8 @@ export function HomeView() {
   const defaultModel = useStore((s) => s.settings?.defaultModel)
   const connectors = useStore((s) => s.connectors)
   const navigate = useStore((s) => s.navigate)
+  const incognitoNext = useStore((s) => s.incognitoNext)
+  const setIncognitoNext = useStore((s) => s.setIncognitoNext)
   const [addOpen, setAddOpen] = useState(false)
   const [projectId, setProjectId] = useState<string | null>(null)
   const [group, setGroup] = useState<StarterGroup['id']>('code')
@@ -147,14 +149,28 @@ export function HomeView() {
   const active = STARTERS.find((g) => g.id === group) ?? STARTERS[0]
 
   return (
-    <main className="scroll-area h-full overflow-y-auto">
+    <main className="scroll-area relative h-full overflow-y-auto">
+      {/* Incognito, top right of the new chat, as in Claude. */}
+      <button
+        type="button"
+        className={`btn btn-outline absolute right-6 top-5 ${incognitoNext ? 'is-on' : ''}`}
+        aria-pressed={incognitoNext}
+        title={incognitoNext ? 'Turn incognito off' : 'Start an incognito chat: not kept, not in search or memory'}
+        onClick={() => setIncognitoNext(!incognitoNext)}
+      >
+        <Ghost size={14} aria-hidden="true" className="mr-1.5" />
+        Incognito
+      </button>
       <div className="mx-auto flex min-h-full w-full max-w-[720px] flex-col px-8 pb-10 pt-[12vh]">
         <div className="greet-in flex items-center justify-center gap-4">
           <span className="greet-mark inline-block">
             <BrandMark size={40} />
           </span>
-          <h1 className="font-serif text-[42px] leading-[1.1] tracking-[-0.01em]">{greeting(new Date())}</h1>
+          <h1 className="font-serif text-[42px] leading-[1.1] tracking-[-0.01em]">{incognitoNext ? 'Incognito chat' : greeting(new Date())}</h1>
         </div>
+        {incognitoNext && (
+          <p className="mt-3 text-center text-[13px] text-ink-muted">This chat won't be kept: it is deleted when you leave it, and it stays out of chat search and memory.</p>
+        )}
 
         <div className="mt-8">
           <PendingStarts />

@@ -109,7 +109,8 @@ export const MIGRATIONS: string[] = [
      id TEXT PRIMARY KEY,
      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
      name TEXT NOT NULL, text TEXT NOT NULL, size INTEGER NOT NULL, created_at INTEGER NOT NULL);
-   CREATE INDEX knowledge_by_project ON knowledge(project_id, created_at);`
+   CREATE INDEX knowledge_by_project ON knowledge(project_id, created_at);`,
+  `ALTER TABLE tasks ADD COLUMN incognito INTEGER NOT NULL DEFAULT 0;`
 ]
 
 export function openDatabase(file: string): DatabaseSync {
