@@ -59,6 +59,8 @@ export interface ToolContext {
   browser?: BrowserService
   /** The user's own Chrome; the core's one shared connection when absent. */
   chrome?: ChromeDriver
+  /** Duo only: the approved Outbox item that may be sent on a site in Chrome right now. */
+  chromeSendPermit?: (domain: string) => { id: string; summary: string } | null
   /** Who is acting, as the user reads it in browser questions: "Work", "Design", or a scheduled task's name. */
   agentName?: string
   /** Screen control (screen_look / screen_act); absent without a desktop. */

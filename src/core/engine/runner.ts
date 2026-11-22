@@ -21,9 +21,11 @@ import { PROVIDER_LABELS } from '../../shared/protocol'
 import { approvalFor } from './approvals'
 import { compactHistory } from './history'
 import { suggestNextMessage } from './suggest'
+import { gistTitle, summaryTitle } from './titles'
 import { textWithSavedImages, userMessageWithImages, type ImageAttachment } from './attachments'
 import { contextTokens, historyBudgetChars, toolsChars } from '../models/context'
 import { guardRiskyTools, pickPromptTools } from '../tools/shared-prompt-tools'
+import { effortProviderOptions } from './effort'
 import { resolve as resolvePath } from 'node:path'
 import { buildInstructions, readProjectInstructions } from './instructions'
 import { LiveTimeline } from './live'
@@ -119,6 +121,8 @@ export class TaskRunner {
   private readonly runs = new Map<string, RunState>()
   private readonly queued = new Map<string, string[]>()
   private readonly suggestions = new Map<string, string>()
+  /** Chats still titled with the gist of their first message, waiting for a summary title. */
+  private readonly autoTitles = new Map<string, { title: string; message: string }>()
   private readonly contexts = new Map<string, { used: number; window: number }>()
   /** In-memory collected (but not yet appended) approval answers. */
   private readonly answers = new Map<string, ApprovalAnswer[]>()
@@ -162,13 +166,11 @@ export class TaskRunner {
       this.deps.repos.tasks.appendMessages(taskId, [{ role: 'user', content: text }])
     }
 
-    // Set title from first message if still default
+    // A new chat gets the gist of its first message at once; after the first reply, a model's summary.
     if (task.title === 'New task') {
-      let title = text.split('\n')[0].trim()
-      if (title.length > 60) {
-        title = title.slice(0, 60) + '…'
-      }
+      const title = gistTitle(text)
       this.deps.repos.tasks.update(taskId, { title })
+      this.autoTitles.set(taskId, { title, message: text })
     }
 
     // Emit timeline
@@ -276,6 +278,34 @@ export class TaskRunner {
     return this.suggestions.get(taskId) ?? null
   }
 
+  /**
+   * After a chat's first reply: a short title summing the chat up, from the task's model (or the
+   * default model when the task runs on a command-line agent). Not when the user renamed it meanwhile.
+   */
+  private async retitle(taskId: string): Promise<void> {
+    const pending = this.autoTitles.get(taskId)
+    if (!pending) return
+    this.autoTitles.delete(taskId)
+    const { repos, bus } = this.deps
+    try {
+      const task = repos.tasks.require(taskId)
+      if (task.title !== pending.title) return
+      const project = repos.projects.require(task.projectId)
+      let resolved = this.deps.models.resolve(project.model)
+      if (resolved.cli) {
+        const fallback = repos.settings.get().defaultModel
+        if (fallback) resolved = this.deps.models.resolve(fallback)
+      }
+      const messages = repos.tasks.messages(taskId).map((m) => m.message)
+      const reply = messageText(messages.find((m) => m.role === 'assistant')?.content)
+      const title = await summaryTitle(pending.message, reply, resolved.cli ? null : resolved.model)
+      if (!title || repos.tasks.require(taskId).title !== pending.title) return
+      bus.emit({ type: 'task.updated', task: repos.tasks.update(taskId, { title }) })
+    } catch {
+      // The gist title stays.
+    }
+  }
+
   private async suggest(taskId: string): Promise<void> {
     const { repos, bus } = this.deps
     try {
@@ -368,7 +398,7 @@ export class TaskRunner {
    * else the folder itself. File changes land on the running task when there is one, so the user
    * can see and undo them there. Risky tools ask the user in the app first.
    */
-  promptToolsFor(folder: string, agent: string, options: { guard?: boolean } = {}): ToolSet {
+  promptToolsFor(folder: string, agent: string, options: { guard?: boolean; chromeSendPermit?: ToolContext['chromeSendPermit'] } = {}): ToolSet {
     const { repos, bus, deps } = { repos: this.deps.repos, bus: this.deps.bus, deps: this.deps }
     const norm = (path: string): string => resolvePath(path).replace(/[\\/]+$/, '').toLowerCase()
     const projects = repos.projects.list().filter((p) => p.kind !== 'design')
@@ -396,6 +426,9 @@ export class TaskRunner {
       ...(deps.render ? { render: deps.render } : {}),
       ...(deps.browser ? { browser: deps.browser } : {}),
       ...(deps.getSchedules?.() && project ? { schedules: deps.getSchedules() } : {}),
+      // The research agent (launch_extended_search_task) and Agent run as sub-agents.
+      ...(deps.subagents ? { subagents: deps.subagents } : {}),
+      ...(options.chromeSendPermit ? { chromeSendPermit: options.chromeSendPermit } : {}),
       agentName: agent,
       cliModel: true,
       ...(deps.dataDir ? { dataDir: deps.dataDir } : {}),
@@ -549,7 +582,8 @@ export class TaskRunner {
         tools,
         // Gemini 2.5 and later think before answering; this asks it to share a summary of that
         // thinking so the transcript can show it. Older Gemini models reject the setting.
-        providerOptions: sharesThoughts(provider, modelId) ? { google: { thinkingConfig: { includeThoughts: true } } } : undefined,
+        // The user's effort level sets the reasoning of models that have a setting for it.
+        providerOptions: (effortProviderOptions(provider, modelId, settings.effort) ?? (sharesThoughts(provider, modelId) ? { google: { thinkingConfig: { includeThoughts: true } } } : undefined)) as never,
         toolApproval: ({ toolCall }: { toolCall: { toolName: string } }) =>
           approvalFor(toolCall.toolName, repos.tasks.require(taskId).autoApprove),
         // A question to the user ends the turn: the answers come back as the next message.
@@ -654,6 +688,7 @@ export class TaskRunner {
 
       // What the user sent while this ran goes out now, as the next message, unless it errored and
       // needs them to look first (it stays queued, shown in the chat, until they send again).
+      void this.retitle(taskId)
       const queued = this.queued.get(taskId)
       if (queued?.length && repos.tasks.require(taskId).status !== 'waiting-approval') {
         this.queued.delete(taskId)

@@ -1,5 +1,5 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { basename, join } from 'node:path'
 import type { DuoProfile } from '../../shared/duo'
 import { myPromptBrief } from '../engine/my-prompt'
 import { DUO_BRIEF, profileMarkdown } from './brief'
@@ -35,10 +35,13 @@ export function prepareDuoWorkspace(options: DuoWorkspaceOptions): void {
   const { dir } = options
   mkdirSync(join(dir, '.agents'), { recursive: true })
 
-  const promptCopy = join(dir, 'my-prompt.md')
+  // The operating prompt under its own name (claude-fable-5.2.md); an older copy by another name goes.
+  const promptCopy = join(dir, basename(options.myPromptPath))
   if (existsSync(options.myPromptPath)) {
     const fresh = !existsSync(promptCopy) || statSync(promptCopy).mtimeMs < statSync(options.myPromptPath).mtimeMs
     if (fresh) copyFileSync(options.myPromptPath, promptCopy)
+    const stale = join(dir, 'my-prompt.md')
+    if (stale !== promptCopy && existsSync(stale)) rmSync(stale, { force: true })
   }
   const operating = existsSync(promptCopy) ? myPromptBrief('file', promptCopy, { promptTools: 'mcp' }) : null
   writeIfChanged(join(dir, 'AGENTS.md'), [operating, operating ? '\n---\n' : '', DUO_BRIEF].filter(Boolean).join('\n'))
@@ -52,6 +55,12 @@ export function prepareDuoWorkspace(options: DuoWorkspaceOptions): void {
       deskmates: {
         command: isWindows ? 'cmd.exe' : options.agentCommand,
         args: isWindows ? ['/d', '/c', options.agentCommand, 'mcp'] : ['mcp'],
+        env: { DESKMATES_AGENT: 'Duo' }
+      },
+      // The operating prompt's tools, the user's Chrome and its instructions among them, as Duo.
+      'deskmates-prompt': {
+        command: isWindows ? 'cmd.exe' : options.agentCommand,
+        args: isWindows ? ['/d', '/c', options.agentCommand, 'prompt-mcp'] : ['prompt-mcp'],
         env: { DESKMATES_AGENT: 'Duo' }
       }
     }

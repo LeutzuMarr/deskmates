@@ -30,6 +30,25 @@ export function memoryTools(ctx: ToolContext) {
   }
 }
 
+type PlanStatus = 'pending' | 'in_progress' | 'done'
+
+/** Shows a plan on the task list: Deskmates' items, or Claude in Chrome's approach and domains. */
+export function runPlan(
+  ctx: Pick<ToolContext, 'onPlan'>,
+  items: Array<{ text: string; status: PlanStatus }> | undefined,
+  domains?: string[],
+  approach?: string[]
+): Record<string, unknown> {
+  const list = items?.length ? items : (approach ?? []).slice(0, 20).map((text, i) => ({ text: text.slice(0, 200), status: (i === 0 ? 'in_progress' : 'pending') as PlanStatus }))
+  if (list.length === 0) throw new Error('Send items (the task list), or approach (the steps of a Chrome task).')
+  ctx.onPlan(list)
+  return {
+    ok: true,
+    items: list.length,
+    ...(domains?.length ? { domains, note: "The plan is on the user's task list. Each site is still asked about once, the first time you act on it." } : {})
+  }
+}
+
 export function agentTools(ctx: ToolContext) {
   return {
     ...memoryTools(ctx),
@@ -47,11 +66,12 @@ export function agentTools(ctx: ToolContext) {
           )
           .min(1)
           .max(20)
+          .optional(),
+        // The Claude in Chrome form of the same tool: the sites a browser task will use and its steps.
+        domains: z.array(z.string()).optional().describe('Chrome tasks: the sites you will visit'),
+        approach: z.array(z.string().min(1)).max(20).optional().describe('Chrome tasks: the steps, in order (the first becomes in_progress)')
       }),
-      execute: async ({ items }) => {
-        ctx.onPlan(items)
-        return { ok: true, items: items.length }
-      }
+      execute: async ({ items, domains, approach }) => runPlan(ctx, items, domains, approach)
     }),
 
     notify_user: tool({

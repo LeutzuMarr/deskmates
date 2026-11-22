@@ -1,5 +1,5 @@
 /**
- * The deskmates-prompt MCP server: the tools the user's operating prompt (my-prompt.md) describes,
+ * The deskmates-prompt MCP server: the tools the user's operating prompt (prompts/fable/claude-fable-5.2.md) describes,
  * under their own names and schemas, for command-line agents (Freebuff, OpenCode, Antigravity).
  * Each call runs in the Deskmates app, on the same machinery as the Work tab's tools, in the folder
  * the agent works in. Risky tools ask the user in the app first.
@@ -40,7 +40,7 @@ export async function createPromptServer(options: PromptServerOptions): Promise<
     { name: PROMPT_SERVER_NAME, version: '0.1.0' },
     {
       instructions:
-        "These are the tools your operating prompt (my-prompt.md) describes, run by the Deskmates app on the user's PC in your folder. Call them by these names. Tools that send, delete, share or run commands ask the user in Deskmates first; if the user says no, nothing happened. Only report results these tools actually returned."
+        "These are the tools your operating prompt describes (plus the user's Chrome and the guides read on demand: read_chrome_instructions, read_research_instructions), run by the Deskmates app on the user's PC in your folder. Call them by these names. Tools that send, delete, share or run commands ask the user in Deskmates first; if the user says no, nothing happened. Only report results these tools actually returned."
     }
   )
   let tools: Array<{ name: string; description: string; inputSchema: Record<string, unknown> }> = []

@@ -22,6 +22,7 @@
  */
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { myPromptBrief, promptSectionTool } from '../engine/my-prompt'
+import { currentEffort, effortProviderOptions } from '../engine/effort'
 import { join } from 'node:path'
 import { isStepCount, ToolLoopAgent, type ModelMessage, type TextStreamPart, type ToolSet } from 'ai'
 import type { Bot, BotRun, ProviderId, RunState, TimelineItem, ToolItem } from '../../shared/protocol'
@@ -412,6 +413,7 @@ export class BotRunner implements RunService {
         model: patientModel(model),
         instructions,
         tools: guardedTools,
+        providerOptions: effortProviderOptions(provider, modelId, currentEffort()) as never,
         toolApproval: ({ toolCall }: { toolCall: { toolName: string } }) =>
           promptToolNames.has(toolCall.toolName) ? approvalFor(toolCall.toolName, bot.autoApprove) : approvalForBotTool(toolCall.toolName, bot.autoApprove),
         stopWhen: isStepCount(this.deps.maxSteps ?? 40)

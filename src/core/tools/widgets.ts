@@ -64,6 +64,68 @@ export function widgetPage(title: string, body: string, extraHead = ''): string 
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title><style>${BASE_CSS}</style>${extraHead}</head><body>${body}${HEIGHT_SCRIPT}</body></html>`
 }
 
+/** The colour ramps of the Visualizer's guide (prompts/visualize/visualize.md): 50, 100, 200, 400, 600, 800, 900. */
+const RAMPS: Record<string, string[]> = {
+  purple: ['#EEEDFE', '#CECBF6', '#AFA9EC', '#7F77DD', '#534AB7', '#3C3489', '#26215C'],
+  teal: ['#E1F5EE', '#9FE1CB', '#5DCAA5', '#1D9E75', '#0F6E56', '#085041', '#04342C'],
+  coral: ['#FAECE7', '#F5C4B3', '#F0997B', '#D85A30', '#993C1D', '#712B13', '#4A1B0C'],
+  pink: ['#FBEAF0', '#F4C0D1', '#ED93B1', '#D4537E', '#993556', '#72243E', '#4B1528'],
+  gray: ['#F1EFE8', '#D3D1C7', '#B4B2A9', '#888780', '#5F5E5A', '#444441', '#2C2C2A'],
+  blue: ['#E6F1FB', '#B5D4F4', '#85B7EB', '#378ADD', '#185FA5', '#0C447C', '#042C53'],
+  green: ['#EAF3DE', '#C0DD97', '#97C459', '#639922', '#3B6D11', '#27500A', '#173404'],
+  amber: ['#FAEEDA', '#FAC775', '#EF9F27', '#BA7517', '#854F0B', '#633806', '#412402'],
+  red: ['#FCEBEB', '#F7C1C1', '#F09595', '#E24B4A', '#A32D2D', '#791F1F', '#501313']
+}
+
+/** The ramp classes (c-blue…) for light and dark mode, as the guide describes them. */
+function rampCss(): string {
+  const shapes = (c: string): string => `.c-${c}>rect,.c-${c}>circle,.c-${c}>ellipse,.c-${c}>polygon,rect.c-${c},circle.c-${c},ellipse.c-${c}`
+  const light = Object.entries(RAMPS)
+    .map(([c, r]) => `${shapes(c)}{fill:${r[0]};stroke:${r[4]}}.c-${c}>.t,.c-${c}>.th{fill:${r[5]}}.c-${c}>.ts{fill:${r[4]}}`)
+    .join('')
+  const dark = Object.entries(RAMPS)
+    .map(([c, r]) => `${shapes(c)}{fill:${r[5]};stroke:${r[2]}}.c-${c}>.t,.c-${c}>.th{fill:${r[1]}}.c-${c}>.ts{fill:${r[2]}}`)
+    .join('')
+  return `${light}@media (prefers-color-scheme:dark){${dark}}`
+}
+
+/** The host side of the Visualizer's design system: variables, SVG classes and pre-styled controls. */
+const VISUAL_CSS = `
+:root{--color-background-primary:#ffffff;--color-background-secondary:#f5f3ee;--color-background-tertiary:#efece5;--color-background-info:${RAMPS.blue![0]};--color-background-danger:${RAMPS.red![0]};--color-background-success:${RAMPS.green![0]};--color-background-warning:${RAMPS.amber![0]};
+--color-text-primary:#1f1d1a;--color-text-secondary:#6b665e;--color-text-tertiary:#9a958c;--color-text-info:${RAMPS.blue![4]};--color-text-danger:${RAMPS.red![4]};--color-text-success:${RAMPS.green![4]};--color-text-warning:${RAMPS.amber![4]};
+--color-border-tertiary:rgba(31,29,26,.15);--color-border-secondary:rgba(31,29,26,.3);--color-border-primary:rgba(31,29,26,.4);--color-border-info:${RAMPS.blue![4]};--color-border-danger:${RAMPS.red![4]};--color-border-success:${RAMPS.green![4]};--color-border-warning:${RAMPS.amber![4]};
+--font-sans:"Inter Variable","Segoe UI",system-ui,sans-serif;--font-serif:"Source Serif 4","Georgia",serif;--font-mono:"JetBrains Mono",Consolas,monospace;
+--border-radius-md:8px;--border-radius-lg:12px;--border-radius-xl:16px;
+--p:var(--color-text-primary);--s:var(--color-text-secondary);--t:var(--color-text-tertiary);--bg2:var(--color-background-secondary);--b:var(--color-border-tertiary);color-scheme:light dark}
+@media (prefers-color-scheme:dark){:root{--color-background-primary:#262421;--color-background-secondary:#2f2c28;--color-background-tertiary:#1f1d1a;--color-background-info:${RAMPS.blue![5]};--color-background-danger:${RAMPS.red![5]};--color-background-success:${RAMPS.green![5]};--color-background-warning:${RAMPS.amber![5]};
+--color-text-primary:#f1ede4;--color-text-secondary:#b4ada1;--color-text-tertiary:#8a8378;--color-text-info:${RAMPS.blue![2]};--color-text-danger:${RAMPS.red![2]};--color-text-success:${RAMPS.green![2]};--color-text-warning:${RAMPS.amber![2]};
+--color-border-tertiary:rgba(241,237,228,.15);--color-border-secondary:rgba(241,237,228,.3);--color-border-primary:rgba(241,237,228,.4);--color-border-info:${RAMPS.blue![2]};--color-border-danger:${RAMPS.red![2]};--color-border-success:${RAMPS.green![2]};--color-border-warning:${RAMPS.amber![2]}}}
+*{box-sizing:border-box}html,body{margin:0;background:transparent;color:var(--color-text-primary);font:400 16px/1.7 var(--font-sans);overflow:hidden}
+body{padding:2px}h1{font-size:22px;font-weight:500;margin:0 0 8px}h2{font-size:18px;font-weight:500;margin:12px 0 6px}h3{font-size:16px;font-weight:500;margin:8px 0 4px}
+a{color:var(--color-text-info)}code{font-family:var(--font-mono);font-size:.9em}
+svg{display:block;max-width:100%}svg text{font-family:var(--font-sans)}
+.t{font:400 14px var(--font-sans);fill:var(--color-text-primary)}.ts{font:400 12px var(--font-sans);fill:var(--color-text-secondary)}.th{font:500 14px var(--font-sans);fill:var(--color-text-primary)}
+.box{fill:var(--color-background-secondary);stroke:var(--color-border-secondary)}.node{cursor:pointer}.node:hover{opacity:.82}
+.arr{stroke:var(--color-text-secondary);stroke-width:1.5;fill:none}.leader{stroke:var(--color-text-tertiary);stroke-width:.5;stroke-dasharray:3 3;fill:none}
+${rampCss()}
+.vz-card{background:var(--color-background-primary);border:.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:12px}
+input[type=text],input[type=email],input[type=number],input[type=search],input[type=url],input[type=tel],input[type=password],input[type=date],input:not([type]),select,textarea{font:inherit;font-size:14px;height:36px;padding:0 10px;color:var(--color-text-primary);background:var(--color-background-primary);border:.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);outline:none}
+textarea{height:auto;padding:8px 10px}input:hover,select:hover,textarea:hover{border-color:var(--color-border-primary)}input:focus,select:focus,textarea:focus{box-shadow:0 0 0 2px var(--color-border-info)}
+button{font:inherit;font-size:14px;padding:6px 14px;color:var(--color-text-primary);background:transparent;border:.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);cursor:pointer}
+button:hover{background:var(--color-background-secondary)}button:active{transform:scale(.98)}
+input[type=range]{accent-color:var(--color-text-info);width:100%}
+table{border-collapse:collapse}td,th{padding:4px 8px}
+`
+
+/** sendPrompt and openLink for Visualizer widgets; plain links open in the browser. */
+const VISUAL_SCRIPT = `<script>(function(){var id=location.pathname.split('/').pop();window.sendPrompt=function(t){parent.postMessage({type:'deskmates-widget-prompt',id:id,text:String(t)},'*')};window.openLink=function(u){window.open(String(u),'_blank','noopener')};document.addEventListener('click',function(e){var a=e.target&&e.target.closest&&e.target.closest('a[href]');if(a&&/^https?:/i.test(a.href)){e.preventDefault();window.open(a.href,'_blank','noopener')}},true)})();</script>`
+
+/** A Visualizer widget (mcp__visualize__show_widget): SVG in a card, or an HTML fragment, on the guide's design system. */
+export function visualPage(title: string, code: string): string {
+  const body = /^\s*<svg/i.test(code) ? `<div class="vz-card">${code}</div>` : code
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title><style>${VISUAL_CSS}</style>${VISUAL_SCRIPT}</head><body>${body}</body></html>`
+}
+
 /** Saves a page as a widget and returns what the tool hands back. */
 export function saveWidget(dataDir: string, title: string, html: string, note?: string): WidgetResult {
   const dir = join(dataDir, 'widgets')
@@ -88,15 +150,19 @@ function itemCard(item: Data): string {
   const name = str(item.name) || str(item.title) || str(item.label)
   const image = safeUrl(item.image_url) || safeUrl(item.image) || safeUrl(item.thumbnail) || safeUrl(item.photo_url)
   const url = safeUrl(item.url) || safeUrl(item.link) || safeUrl(item.website)
-  const detail = str(item.description) || str(item.summary) || str(item.snippet) || str(item.tip) || str(item.notes) || str(item.address)
+  const detail = str(item.description) || str(item.blurb) || str(item.summary) || str(item.snippet) || str(item.tip) || str(item.notes) || str(item.address)
   const facts: string[] = []
   for (const key of ['price', 'rating', 'brand', 'category', 'duration', 'time', 'address', 'retailer', 'source']) {
     const value = str(item[key])
     if (value && value !== detail) facts.push(`<span class="pill">${esc(key === 'rating' ? `★ ${value}` : value)}</span>`)
   }
-  for (const key of ['pros', 'cons', 'highlights', 'features']) {
+  const attributes = list(item.attributes)
+  if (attributes.length) {
+    facts.push(`<table>${attributes.map((a) => `<tr><td class="faint">${esc(str(a.label))}</td><td>${typeof a.value === 'boolean' ? (a.value ? '✓' : '✗') : esc(str(a.value))}</td></tr>`).join('')}</table>`)
+  }
+  for (const key of ['pros', 'cons', 'highlights', 'features', 'bullets', 'tips']) {
     const values = Array.isArray(item[key]) ? (item[key] as unknown[]).map(str).filter(Boolean) : []
-    if (values.length) facts.push(`<div class="faint">${esc(key)}</div><ul>${values.map((v) => `<li>${esc(v)}</li>`).join('')}</ul>`)
+    if (values.length) facts.push(`${key === 'bullets' ? '' : `<div class="faint">${esc(key)}</div>`}<ul>${values.map((v) => `<li>${esc(v)}</li>`).join('')}</ul>`)
   }
   return `<div class="card">${image ? `<img class="thumb" src="${esc(image)}" alt="">` : ''}<h3>${url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(name || url)}</a>` : esc(name)}</h3>${detail ? `<p class="muted">${esc(detail)}</p>` : ''}${facts.join('')}</div>`
 }
@@ -108,9 +174,12 @@ function cards(data: Data, key: string): string {
 function itinerary(data: Data): string {
   const days = list(data.days)
     .map((day, i) => {
-      const title = str(day.title) || str(day.date) || `Day ${i + 1}`
-      const items = list(day.items ?? day.activities ?? day.stops)
-        .map((it) => `<li><b>${esc(str(it.time))}</b> ${esc(str(it.title) || str(it.name))}${str(it.description) ? ` <span class="muted">— ${esc(str(it.description))}</span>` : ''}</li>`)
+      const title = str(day.day_label) || str(day.title) || str(day.date) || `Day ${i + 1}`
+      const items = list(day.items ?? day.activities ?? day.stops ?? day.locations)
+        .map((it) => {
+          const note = str(it.description) || str(it.blurb) || str(it.notes)
+          return `<li><b>${esc(str(it.time) || str(it.arrival_time))}</b> ${esc(str(it.title) || str(it.name))}${note ? ` <span class="muted">— ${esc(note)}</span>` : ''}</li>`
+        })
         .join('')
       return `<div class="card"><h3>${esc(title)}</h3>${str(day.summary) ? `<p class="muted">${esc(str(day.summary))}</p>` : ''}<ul>${items}</ul></div>`
     })
@@ -129,8 +198,13 @@ function recipe(data: Data): string {
   const ingredients = list(data.ingredients)
     .map((it) => `<li>${esc([str(it.amount), str(it.unit), str(it.name) || str(it.item)].filter(Boolean).join(' '))}${str(it.notes) ? ` <span class="muted">(${esc(str(it.notes))})</span>` : ''}</li>`)
     .join('')
+  // Steps refer to ingredients as {0001}: show that ingredient's amount and name there.
+  const byId = new Map(list(data.ingredients).map((it) => [str(it.id), [str(it.amount), str(it.unit), str(it.name) || str(it.item)].filter(Boolean).join(' ')]))
   const method = list(data.steps)
-    .map((s) => `<li>${esc(str(s.content) || str(s.text) || str(s.instruction) || str(s.description))}</li>`)
+    .map((s) => {
+      const text = (str(s.content) || str(s.text) || str(s.instruction) || str(s.description)).replace(/\{(\w+)\}/g, (all, id: string) => byId.get(id) ?? all)
+      return `<li>${str(s.title) ? `<b>${esc(str(s.title))}.</b> ` : ''}${esc(text)}${Number(s.timer_seconds) > 0 ? ` <span class="pill">${Math.round(Number(s.timer_seconds) / 60) || 1} min</span>` : ''}</li>`
+    })
     .join('')
   return `${header(data)}${data.base_servings ? `<p class="faint">Serves ${esc(str(data.base_servings))}</p>` : ''}<div class="card"><h2>Ingredients</h2><ul>${ingredients}</ul><h2>Method</h2><ol>${method}</ol>${str(data.notes) ? `<p class="muted">${esc(str(data.notes))}</p>` : ''}</div>`
 }

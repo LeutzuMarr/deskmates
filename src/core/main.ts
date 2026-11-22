@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from 'node:crypto'
 import { mkdirSync, existsSync, readFileSync, renameSync, rmSync, watchFile, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import type { CoreToHost, HostToCore, Settings } from '../shared/protocol'
 import { agentCommandFileName, agentKitDir, writeAgentGuide } from './agents/guide'
 import { ExecCommandRunner } from './bots/command-runner'
@@ -46,9 +46,9 @@ import { DuoService } from './duo/service'
 import { prepareDuoWorkspace } from './duo/workspace'
 import { duoTools } from './tools/duo'
 import { ensureFreebuffPromptTools, setPromptToolsCommand } from './terminals/prompt-tools-config'
-import { agentBrowserTools } from './tools/browser'
 import { webFetchText, webSearchResults } from './tools/web'
 import { myPromptBrief, myPromptPath, promptSectionTool } from './engine/my-prompt'
+import { setEffortSource } from './engine/effort'
 import { DEFAULT_DUO_PROFILE, type DuoProfile } from '../shared/duo'
 import { tool as aiTool } from 'ai'
 import { z } from 'zod'
@@ -99,6 +99,8 @@ async function main(): Promise<void> {
 
   const db = openDatabase(join(dataDir, 'deskmates.db'))
   const repos = createRepos(db)
+  // Every agent's instructions carry the effort level the user picked next to the model.
+  setEffortSource(() => repos.settings.get().effort)
   repos.tasks.resetInterrupted()
   repos.runs.resetInterrupted()
 
@@ -335,8 +337,9 @@ async function main(): Promise<void> {
     resolveModel: (ref) => models.resolve(ref),
     apiTools: () => ({
       // The operating prompt's tools first, so Duo's own tools of the same name win.
-      ...runner.promptToolsFor(duoFolder, 'Duo'),
-      ...agentBrowserTools({ browser, agent: 'Duo', runKey: 'duo', sendPermit: (domain) => duo.sendPermit(domain), screenshotDir: join(duoFolder, 'screenshots') }),
+      // Duo browses in the user's own Chrome (the Chrome tools come with these), where an approved
+      // Outbox item lets one Send through.
+      ...runner.promptToolsFor(duoFolder, 'Duo', { chromeSendPermit: (domain) => duo.sendPermit(domain) }),
       ...duoTools(duo, duoPlaybook),
       ...promptSectionTool(myPromptPath(promptRoot)),
       web_search: aiTool({
@@ -398,7 +401,9 @@ async function main(): Promise<void> {
     taskSchedules,
     duo,
     duoTools: () => duoTools(duo, duoPlaybook),
-    promptToolsFor: (folder, agent) => runner.promptToolsFor(folder, agent),
+    // Duo's own Freebuff works in Duo's folder: its Chrome sends follow the Outbox.
+    promptToolsFor: (folder, agent) =>
+      runner.promptToolsFor(folder, agent, resolve(folder).toLowerCase() === resolve(duoFolder).toLowerCase() ? { chromeSendPermit: (domain) => duo.sendPermit(domain) } : {}),
     duoSendPermit: (domain) => duo.sendPermit(domain),
     remote,
     setRemoteConfig: (patch) => repos.settings.setExtra('remote', { ...EMPTY_REMOTE, ...repos.settings.getExtra<RemoteConfig>('remote', EMPTY_REMOTE), ...patch })
@@ -414,7 +419,15 @@ async function main(): Promise<void> {
       .catch((error) => console.error('[core] phone access sync failed', error))
   }
   bus.on((event) => {
-    if (event.type === 'settings.updated') applyPhoneSettings(event.settings)
+    if (event.type === 'settings.updated') {
+      applyPhoneSettings(event.settings)
+      // The connected terminal agents read their brief from a file: keep its effort level current.
+      try {
+        writeTerminalBrief()
+      } catch (error) {
+        console.error("[core] couldn't refresh the terminal agents' prompt", error)
+      }
+    }
   })
   applyPhoneSettings(repos.settings.get())
 

@@ -16,6 +16,7 @@ import type { EventBus } from '../events'
 import { bareDomain, checkOutboxAdd, sameCompany } from './limits'
 import type { DuoStore } from './store'
 import { DUO_BRIEF, startPrompt } from './brief'
+import { currentEffort, effortProviderOptions } from '../engine/effort'
 
 const MAX_TURN_MESSAGES = 30
 /** Steps kept for the run on screen; a long browser session can take hundreds. */
@@ -42,8 +43,8 @@ export interface DuoServiceDeps {
   /** Deskmates' default model, for when Duo's settings leave the choice to it. */
   defaultModel?: () => ModelRef | null
   /** Resolves an API model, for when Duo runs on one. */
-  resolveModel: (ref: ModelRef) => { model: LanguageModel }
-  /** Tools for an API-model run: the browser (as Duo), web search and the prompt reader. */
+  resolveModel: (ref: ModelRef) => { model: LanguageModel; provider?: string; modelId?: string }
+  /** Tools for an API-model run: the operating prompt's tools with the user's Chrome (as Duo), web search and the prompt reader. */
   apiTools: () => ToolSet
   /** The user's prompt's first section and index, for an API-model run. */
   operatingPrompt: () => string | null
@@ -185,7 +186,7 @@ export class DuoService {
     if (!item || item.status !== 'approved') throw new Error('Only an approved item can be handed to the user.')
     const next = this.deps.store.updateItem(id, { status: 'with-user' })
     if (item.kind === 'linkedin') this.deps.store.record({ domain: item.domain, company: item.company, kind: 'linkedin', at: this.now() })
-    this.deps.notify('Ready for you to send on LinkedIn', `${item.company}: the message is filled in. Open Deskmates' browser and press Send.`)
+    this.deps.notify('Ready for you to send on LinkedIn', `${item.company}: the message is filled in. Open it in your Chrome and press Send.`)
     this.emit()
     return next
   }
@@ -427,7 +428,7 @@ export class DuoService {
   }
 
   private async apiTurn(model: ModelRef, signal: AbortSignal): Promise<string> {
-    const { model: resolved } = this.deps.resolveModel(model)
+    const { model: resolved, provider, modelId } = this.deps.resolveModel(model)
     let stepBase = this.steps.length
     const operating = this.deps.operatingPrompt()
     const agent = new ToolLoopAgent({
@@ -436,6 +437,8 @@ export class DuoService {
         .filter(Boolean)
         .join('\n\n'),
       tools: this.tracked(this.deps.apiTools()),
+      // The user's effort level sets the reasoning of models that have a setting for it.
+      providerOptions: effortProviderOptions(provider ?? model.provider, modelId ?? model.modelId, currentEffort()) as never,
       stopWhen: [isStepCount(60)],
       // What the model says on its way ("Opening the school site to read the homework.") is shown
       // as a step, ahead of the tool calls it introduced, so the user follows along as it works.

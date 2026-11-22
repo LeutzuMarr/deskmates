@@ -119,7 +119,11 @@ function chromeStep(name: string, input: Input, url: string, query: string): Ste
 export function stepWords(toolName: string, rawInput: unknown): StepWords {
   const input = (rawInput && typeof rawInput === 'object' ? rawInput : {}) as Input
   // Command-line agents show the deskmates-prompt server's tools with its name in front.
-  const name = toolName.toLowerCase().replace(/^(mcp__deskmates[-_]prompt__|deskmates[-_]prompt[_:.])/, '')
+  // The Fable prompt names some of its tools with a server in front (mcp__memory__memory_read…).
+  const name = toolName
+    .toLowerCase()
+    .replace(/^(mcp__deskmates[-_]prompt__|deskmates[-_]prompt[_:.])/, '')
+    .replace(/^mcp__(memory|widgets|claude_ai|claude-code-remote)__/, '')
   const path = pathOf(input)
   const url = shortUrl(input.url ?? input.href)
   const query = clip(str(input.query ?? input.q ?? input.pattern ?? input.regex), 60)
@@ -141,7 +145,7 @@ export function stepWords(toolName: string, rawInput: unknown): StepWords {
   const chrome = chromeStep(name, input, url, query)
   if (chrome) return chrome
 
-  if (name.startsWith('create_')) {
+  if (name.startsWith('create_') && name !== 'create_trigger') {
     const kind = name.slice('create_'.length).replace(/_/g, ' ')
     return words('Creating', 'Created', path || `a ${kind}`)
   }
@@ -178,6 +182,32 @@ export function stepWords(toolName: string, rawInput: unknown): StepWords {
       return words('Searching', 'Searched', 'for connectors')
     case 'ask_user_input_v0':
       return words('Asking', 'Asked', 'you')
+    case 'read_chrome_instructions':
+      return words('Reading', 'Read', 'the Chrome instructions')
+    case 'read_research_instructions':
+      return words('Reading', 'Read', 'the research instructions')
+    case 'read_prompt_section':
+      return words('Reading', 'Read', str(input.title) ? `"${clip(str(input.title), 50)}"` : 'its instructions')
+    case 'launch_extended_search_task':
+      return words('Researching', 'Researched', clip(str(input.command), 60) || 'the question')
+    case 'read_research_report':
+      return words('Reading', 'Read', 'the research report')
+    case 'current_time':
+      return words('Checking', 'Checked', 'the time')
+    case 'taskcreate':
+      return words('Adding', 'Added', clip(str(input.subject), 60) || 'a task')
+    case 'taskupdate':
+      return words('Updating', 'Updated', 'the task list')
+    case 'propose_skills':
+      return words('Proposing', 'Proposed', 'skills')
+    case 'add_repo':
+      return words('Checking', 'Checked', `${str(input.owner)}/${str(input.repo)} on GitHub`)
+    case 'create_trigger':
+      return words('Scheduling', 'Scheduled', str(input.name) || 'a task')
+    case 'send_later':
+      return words('Scheduling', 'Scheduled', 'a reminder')
+    case 'searchmcpregistry':
+      return words('Searching', 'Searched', 'for connectors')
     case 'mcp__visualize__read_me':
       return words('Reading', 'Read', 'the widget guide')
     case 'mcp__visualize__show_widget':

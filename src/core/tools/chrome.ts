@@ -1,7 +1,10 @@
 /**
  * Tools that drive the user's own Google Chrome (their tabs, their sign-ins), named and shaped like
  * Claude in Chrome's: tabs_context, tabs_create, navigate, read_page, find, computer, form_input,
- * get_page_text, javascript_tool, read_console_messages, read_network_requests (and tabs_close).
+ * get_page_text, javascript_tool, read_console_messages, read_network_requests, browser_batch,
+ * upload_image, resize_window, gif_creator and turn_answer_start (and tabs_close). The first result
+ * of a run carries the Claude in Chrome instructions (prompts/claude-in-chrome), unless the agent
+ * already read them with read_chrome_instructions.
  * Every agent gets them: the Work tab, the command-line agents through deskmates-prompt, bots, Duo.
  *
  * The same rules as the agent browser, applied here rather than left to the model:
@@ -13,14 +16,16 @@
  * - LinkedIn: nothing presses Send or Connect, and it isn't used while the user is away;
  * - Chrome's own pages (chrome://settings and the like) are off limits.
  */
-import { mkdirSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { basename, isAbsolute, join, resolve } from 'node:path'
 import { tool, type Tool, type ToolResultPart, type ToolSet } from 'ai'
 import { z } from 'zod'
 import { AWAY_AFTER_SECONDS, domainOf, isLinkedIn, isSendControl, isSensitiveField } from '../../shared/agent-browser'
 import type { SiteAnswer, SiteAsk } from '../../shared/agent-browser'
 import type { ChromeDriver, ChromeTab, MouseButton } from '../chrome/service'
 import { modifierBits } from '../chrome/service'
+import { decodePng, drawOverlays, encodeGif, type FrameAction, type GifOptions } from '../chrome/gif'
+import { chromeInstructions, chromeInstructionsDue, markChromeInstructionsGiven } from '../engine/guides'
 import {
   ENTER_TARGET_SCRIPT,
   fieldScript,
@@ -58,6 +63,10 @@ export interface ChromeToolDeps {
   screenshotDir?: string
   /** Whether the model can be shown pictures. */
   withImages?: boolean
+  /** Where exported GIFs are saved (the project folder); the screenshot folder when absent. */
+  outputDir?: string
+  /** Hand the Claude in Chrome instructions over with the first Chrome result of a run (default true). */
+  handOverInstructions?: boolean
   signal?: AbortSignal
 }
 
@@ -74,8 +83,17 @@ export const CHROME_TOOL_NAMES = [
   'get_page_text',
   'javascript_tool',
   'read_console_messages',
-  'read_network_requests'
+  'read_network_requests',
+  'browser_batch',
+  'upload_image',
+  'resize_window',
+  'gif_creator',
+  'turn_answer_start'
 ] as const
+
+/** Tools whose result is a change on the page, so a GIF recording takes a frame after them. */
+const FRAME_TOOLS: ReadonlySet<string> = new Set(['navigate', 'computer', 'form_input', 'tabs_create', 'upload_image'])
+const MAX_FRAMES = 80
 
 const tabId = z.number().int().positive().optional().describe('The tab to use, from tabs_context. Defaults to the tab used last.')
 const ref = z.string().regex(/^ref_\d+$/, 'A ref looks like ref_12, from read_page or find.')
@@ -138,7 +156,49 @@ const SCHEMAS = {
     limit: z.number().int().min(1).max(500).default(50),
     requestId: z.string().optional().describe("Return this request's response body instead of the list"),
     clear: z.boolean().default(false).describe('Forget the requests after reading them')
-  })
+  }),
+  browser_batch: z.object({
+    actions: z
+      .array(
+        z.object({
+          name: z.string().min(1).describe('A Chrome tool name (computer, navigate, find, form_input, tabs_create…). browser_batch cannot be nested.'),
+          input: z.record(z.string(), z.unknown()).default({}).describe("That tool's input, as you would pass it directly")
+        })
+      )
+      .min(1)
+      .max(30)
+      .describe('Tool calls to run one after another; the batch stops at the first error')
+  }),
+  upload_image: z.object({
+    imageId: z.string().min(1).describe('A screenshot\'s image id (from a computer screenshot, like "screenshot_3"), or the path of an image file in the project folder'),
+    ref: ref.optional().describe('A file input (or the element holding one), from read_page or find'),
+    coordinate: point.optional().describe('Where to drop the image, in the last screenshot (for drag-and-drop targets)'),
+    tabId,
+    filename: z.string().optional().describe('The file name the site sees (default image.png)')
+  }),
+  resize_window: z.object({
+    width: z.number().int().min(200).max(7680).describe('Window width in pixels'),
+    height: z.number().int().min(200).max(4320).describe('Window height in pixels'),
+    tabId
+  }),
+  gif_creator: z.object({
+    action: z.enum(['start_recording', 'stop_recording', 'export', 'clear']),
+    tabId,
+    coordinate: point.optional().describe("For export: drop the GIF on the page here instead of saving it (download)"),
+    download: z.boolean().optional().describe('For export: save the GIF to the project folder'),
+    filename: z.string().optional().describe('For export: the file name (default recording-<time>.gif)'),
+    options: z
+      .object({
+        showClickIndicators: z.boolean().optional(),
+        showDragPaths: z.boolean().optional(),
+        showActionLabels: z.boolean().optional(),
+        showProgressBar: z.boolean().optional(),
+        showWatermark: z.boolean().optional(),
+        quality: z.number().optional()
+      })
+      .optional()
+  }),
+  turn_answer_start: z.object({})
 } satisfies Record<(typeof CHROME_TOOL_NAMES)[number], z.ZodObject>
 
 const DESCRIPTIONS: Record<(typeof CHROME_TOOL_NAMES)[number], string> = {
@@ -158,7 +218,15 @@ const DESCRIPTIONS: Record<(typeof CHROME_TOOL_NAMES)[number], string> = {
   javascript_tool:
     'Run JavaScript in a Chrome tab and get the value of the last expression. The user is asked once per site before scripts run there. Never use it to fill passwords or codes, or to send, post, pay or delete.',
   read_console_messages: "Console messages and errors from a Chrome tab, since Deskmates started watching it (from the first tool call on that tab).",
-  read_network_requests: "Network requests a Chrome tab made since Deskmates started watching it: method, address, status. Pass requestId to read one response's body."
+  read_network_requests: "Network requests a Chrome tab made since Deskmates started watching it: method, address, status. Pass requestId to read one response's body.",
+  browser_batch:
+    'Run several Chrome tool calls in one go, in order (for example navigate, click a field, type, press Enter, screenshot). Each item is {name, input} with that tool\'s own input. Each call\'s own permission check still runs; the batch stops at the first error. Coordinates refer to the screenshot taken before the batch.',
+  upload_image:
+    "Upload a screenshot (its image id from computer's screenshot) or an image file from the project into a page: to a file input by ref, or dropped at a coordinate (drag-and-drop targets). Asks the user first, every time.",
+  resize_window: "Resize the user's Chrome window (for checking a page at another size). Asks the user once per task.",
+  gif_creator:
+    'Record the Chrome session as an animated GIF: start_recording (then take a screenshot for the first frame), stop_recording (take a screenshot just before), export (download: true saves it to the project folder; coordinate drops it on the page), clear. Frames are taken after every action while recording; export draws click rings, drag paths, action labels and a progress bar.',
+  turn_answer_start: 'Marks the start of your answer this turn. It does nothing in Deskmates; call it at most once, just before your answer.'
 }
 
 /** The Chrome tools as the deskmates-prompt server lists them. */
@@ -173,13 +241,21 @@ export function chromeToolInfos(): Array<{ name: string; description: string; in
 interface RunMemory {
   lastTab?: number
   scriptsAllowed: Set<string>
+  /** Recent screenshots: file → base64 JPEG. */
   shots: Map<string, string>
+  /** Image ids handed out with screenshots ("screenshot_3") → their file. */
+  shotIds: Map<string, string>
+  shotCount: number
+  /** What the last action did, for the GIF overlays. */
+  lastAction?: FrameAction
+  /** A GIF recording: PNG frames (base64) and what led to each. */
+  gif?: { active: boolean; scale: number; frames: Array<{ png: string; action?: FrameAction }> }
 }
 const runs = new Map<string, RunMemory>()
 function memory(runKey: string): RunMemory {
   let entry = runs.get(runKey)
   if (!entry) {
-    entry = { scriptsAllowed: new Set(), shots: new Map() }
+    entry = { scriptsAllowed: new Set(), shots: new Map(), shotIds: new Map(), shotCount: 0 }
     runs.set(runKey, entry)
     if (runs.size > 200) runs.delete(runs.keys().next().value as string)
   }
@@ -215,11 +291,27 @@ const LINKEDIN_AWAY =
 const LINKEDIN_SEND = "On LinkedIn only the user presses Send or Connect. Fill it in, then tell the user it's ready in their Chrome."
 const SECRET_FIELD = 'That is a password, code, card or ID field. Only the user types there: ask them to fill it in in their Chrome, then carry on.'
 
-function shotText(tab: ChromeTab, shot: { width: number; height: number }, file: string | null, zoomed: boolean): string {
-  const where = file ? ` Saved to ${file}.` : ''
+function shotText(tab: ChromeTab, shot: { width: number; height: number }, file: string | null, zoomed: boolean, imageId: string | null): string {
+  const where = file ? ` Saved to ${file}${imageId ? ` (image id ${imageId}, for upload_image)` : ''}.` : ''
   return zoomed
     ? `Zoomed picture of part of tab ${tab.tabId} (${shot.width}×${shot.height}).${where} Coordinates for clicks still come from a full screenshot.`
     : `Screenshot of tab ${tab.tabId} (${tab.title || tab.url}), ${shot.width}×${shot.height}; clicks use these coordinates.${where}`
+}
+
+/** A one-line account of a Chrome call, for a GIF frame's label. */
+function actionLabel(name: string, input: Record<string, unknown>): string {
+  if (name === 'computer') {
+    const action = String(input.action ?? '')
+    if (action === 'type') return `Type "${String(input.text ?? '').slice(0, 30)}"`
+    if (action === 'key') return `Press ${String(input.text ?? '')}`
+    if (action === 'scroll') return `Scroll ${String(input.scroll_direction ?? 'down')}`
+    return action.replace(/_/g, ' ')
+  }
+  if (name === 'navigate') return `Go to ${String(input.url ?? '').replace(/^https?:\/\//, '').slice(0, 40)}`
+  if (name === 'form_input') return `Fill ${String(input.ref ?? 'field')}`
+  if (name === 'tabs_create') return 'New tab'
+  if (name === 'upload_image') return 'Upload image'
+  return name.replace(/_/g, ' ')
 }
 
 export function chromeTools(deps: ChromeToolDeps): ToolSet {
@@ -293,14 +385,53 @@ export function chromeTools(deps: ChromeToolDeps): ToolSet {
 
   const describeTab = (tab: ChromeTab): string => `Tab ${tab.tabId}: ${tab.title || '(no title)'} | ${tab.url}`
 
-  const saveShot = (data: string): string | null => {
+  const saveShot = (data: string): { file: string; id: string } | null => {
     if (!deps.screenshotDir) return null
     mkdirSync(deps.screenshotDir, { recursive: true })
     const file = join(deps.screenshotDir, `chrome-${Date.now()}.jpg`)
     writeFileSync(file, Buffer.from(data, 'base64'))
     mem.shots.set(file, data)
     while (mem.shots.size > 4) mem.shots.delete(mem.shots.keys().next().value as string)
-    return file
+    const id = `screenshot_${++mem.shotCount}`
+    mem.shotIds.set(id, file)
+    while (mem.shotIds.size > 30) mem.shotIds.delete(mem.shotIds.keys().next().value as string)
+    return { file, id }
+  }
+
+  /** While recording a GIF: a frame of the tab as it is now, with what just happened. */
+  const captureFrame = async (action?: FrameAction): Promise<void> => {
+    const gif = mem.gif
+    if (!gif?.active || mem.lastTab === undefined) return
+    if (gif.frames.length >= MAX_FRAMES) {
+      gif.active = false
+      return
+    }
+    try {
+      const shot = await chrome.screenshot(mem.lastTab, undefined, gif.scale, 'png')
+      const scaled = (p?: [number, number]): [number, number] | undefined => (p ? [p[0] * gif.scale, p[1] * gif.scale] : undefined)
+      gif.frames.push({ png: shot.data, ...(action ? { action: { label: action.label, ...(action.point ? { point: scaled(action.point)! } : {}), ...(action.from ? { from: scaled(action.from)! } : {}), ...(action.to ? { to: scaled(action.to)! } : {}) } } : {}) })
+    } catch {
+      // A frame that can't be taken (the tab closed, Chrome busy) is skipped.
+    }
+  }
+
+  /** An image the agent names for upload: a screenshot id, or an image file in the project. */
+  const imageFile = (imageId: string): string => {
+    const known = mem.shotIds.get(imageId)
+    if (known && existsSync(known)) return known
+    const base = deps.outputDir ?? deps.screenshotDir
+    const candidate = isAbsolute(imageId) ? imageId : base ? resolve(base, imageId) : ''
+    const inside = base && candidate && (resolve(candidate).toLowerCase().startsWith(resolve(base).toLowerCase()) || (deps.screenshotDir && resolve(candidate).toLowerCase().startsWith(resolve(deps.screenshotDir).toLowerCase())))
+    if (inside && existsSync(candidate) && statSync(candidate).isFile() && /\.(png|jpe?g|gif|webp|bmp)$/i.test(candidate)) return candidate
+    throw new Error(`There is no image "${imageId}". Use the image id a screenshot gave (like screenshot_2), or the path of an image file in the project folder.`)
+  }
+
+  /** Asks before something leaves the PC for a site (an upload). Every time. */
+  const ensureUpload = async (what: string, url: string): Promise<void> => {
+    const domain = siteOf(url) || 'Chrome'
+    if (isLinkedIn(url)) throw new Error(LINKEDIN_SEND)
+    const answer = await asker.ask({ kind: 'action', domain, detail: `upload ${what} to ${domain} in your Chrome`, agent, runKey }, ASK_TIMEOUT_MS, deps.signal)
+    if (answer !== 'allow-once' && answer !== 'always') throw new Error(answer === 'deny' ? `The user said no to uploading ${what}. Don't.` : `The user hasn't answered about uploading ${what}. Leave it undone and tell them.`)
   }
 
   const withShot = ({ output }: { output: unknown }): ToolResultOutput => {
@@ -310,14 +441,39 @@ export function chromeTools(deps: ChromeToolDeps): ToolSet {
     return { type: 'content', value: [{ type: 'text', text }, { type: 'file', mediaType: 'image/jpeg', data: { type: 'data', data: mem.shots.get(file)! } }] }
   }
 
+  /** Each tool's input parsing and work, by name: what the tools run, and what browser_batch calls. */
+  const runners = new Map<string, (raw: unknown) => Promise<string>>()
+
+  /** The instructions, handed over once per run with the first Chrome result (unless already read). */
+  const withInstructions = (name: string, result: string): string => {
+    if (deps.handOverInstructions === false || name === 'turn_answer_start' || !chromeInstructionsDue(runKey)) return result
+    const guide = chromeInstructions()
+    if (!guide) return result
+    markChromeInstructionsGiven(runKey)
+    return `${result}\n\n---\nBefore your next Chrome step: these are the instructions for working in the user's Chrome. You get them once per task; follow them from here on.\n\n${guide}`
+  }
+
   /** Builds a tool whose input is parsed here too, so bridged calls (which skip the SDK's parse) get defaults. */
-  const make = <N extends (typeof CHROME_TOOL_NAMES)[number]>(name: N, run: (input: z.output<(typeof SCHEMAS)[N]>) => Promise<string>, extra: Record<string, unknown> = {}): Tool =>
-    tool({
+  const make = <N extends (typeof CHROME_TOOL_NAMES)[number]>(name: N, run: (input: z.output<(typeof SCHEMAS)[N]>) => Promise<string>, extra: Record<string, unknown> = {}): Tool => {
+    const runner = async (raw: unknown): Promise<string> => {
+      const input = (SCHEMAS[name] as z.ZodType).parse(raw ?? {}) as z.output<(typeof SCHEMAS)[N]>
+      mem.lastAction = undefined
+      const result = await run(input)
+      if (FRAME_TOOLS.has(name)) {
+        const action = input as Record<string, unknown>
+        const skip = name === 'computer' && (action.action === 'zoom' || action.action === 'wait')
+        if (!skip) await captureFrame({ label: actionLabel(name, action), ...(mem.lastAction ?? {}) })
+      }
+      return result
+    }
+    runners.set(name, runner)
+    return tool({
       description: DESCRIPTIONS[name],
       inputSchema: SCHEMAS[name] as z.ZodType,
-      execute: async (raw: unknown) => run((SCHEMAS[name] as z.ZodType).parse(raw ?? {}) as z.output<(typeof SCHEMAS)[N]>),
+      execute: async (raw: unknown) => withInstructions(name, await runner(raw)),
       ...extra
     } as unknown as Tool) as Tool
+  }
 
   /** Where an element or coordinate is, and what a click there would press. */
   const target = async (tab: ChromeTab, input: { ref?: string; coordinate?: number[] }): Promise<{ x: number; y: number; name: string; url: string }> => {
@@ -415,7 +571,8 @@ export function chromeTools(deps: ChromeToolDeps): ToolSet {
             await ensureSite(tab, 'read')
             if (action === 'zoom' && !input.region) throw new Error('zoom needs a region: (x0, y0, x1, y1) from a screenshot.')
             const shot = await chrome.screenshot(tab.tabId, action === 'zoom' ? (input.region as [number, number, number, number]) : undefined)
-            return shotText(tab, shot, saveShot(shot.data), action === 'zoom')
+            const saved = saveShot(shot.data)
+            return shotText(tab, shot, saved?.file ?? null, action === 'zoom', saved?.id ?? null)
           }
           case 'wait': {
             await new Promise((resolve) => setTimeout(resolve, Math.min(10, input.duration ?? 1) * 1000))
@@ -440,6 +597,7 @@ export function chromeTools(deps: ChromeToolDeps): ToolSet {
             await ensureSite(tab, 'read')
             const spot = await target(tab, input)
             await chrome.move(tab.tabId, spot.x, spot.y)
+            mem.lastAction = { label: 'Hover', point: [spot.x, spot.y] }
             return `Hovering over ${spot.name ? `“${spot.name}”` : `(${Math.round(spot.x)}, ${Math.round(spot.y)})`}.`
           }
           case 'left_click':
@@ -453,12 +611,14 @@ export function chromeTools(deps: ChromeToolDeps): ToolSet {
             const button: MouseButton = action === 'right_click' ? 'right' : 'left'
             const count = action === 'double_click' ? 2 : action === 'triple_click' ? 3 : 1
             await chrome.click(tab.tabId, spot.x, spot.y, { button, count, modifiers: modifierBits(input.modifiers) })
+            mem.lastAction = { label: spot.name ? `Click "${spot.name.slice(0, 30)}"` : 'Click', point: [spot.x, spot.y] }
             return `Clicked ${spot.name ? `“${spot.name}”` : `at (${Math.round(spot.x)}, ${Math.round(spot.y)})`} in tab ${tab.tabId}.`
           }
           case 'left_click_drag': {
             await ensureSite(tab, 'act')
             if (!input.start_coordinate || !input.coordinate) throw new Error('left_click_drag needs start_coordinate and coordinate.')
             await chrome.drag(tab.tabId, input.start_coordinate as [number, number], input.coordinate as [number, number])
+            mem.lastAction = { label: 'Drag', from: input.start_coordinate as [number, number], to: input.coordinate as [number, number] }
             return `Dragged from (${input.start_coordinate.join(', ')}) to (${input.coordinate.join(', ')}).`
           }
           case 'type': {
@@ -557,6 +717,115 @@ export function chromeTools(deps: ChromeToolDeps): ToolSet {
         .slice(-limit)
         .map((r) => `${r.requestId}  ${r.method} ${r.status ?? (r.failed ? 'FAILED' : '…')} ${r.url.length > 200 ? `${r.url.slice(0, 199)}…` : r.url}${r.type ? `  [${r.type}]` : ''}${r.failed ? `  ${r.failed}` : ''}`)
         .join('\n')
-    })
+    }),
+
+    browser_batch: make(
+      'browser_batch',
+      async ({ actions }) => {
+        const lines: string[] = []
+        for (const [index, item] of actions.entries()) {
+          if (item.name === 'browser_batch') throw new Error('browser_batch cannot be nested.')
+          const runner = runners.get(item.name)
+          if (!runner) {
+            lines.push(`${index + 1}. ${item.name}: there is no Chrome tool by that name. Stopped here.`)
+            break
+          }
+          try {
+            lines.push(`${index + 1}. ${item.name}: ${await runner(item.input)}`)
+          } catch (error) {
+            lines.push(`${index + 1}. ${item.name} failed: ${error instanceof Error ? error.message : String(error)}`, `Stopped after ${index} of ${actions.length} steps.`)
+            break
+          }
+        }
+        return lines.join('\n')
+      },
+      { toModelOutput: withShot }
+    ),
+
+    upload_image: make('upload_image', async ({ imageId, ref: element, coordinate, tabId: id, filename }) => {
+      if (!element === !coordinate) throw new Error('Give either ref (a file input) or coordinate (a drop target), not both.')
+      const tab = used(await pickTab(id))
+      await ensureSite(tab, 'act')
+      let file = imageFile(imageId)
+      if (filename && basename(file) !== filename) {
+        const dir = deps.screenshotDir ?? deps.outputDir
+        if (dir && /^[\w .()-]+\.(png|jpe?g|gif|webp)$/i.test(filename)) {
+          mkdirSync(dir, { recursive: true })
+          const copy = join(dir, filename)
+          writeFileSync(copy, readFileSync(file))
+          file = copy
+        }
+      }
+      await ensureUpload(`the image ${basename(file)}`, tab.url)
+      if (element) {
+        if (!chrome.setFiles) throw new Error("This Chrome connection can't fill file inputs.")
+        await chrome.setFiles(tab.tabId, element, [file])
+        return `Put ${basename(file)} in the file input ${element} in tab ${tab.tabId}.`
+      }
+      if (!chrome.dropFiles) throw new Error("This Chrome connection can't drop files on a page.")
+      const [x, y] = coordinate as [number, number]
+      await chrome.dropFiles(tab.tabId, x, y, [file])
+      mem.lastAction = { label: 'Upload image', point: [x, y] }
+      return `Dropped ${basename(file)} at (${x}, ${y}) in tab ${tab.tabId}.`
+    }),
+
+    resize_window: make('resize_window', async ({ width, height, tabId: id }) => {
+      const tab = used(await pickTab(id))
+      await ensureSite(tab, 'read')
+      if (!chrome.resizeWindow) throw new Error("This Chrome connection can't resize windows.")
+      if (!mem.scriptsAllowed.has('resize-window')) {
+        const answer = await asker.ask({ kind: 'action', domain: 'Chrome', detail: `resize your Chrome window to ${width}×${height}`, agent, runKey }, ASK_TIMEOUT_MS, deps.signal)
+        if (answer !== 'allow-once' && answer !== 'always') throw new Error(answer === 'deny' ? "The user said no to resizing their Chrome window. Don't." : "The user hasn't answered about resizing their Chrome window. Leave it as it is.")
+        mem.scriptsAllowed.add('resize-window')
+      }
+      await chrome.resizeWindow(tab.tabId, width, height)
+      return `Resized the Chrome window to ${width}×${height}. Take a screenshot to see the page at that size.`
+    }),
+
+    gif_creator: make('gif_creator', async ({ action, tabId: id, coordinate, download, filename, options }) => {
+      if (id !== undefined) used(await pickTab(id))
+      switch (action) {
+        case 'start_recording':
+          mem.gif = { active: true, scale: 0.5, frames: mem.gif?.frames ?? [] }
+          return 'Recording. Take a screenshot now so the first frame shows where you start; every action from here adds a frame.'
+        case 'stop_recording': {
+          if (!mem.gif) return 'Nothing is being recorded.'
+          mem.gif.active = false
+          return `Stopped recording with ${mem.gif.frames.length} frame${mem.gif.frames.length === 1 ? '' : 's'}. Export it with action "export".`
+        }
+        case 'clear':
+          mem.gif = undefined
+          return 'Cleared the recording.'
+        case 'export': {
+          const frames = mem.gif?.frames ?? []
+          if (frames.length === 0) throw new Error('There are no frames: start_recording, act in the tab, then export.')
+          if (!download && !coordinate) throw new Error('export needs download: true (save it to the project folder) or a coordinate to drop it on the page.')
+          const gifOptions: GifOptions = { ...options, delayCs: 90 }
+          const images = frames.map((frame, index) => {
+            const image = decodePng(Buffer.from(frame.png, 'base64'))
+            drawOverlays(image, frame.action, index, frames.length, gifOptions)
+            return image
+          })
+          const gif = encodeGif(images, gifOptions)
+          const dir = download ? (deps.outputDir ?? deps.screenshotDir) : (deps.screenshotDir ?? deps.outputDir)
+          if (!dir) throw new Error('There is no folder to save the GIF in.')
+          const name = filename && /^[\w .()-]+\.gif$/i.test(filename) ? filename : `recording-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.gif`
+          mkdirSync(dir, { recursive: true })
+          const file = join(dir, name)
+          writeFileSync(file, gif)
+          const size = `${frames.length} frames, ${Math.round(gif.length / 1024)} KB`
+          if (download) return `Saved the GIF to ${file} (${size}). Show it to the user with SendUserFile.`
+          const tab = used(await pickTab(id))
+          await ensureSite(tab, 'act')
+          await ensureUpload(`the recording ${name}`, tab.url)
+          if (!chrome.dropFiles) throw new Error("This Chrome connection can't drop files on a page.")
+          const [x, y] = coordinate as [number, number]
+          await chrome.dropFiles(tab.tabId, x, y, [file])
+          return `Dropped the GIF (${size}) at (${x}, ${y}) in tab ${tab.tabId}. It is also saved at ${file}.`
+        }
+      }
+    }),
+
+    turn_answer_start: make('turn_answer_start', async () => 'OK. Write your answer now.')
   }
 }

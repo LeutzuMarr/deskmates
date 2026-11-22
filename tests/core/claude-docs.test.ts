@@ -100,7 +100,7 @@ describe('operating prompt brief', () => {
     const bot = myPromptBrief('tool', path)!
     expect(work).toContain('real tools in this run')
     expect(bot).not.toContain('real tools in this run')
-    expect(bot).toContain("can't call here")
+    expect(bot).toContain('may not have here')
     for (const brief of [work, bot, myPromptBrief('none', path)!, myPromptBrief('file', path)!]) expect(brief).toContain('Staying truthful:')
   })
 })

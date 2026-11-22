@@ -6,7 +6,7 @@ import { concentricVars } from '../lib/design'
 import { AssistantText } from './Markdown'
 import type { ToolItem } from '../../../shared/protocol'
 import type { QuickReplies } from '../../../shared/quick-replies'
-import { WIDGET_TOOL_NAMES } from '../../../shared/widgets'
+import { WIDGET_PROMPT_MESSAGE, WIDGET_TOOL_NAMES } from '../../../shared/widgets'
 
 /** Tools shown as their own card in the conversation instead of inside the gray activity summary. */
 export const CARD_TOOLS = new Set(['AskUserQuestion', 'ask_user', 'ask_user_input_v0', 'SendUserMessage', 'SendUserFile', 'present_files', ...WIDGET_TOOL_NAMES])
@@ -264,7 +264,7 @@ export function AgentCard({ taskId, item, answered, running }: { taskId: string;
     return message ? <AssistantText text={message} /> : null
   }
   if (item.toolName === 'SendUserFile' || item.toolName === 'present_files') return item.state === 'done' ? <FileCards item={item} /> : null
-  if (WIDGET_TOOL_NAMES.includes(item.toolName)) return <WidgetCard item={item} />
+  if (WIDGET_TOOL_NAMES.includes(item.toolName)) return <WidgetCard taskId={taskId} item={item} running={running} />
   return <QuestionCard taskId={taskId} item={item} answered={answered} running={running} />
 }
 
@@ -327,20 +327,31 @@ export function QuickReplyCard({ taskId, replies, running }: { taskId: string; r
  * A widget an agent drew (a chart, cards, a quiz, a map…): its page in a sandboxed frame that grows
  * to the height the page reports. While the tool runs, a placeholder line; if it failed, the error.
  */
-function WidgetCard({ item }: { item: ToolItem }) {
+function WidgetCard({ taskId, item, running }: { taskId: string; item: ToolItem; running: boolean }) {
   const frameRef = useRef<HTMLIFrameElement>(null)
   const [height, setHeight] = useState(160)
+  const showToast = useStore((s) => s.showToast)
+  const runningRef = useRef(running)
+  runningRef.current = running
   const output = (item.output ?? {}) as { widget?: unknown; title?: unknown }
   const src = typeof output.widget === 'string' && output.widget.startsWith('deskmates-preview://widget/') ? output.widget : null
   useEffect(() => {
     const onMessage = (event: MessageEvent): void => {
       if (event.source !== frameRef.current?.contentWindow) return
-      const data = event.data as { type?: unknown; height?: unknown }
+      const data = event.data as { type?: unknown; height?: unknown; text?: unknown }
       if (data?.type === 'deskmates-widget-height' && typeof data.height === 'number') setHeight(Math.min(Math.max(data.height, 40), 2400))
+      // The Visualizer's sendPrompt(text): the widget asks a follow-up as the user's next message.
+      if (data?.type === WIDGET_PROMPT_MESSAGE && typeof data.text === 'string' && data.text.trim()) {
+        if (runningRef.current) {
+          showToast('Wait for the answer to finish, then try again.')
+          return
+        }
+        core.call('tasks.send', { id: taskId, text: data.text.trim().slice(0, 2000) }).catch((error: unknown) => showToast(`Couldn't send that: ${error instanceof Error ? error.message : String(error)}`))
+      }
     }
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
-  }, [])
+  }, [taskId, showToast])
   if (item.state === 'error') {
     return <div className="msg-in rounded-2xl border border-[color:var(--danger,#b3412f)]/40 px-4 py-3 text-[13px] text-[color:var(--danger,#b3412f)]">Couldn't show this: {typeof item.output === 'string' ? item.output : 'the widget failed.'}</div>
   }
