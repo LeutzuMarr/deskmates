@@ -217,23 +217,50 @@ export function isWorkLine(text: string): boolean {
 
 /** Freebuff's window is 110 columns; a cleaned line this long was most likely wrapped onto the next. */
 const WRAP_LENGTH = 95
+/** The line that opens what Freebuff thinks before it acts or answers. */
+const THINKING_STEP = /^•\s*Thinking(?!\w)/i
+
+/** One piece of Freebuff's reply: a step it took (a tool, a command, its thinking) or prose for the user. */
+export interface ReplyPart {
+  step: boolean
+  text: string
+}
+
+/**
+ * Freebuff's finished reply split into the steps it took and what it said, in order (see
+ * `groupWork`). Consecutive paragraphs of prose are one part, so the answer stays one message.
+ */
+export function replyParts(reply: string): ReplyPart[] {
+  const parts: ReplyPart[] = []
+  for (const item of groupWork(reply.split('\n'))) {
+    const step = isWorkLine(item)
+    const last = parts[parts.length - 1]
+    if (!step && last && !last.step) last.text += `\n\n${item}`
+    else parts.push({ step, text: item })
+  }
+  return parts
+}
 
 /**
  * Freebuff's output lines turned into whole items, in order: each tool or command line is its own
  * item, and a paragraph of prose (which the window wraps over several lines) is joined back into one.
- * Freebuff's own "thinking…" status is left out.
+ * Freebuff's own "thinking…" status is left out. What Freebuff thinks ("• Thinking" and the lines
+ * under it, up to a blank line) is one item, a step: it is Freebuff working, not its answer.
  */
 export function groupWork(lines: string[]): string[] {
   const items: string[] = []
   let joinable = false
+  let thinking = false
   for (const raw of lines) {
     const line = raw.trim()
     if (!line || BUSY.test(line) || FREEBUFF_CHROME.test(line)) {
       joinable = false
+      if (!line) thinking = false
       continue
     }
     const marker = WORK_MARKER.test(line)
-    if (!marker && joinable && items.length > 0) {
+    if (marker) thinking = THINKING_STEP.test(line)
+    if (!marker && (joinable || thinking) && items.length > 0) {
       items[items.length - 1] += ` ${line}`
     } else {
       items.push(line)
