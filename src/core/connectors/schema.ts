@@ -2,6 +2,13 @@
 import { z } from 'zod'
 
 export function jsonSchemaToZod(schema: unknown): z.ZodTypeAny {
+  const out = convert(schema)
+  // Keep each field's description: it is how the model learns what to send.
+  const description = schema && typeof schema === 'object' ? (schema as { description?: unknown }).description : undefined
+  return typeof description === 'string' && description.trim() ? out.describe(description.trim().slice(0, 1500)) : out
+}
+
+function convert(schema: unknown): z.ZodTypeAny {
   if (!schema || typeof schema !== 'object') return z.any()
   const s = schema as Record<string, unknown>
 

@@ -18,6 +18,7 @@ import { scheduleTools } from './schedules'
 import { screenControlTools } from './screen-control'
 import { chromeTools } from './chrome'
 import { sharedChrome } from '../chrome/service'
+import { guideTools } from '../engine/guides'
 import { join } from 'node:path'
 
 /** Merges every tool group into one ToolSet for a run. Built fresh per run via TaskRunner. */
@@ -67,11 +68,15 @@ export function buildTools(ctx: ToolContext): ToolSet {
           agent: ctx.agentName ?? 'Work',
           runKey: ctx.taskId,
           screenshotDir: join(ctx.root, '.deskmates', 'screenshots'),
+          outputDir: ctx.root,
           withImages: ['google', 'openai'].includes(ctx.modelRef.provider),
+          ...(ctx.chromeSendPermit ? { sendPermit: ctx.chromeSendPermit } : {}),
           ...(ctx.signal ? { signal: ctx.signal } : {})
         })
       )
     }
+    // The Chrome and research instructions, read only when a task needs them.
+    Object.assign(all, guideTools(ctx.taskId))
     Object.assign(all, promptTools(ctx, all))
   }
   return all

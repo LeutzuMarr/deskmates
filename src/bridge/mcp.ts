@@ -128,8 +128,9 @@ export function createDeskmatesServer(options: { call: Call; dataDir: string; ap
     return 'Cleared the screen.'
   }))
 
-  registerBrowserTools(server, call, options.agent)
+  // Duo browses in the user's own Chrome (the deskmates-prompt server's Chrome tools), not here.
   if (options.agent === 'Duo') registerDuoTools(server, call)
+  else registerBrowserTools(server, call, options.agent)
 
   // The pc tools stay stubs until stage 2; the guide's PC section says so too.
   const pcNotReady = (): Promise<CallToolResult> =>

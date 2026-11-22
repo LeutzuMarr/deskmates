@@ -8,6 +8,7 @@ import { concentricVars, decorateWithSelection } from '../lib/design'
 import type { Selection } from '../lib/design'
 import { FOCUS_COMPOSER_EVENT } from '../lib/shortcuts'
 import { ModelPicker } from './ModelPicker'
+import { EffortPicker } from './EffortPicker'
 import { ContextMeter } from './ContextMeter'
 import { BUILT_IN_COMMANDS, runBuiltIn } from '../lib/commands'
 
@@ -517,6 +518,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               }}
             />
             <ModelPicker projectId={projectId} />
+            <EffortPicker />
             <ContextMeter taskId={taskId} />
             {showSuggestion && (
               <span className="truncate text-[12px] text-ink-faint">

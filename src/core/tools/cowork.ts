@@ -12,6 +12,7 @@ import { officeTools } from './office'
 import { runPowerShell, type ShellResult } from './shell'
 import { readOnlySubagentTools } from './agent-tools'
 import { webFetchText, webSearchResults } from './web'
+import { builtinSkill, markChromeInstructionsGiven } from '../engine/guides'
 
 const SKIP_DIRS = new Set(['node_modules', '.git', '.venv', 'venv', '__pycache__', '.next', 'dist', 'out', 'build'])
 const DOCUMENT_EXTS = new Set(['.pdf', '.docx', '.xlsx', '.pptx'])
@@ -418,8 +419,27 @@ export function coworkTools(ctx: ToolContext, listTools: () => ToolListing[] = (
 
     WebSearch: tool({
       description: 'Search the web and get the top results (title, address, snippet).',
-      inputSchema: z.object({ query: z.string().min(2) }),
-      execute: async ({ query }, { abortSignal }) => webSearchResults(query, abortSignal)
+      inputSchema: z.object({
+        query: z.string().min(2),
+        mode: z.enum(['standard', 'extended']).optional().describe('"extended" also looks further down the results'),
+        allowed_domains: z.array(z.string()).optional().describe('Only results from these domains'),
+        blocked_domains: z.array(z.string()).optional().describe('Never results from these domains')
+      }),
+      execute: async ({ query, mode, allowed_domains, blocked_domains }, { abortSignal }) => {
+        const results = await webSearchResults(query, abortSignal)
+        if (typeof results === 'string') return results
+        const host = (url: string): string => {
+          try {
+            return new URL(url).hostname.toLowerCase()
+          } catch {
+            return ''
+          }
+        }
+        const within = (url: string, domains: string[]): boolean => domains.some((d) => host(url) === d.toLowerCase().replace(/^www\./, '') || host(url).endsWith(`.${d.toLowerCase().replace(/^www\./, '')}`) || host(url) === `www.${d.toLowerCase()}`)
+        const kept = results.filter((r) => (!allowed_domains?.length || within(r.url, allowed_domains)) && (!blocked_domains?.length || !within(r.url, blocked_domains)))
+        const shown = kept.slice(0, mode === 'extended' ? 20 : 10)
+        return shown.length ? shown : 'No results from those domains. Try other words or fewer domain limits.'
+      }
     }),
 
     WebFetch: tool({
@@ -520,11 +540,16 @@ export function coworkTools(ctx: ToolContext, listTools: () => ToolListing[] = (
       description: 'Load an installed skill by name and get its instructions (and the files it comes with).',
       inputSchema: z.object({ skill: z.string().min(1), args: z.string().optional() }),
       execute: async ({ skill, args }) => {
-        if (!ctx.skills) throw new Error('No skills are set up in this app.')
         const name = skill.replace(/^.*:/, '')
-        const loaded = ctx.skills.load(skill) ?? ctx.skills.load(name)
+        const loaded = ctx.skills ? (ctx.skills.load(skill) ?? ctx.skills.load(name)) : null
         if (!loaded) {
-          const installed = ctx.skills.list().filter((s) => s.enabled).map((s) => s.name)
+          // The skills the operating prompt lists that Deskmates provides itself (chrome-browser…).
+          const builtin = builtinSkill(name)
+          if (builtin) {
+            if (/^(chrome-browser|claude-in-chrome)$/i.test(name)) markChromeInstructionsGiven(ctx.taskId)
+            return { name: builtin.name, instructions: builtin.instructions, files: [], args: args ?? null }
+          }
+          const installed = ctx.skills?.list().filter((s) => s.enabled).map((s) => s.name) ?? []
           throw new Error(`No enabled skill named "${skill}". Installed: ${installed.join(', ') || 'none'}.`)
         }
         return { name: loaded.name, instructions: loaded.instructions, files: loaded.files, args: args ?? null }

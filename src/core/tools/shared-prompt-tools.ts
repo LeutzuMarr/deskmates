@@ -9,6 +9,7 @@ import { tool, type Tool, type ToolSet } from 'ai'
 import { approvalFor } from '../engine/approvals'
 import { promptToolSpecs } from '../engine/my-prompt'
 import { CHROME_TOOL_NAMES, chromeToolInfos } from './chrome'
+import { GUIDE_TOOL_NAMES, guideToolInfos } from '../engine/guides'
 
 /** One prompt tool as an MCP server lists it: the prompt's own description and JSON schema. */
 export interface PromptToolInfo {
@@ -17,37 +18,46 @@ export interface PromptToolInfo {
   inputSchema: Record<string, unknown>
 }
 
-/** Deskmates' own tools that agents outside the tool loop get too: the task list the user watches. */
-export const APP_TOOL_NAMES = ['update_plan'] as const
+/** Deskmates' own tools that agents outside the tool loop get too: the task list the user watches,
+ *  the operating prompt's other sections, and the guides read only when a task needs them. */
+export const APP_TOOL_NAMES = ['update_plan', 'read_prompt_section', ...GUIDE_TOOL_NAMES] as const
 
 const UPDATE_PLAN_INFO: PromptToolInfo = {
   name: 'update_plan',
   description:
-    'The task list the user watches at the end of the chat in Deskmates. For any request with more than one step, call it first with the whole plan (short steps, the one you start in_progress, the rest pending), and again each time a step finishes or the plan changes. Send the whole list every time.',
+    'The task list the user watches at the end of the chat in Deskmates. For any request with more than one step, call it first with the whole plan (short steps, the one you start in_progress, the rest pending), and again each time a step finishes or the plan changes. Send the whole list every time. A Chrome task may send domains and approach instead (the Claude in Chrome form).',
   inputSchema: {
     type: 'object',
     properties: {
       items: {
         type: 'array',
         items: { type: 'object', properties: { text: { type: 'string' }, status: { type: 'string', enum: ['pending', 'in_progress', 'done'] } }, required: ['text', 'status'] }
-      }
-    },
-    required: ['items']
+      },
+      domains: { type: 'array', items: { type: 'string' }, description: 'Chrome tasks: the sites you will visit' },
+      approach: { type: 'array', items: { type: 'string' }, description: 'Chrome tasks: the steps, in order' }
+    }
   }
 }
 
-/** The prompt's tools that have a schema, as the prompt describes them, plus the task list. */
+const READ_SECTION_INFO: PromptToolInfo = {
+  name: 'read_prompt_section',
+  description: "Read one section of the user's operating prompt, or one part of a section, by its title (from the index in your instructions). A tool's name gives that tool's full entry.",
+  inputSchema: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] }
+}
+
+/** The prompt's tools that have a schema, as the prompt describes them, plus Deskmates' own. */
 export function promptToolInfos(): PromptToolInfo[] {
-  const out: PromptToolInfo[] = [UPDATE_PLAN_INFO]
+  const out: PromptToolInfo[] = [UPDATE_PLAN_INFO, READ_SECTION_INFO, ...guideToolInfos()]
   for (const [name, spec] of promptToolSpecs()) {
     // A tool whose schema in the prompt isn't valid JSON is still listed, taking any arguments: the
     // prompt itself shows the agent what to send.
-    const schema = spec.schema && typeof spec.schema === 'object' ? (spec.schema as Record<string, unknown>) : { properties: {}, additionalProperties: true }
+    const { $schema: _drop, ...schema } = spec.schema && typeof spec.schema === 'object' ? (spec.schema as Record<string, unknown>) : { properties: {}, additionalProperties: true }
     out.push({ name, description: spec.description || `The ${name} tool from the operating prompt.`, inputSchema: { type: 'object', ...schema } })
   }
   // The user's own Chrome, under Claude in Chrome's names (core/tools/chrome.ts).
   out.push(...chromeToolInfos())
-  return out
+  const seen = new Set<string>()
+  return out.filter((info) => !seen.has(info.name) && Boolean(seen.add(info.name)))
 }
 
 /** Asks the user whether `agent` may run tool `name`; resolves true only on a yes. */

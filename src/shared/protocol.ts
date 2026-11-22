@@ -1,3 +1,4 @@
+import type { EffortLevel } from './effort'
 import type { RenderRequest, RenderResult, VideoRequest, VideoResult } from '../core/render/types'
 import type { FreebuffModelList, FreebuffStatus } from './freebuff'
 
@@ -116,6 +117,8 @@ export interface Settings {
   globalInstructions: string
   /** How every agent writes its replies. */
   responseStyle: ResponseStyle
+  /** How hard every agent thinks: the operating prompt's effort level (shared/effort.ts). */
+  effort: EffortLevel
   /** Base URL for the OpenAI-compatible provider (OpenRouter, Ollama, LM Studio…), ending in /v1. */
   compatibleBaseUrl: string
   /** Base URL of the local Ollama server's OpenAI-compatible API, ending in /v1. */
@@ -181,6 +184,7 @@ export const DEFAULT_SETTINGS: Settings = {
   defaultModel: null,
   globalInstructions: '',
   responseStyle: 'normal',
+  effort: 'medium',
   compatibleBaseUrl: 'https://openrouter.ai/api/v1',
   ollamaBaseUrl: 'http://localhost:11434/v1',
   lmstudioBaseUrl: 'http://localhost:1234/v1',

@@ -184,7 +184,7 @@ export function buildInstructions(input: BuildInstructionsInput): string {
   const parts: string[] = []
 
   // One prompt per tab: the Design tab reads claude-design.md, the Work tab the user's own prompt
-  // (my-prompt.md). Only bare facts about this setup follow it, so nothing competes with it.
+  // (prompts/fable/claude-fable-5.2.md). Only bare facts about this setup follow it, so nothing competes with it.
   const cli = isCliProvider(model.provider)
   const basePrompt = isDesign ? loadBasePrompt('design') : myPromptBrief(cli ? 'file' : 'tool', undefined, { promptTools: !cli ? true : model.provider === 'freebuff' || model.provider === 'opencode' ? 'mcp' : false })
   if (basePrompt) {

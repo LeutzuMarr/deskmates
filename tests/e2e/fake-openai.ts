@@ -16,6 +16,8 @@ export interface FakeReply {
 export interface FakeOpenAI {
   url: string
   requests: any[]
+  /** The summary-title requests, kept apart from the scripted steps. */
+  titles: any[]
   close(): Promise<void>
 }
 
@@ -44,6 +46,7 @@ function toolCallDelta(tc: FakeToolCall, index: number): unknown {
  */
 export async function startFakeOpenAI(steps: Array<(body: any) => FakeReply>): Promise<FakeOpenAI> {
   const requests: any[] = []
+  const titles: any[] = []
   let stepIndex = 0
 
   function readBody(req: IncomingMessage): Promise<any> {
@@ -132,6 +135,18 @@ export async function startFakeOpenAI(steps: Array<(body: any) => FakeReply>): P
 
       if (req.method === 'POST' && url.startsWith('/v1/chat/completions')) {
         const body = await readBody(req)
+        // A chat's summary title (engine/titles.ts) is answered here, outside the scripted steps.
+        const system = JSON.stringify((body as { messages?: Array<{ role?: string; content?: unknown }> }).messages?.find((m) => m.role === 'system')?.content ?? '')
+        if (system.includes('You name chats.')) {
+          titles.push(body)
+          // "Notes on <the user's first three words>": predictable, and still findable by those words.
+          const prompt = JSON.stringify((body as { messages?: Array<{ role?: string; content?: unknown }> }).messages?.find((m) => m.role === 'user')?.content ?? '')
+          const words = /The user wrote:\\n([^\\]+)/.exec(prompt)?.[1]?.split(' ').slice(0, 3).join(' ') ?? 'this chat'
+          const reply: FakeReply = { text: `Notes on ${words}` }
+          if ((body as { stream?: boolean }).stream) sendStream(res, reply)
+          else sendJson(res, reply)
+          return
+        }
         requests.push(body)
 
         const stepFn = steps[stepIndex]
@@ -162,6 +177,7 @@ export async function startFakeOpenAI(steps: Array<(body: any) => FakeReply>): P
   return {
     url,
     requests,
+    titles,
     close: () => new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())))
   }
 }

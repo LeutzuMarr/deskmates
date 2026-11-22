@@ -177,7 +177,7 @@ test('works on a folder end to end', async () => {
       }, projectDir)
 
       await clickRobust(page.getByRole('button', { name: 'Add project', exact: true }))
-      const dialog = page.locator('dialog')
+      const dialog = page.getByRole('dialog', { name: 'Add a project' })
       await expect(dialog).toBeVisible()
 
       await clickRobust(dialog.getByRole('button', { name: 'Browse…', exact: true }))

@@ -79,11 +79,11 @@ describe('memory documents', () => {
 })
 
 describe("the operating prompt's tools", () => {
-  it('reads every tool heading, keeping schemas that parse and marking the rest', () => {
+  it('reads every tool heading, repairing schemas pasted with unescaped quotes', () => {
     const specs = promptToolSpecs(join(dir, 'prompts', 'my-prompt', 'my-prompt.md'))
     expect([...specs.keys()]).toEqual(['create_file', 'memory_write', 'chart_display_v0', 'mcp__Gmail__send_message'])
     expect(specs.get('create_file')?.description).toBe('Create a new file with content.')
-    expect(specs.get('chart_display_v0')?.schema).toBeNull()
+    expect(specs.get('chart_display_v0')?.schema).toEqual({ description: 'has "bad" quotes' })
   })
 
   it('builds the tools the prompt names on top of the run’s own tools, and only those', async () => {

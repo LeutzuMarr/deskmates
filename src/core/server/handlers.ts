@@ -1,3 +1,4 @@
+import { EFFORT_LEVELS, isEffortLevel } from '../../shared/effort'
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import type { BrowserService } from '../browser/service'
 import { EMPTY_BROWSER_STATE, type SiteAnswer } from '../../shared/agent-browser'
@@ -218,6 +219,9 @@ export function createHandlers(services: HandlerServices): Handlers {
         if (!Number.isInteger(patch.maxSteps) || patch.maxSteps < 1 || patch.maxSteps > 200) {
           throw new Error('maxSteps must be a whole number between 1 and 200.')
         }
+      }
+      if (patch.effort !== undefined && !isEffortLevel(patch.effort)) {
+        throw new Error(`effort must be one of: ${EFFORT_LEVELS.join(', ')}.`)
       }
       if (patch.phoneAccess !== undefined && typeof patch.phoneAccess !== 'boolean') {
         throw new Error('phoneAccess must be true or false.')

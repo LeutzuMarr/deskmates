@@ -42,6 +42,8 @@ export interface SubagentRunRequest {
   tools: ToolSet
   /** Extra system context every child gets in addition to its own instruction. */
   instructions?: string
+  /** Step cap for each child (default SUBAGENT_STOP_STEPS). */
+  maxSteps?: number
   abortSignal?: AbortSignal
 }
 
@@ -93,7 +95,7 @@ async function runChild(model: LanguageModel, request: SubagentRunRequest, task:
       model,
       instructions,
       tools: request.tools,
-      stopWhen: isStepCount(SUBAGENT_STOP_STEPS)
+      stopWhen: isStepCount(request.maxSteps ?? SUBAGENT_STOP_STEPS)
     })
 
     const result = await agent.stream({

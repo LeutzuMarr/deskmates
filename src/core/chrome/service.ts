@@ -61,7 +61,13 @@ export interface ChromeDriver {
   wheel(tabId: number, x: number, y: number, dx: number, dy: number): Promise<void>
   insertText(tabId: number, text: string): Promise<void>
   key(tabId: number, key: string): Promise<void>
-  screenshot(tabId: number, region?: [number, number, number, number], scale?: number): Promise<Shot>
+  screenshot(tabId: number, region?: [number, number, number, number], scale?: number, format?: 'jpeg' | 'png'): Promise<Shot>
+  /** Resizes the Chrome window the tab is in. */
+  resizeWindow?(tabId: number, width: number, height: number): Promise<void>
+  /** Puts files into the file input `ref` points at (or the first one inside it). */
+  setFiles?(tabId: number, ref: string, paths: string[]): Promise<void>
+  /** Drops files on the page at (x, y), as dragging them from the desktop would. */
+  dropFiles?(tabId: number, x: number, y: number, paths: string[]): Promise<void>
   consoleMessages(tabId: number): ConsoleEntry[]
   clearConsole(tabId: number): void
   networkRequests(tabId: number): NetworkEntry[]
@@ -462,7 +468,7 @@ export class ChromeService implements ChromeDriver {
     await this.send(tabId, 'Input.dispatchKeyEvent', { ...base, type: 'keyUp' })
   }
 
-  async screenshot(tabId: number, region?: [number, number, number, number], scale?: number): Promise<Shot> {
+  async screenshot(tabId: number, region?: [number, number, number, number], scale?: number, format: 'jpeg' | 'png' = 'jpeg'): Promise<Shot> {
     await this.front(tabId)
     const view = await this.evaluate<{ width: number; height: number; dpr: number }>(tabId, VIEWPORT_SCRIPT)
     const [x0, y0, x1, y1] = region ?? [0, 0, view.width, view.height]
@@ -470,8 +476,33 @@ export class ChromeService implements ChromeDriver {
     const height = Math.max(1, y1 - y0)
     // Viewport screenshots come out in CSS pixels, so their coordinates are the ones clicks use.
     const zoom = scale ?? (region ? Math.min(4, 1280 / width) : 1)
-    const { data } = await this.send<{ data: string }>(tabId, 'Page.captureScreenshot', { format: 'jpeg', quality: 80, clip: { x: x0, y: y0, width, height, scale: zoom } }, 30_000)
+    const { data } = await this.send<{ data: string }>(tabId, 'Page.captureScreenshot', { format, ...(format === 'jpeg' ? { quality: 80 } : {}), clip: { x: x0, y: y0, width, height, scale: zoom } }, 30_000)
     return { data, width: Math.round(width * zoom), height: Math.round(height * zoom) }
+  }
+
+  async resizeWindow(tabId: number, width: number, height: number): Promise<void> {
+    const connection = await this.connect()
+    const { windowId } = await connection.send<{ windowId: number }>('Browser.getWindowForTarget', { targetId: this.targetOf(tabId) })
+    // A maximised or full-screen window has to become normal before it takes a size.
+    await connection.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'normal' } }).catch(() => undefined)
+    await connection.send('Browser.setWindowBounds', { windowId, bounds: { width: Math.round(width), height: Math.round(height) } })
+  }
+
+  async setFiles(tabId: number, ref: string, paths: string[]): Promise<void> {
+    const expression = `(() => { const R = window.__deskmatesRefs; const w = R && R.map.get(${JSON.stringify(ref)}); const el = w && w.deref(); if (!el || !el.isConnected) return null; if (el.matches && el.matches('input[type=file]')) return el; const inner = el.querySelector && el.querySelector('input[type=file]'); if (inner) return inner; const label = el.closest && el.closest('label'); const target = label && label.control; return target && target.matches('input[type=file]') ? target : null; })()`
+    const found = await this.send<{ result?: { objectId?: string; subtype?: string } }>(tabId, 'Runtime.evaluate', { expression, returnByValue: false })
+    const objectId = found.result?.objectId
+    if (!objectId || found.result?.subtype === 'null') throw new CdpError(`${ref} is not a file input, and has none inside it. Use read_page or find to get the file input's ref, or give a coordinate to drop the file there.`)
+    await this.send(tabId, 'DOM.enable').catch(() => undefined)
+    await this.send(tabId, 'DOM.setFileInputFiles', { files: paths, objectId })
+  }
+
+  async dropFiles(tabId: number, x: number, y: number, paths: string[]): Promise<void> {
+    await this.front(tabId)
+    const data = { items: [], files: paths, dragOperationsMask: 1 }
+    for (const type of ['dragEnter', 'dragOver', 'drop'] as const) {
+      await this.send(tabId, 'Input.dispatchDragEvent', { type, x, y, data })
+    }
   }
 
   consoleMessages(tabId: number): ConsoleEntry[] {

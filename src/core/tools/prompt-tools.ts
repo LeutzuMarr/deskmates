@@ -1,5 +1,5 @@
 /**
- * The tools the user's operating prompt (prompts/my-prompt/my-prompt.md) tells agents to use, under
+ * The tools the user's operating prompt (prompts/fable/claude-fable-5.2.md) tells agents to use, under
  * the names and with the inputs the prompt teaches. Each is built from the JSON schema in the
  * prompt's "Tools" section (see promptToolSpecs) and runs on Deskmates' own machinery: file and shell
  * tools, the web, a shared memory folder, past chats, MCP connectors, and inline widgets drawn in the
@@ -19,9 +19,11 @@ import type { ToolContext } from './context'
 import { callTool, nativePath } from './cowork'
 import { MemoryFiles } from './memory-files'
 import { webFetchText, webSearchResults } from './web'
-import { displayBody, imageGallery, saveWidget, widgetPage } from './widgets'
+import { displayBody, imageGallery, saveWidget, visualPage, widgetPage } from './widgets'
 import { WIDGET_TOOL_NAMES } from '../../shared/widgets'
 import { claudeDocsImplementations } from './claude-docs'
+import { fableImplementations } from './fable-tools'
+import { visualizeGuide } from '../engine/guides'
 import { join } from 'node:path'
 
 const USER_AGENT = 'Deskmates/1.0 (desktop assistant)'
@@ -182,7 +184,7 @@ function implementations(ctx: ToolContext, base: ToolSet): Record<string, Run> {
 
     image_search: async (input, { abortSignal }) => {
       const query = str(input.query)
-      const count = Math.min(Math.max(Number(input.max_results) || 4, 1), 12)
+      const count = Math.min(Math.max(Number(input.max_results) || 4, 3), 12)
       const body = (await getJson(`https://api.openverse.org/v1/images/?q=${encodeURIComponent(query)}&page_size=${count}`, abortSignal)) as { results?: Array<Record<string, unknown>> }
       const images = (body.results ?? []).map((r) => ({
         title: str(r.title),
@@ -208,19 +210,21 @@ function implementations(ctx: ToolContext, base: ToolSet): Record<string, Run> {
       const max = Math.min(Number(input.max_results) || 5, 10)
       // The 300 most recent chats: enough to find what the user means, without reading the whole history.
       const chats = ctx.chats.list().slice(0, 300).filter((chat) => chat.id !== ctx.taskId && (!input.within_conversation_id || chat.id === input.within_conversation_id))
-      const hits: Array<{ conversation_id: string; title: string; project: string; updated: string; excerpt: string; score: number }> = []
+      const hits: Array<{ conversation_id: string; title: string; project: string; updated: string; excerpt: string; page_token: string; score: number }> = []
       for (const chat of chats) {
         const turns = ctx.chats.turns(chat.id)
-        let best = { score: 0, excerpt: '' }
-        for (const turn of turns) {
+        let best = { score: 0, excerpt: '', index: 0 }
+        turns.forEach((turn, index) => {
           const lower = turn.text.toLowerCase()
           const score = words.filter((w) => lower.includes(w)).length + words.filter((w) => chat.title.toLowerCase().includes(w)).length
           if (score > best.score) {
             const at = Math.max(0, lower.indexOf(words.find((w) => lower.includes(w)) ?? '') - 120)
-            best = { score, excerpt: `${turn.role}: ${turn.text.slice(at, at + 400)}` }
+            best = { score, excerpt: `${turn.role}: ${turn.text.slice(at, at + 400)}`, index }
           }
-        }
-        if (best.score > 0) hits.push({ conversation_id: chat.id, title: chat.title, project: chat.project, updated: new Date(chat.updatedAt).toISOString(), excerpt: best.excerpt, score: best.score })
+        })
+        // The page opens at the question that led to the hit.
+        const start = best.index > 0 && turns[best.index]?.role === 'assistant' ? best.index - 1 : best.index
+        if (best.score > 0) hits.push({ conversation_id: chat.id, title: chat.title, project: chat.project, updated: new Date(chat.updatedAt).toISOString(), excerpt: best.excerpt, page_token: String(start), score: best.score })
       }
       hits.sort((a, b) => b.score - a.score)
       return hits.length ? hits.slice(0, max).map(({ score: _score, ...hit }) => hit) : 'No past chats match.'
@@ -241,16 +245,23 @@ function implementations(ctx: ToolContext, base: ToolSet): Record<string, Run> {
     },
     read_conversation: async (input) => {
       if (!ctx.chats) throw new Error('Past chats are not available in this run.')
-      const id = str(input.conversation_id)
+      const id = str(input.conversation_id) === 'current' ? ctx.taskId : str(input.conversation_id)
       const chat = ctx.chats.list().find((c) => c.id === id)
       if (!chat) throw new Error(`No chat with id ${id}. Use conversation_search or recent_chats for ids.`)
       const turns = ctx.chats.turns(id)
       const start = Number(input.page_token) || 0
       const max = Math.min(Number(input.max_turns) || 20, 50)
       const page = turns.slice(start, start + max)
-      return { title: chat.title, project: chat.project, turns: page.map((t) => ({ role: t.role, text: t.text.slice(0, 4000) })), next_page_token: start + max < turns.length ? String(start + max) : null }
+      return {
+        title: chat.title,
+        project: chat.project,
+        turns: page.map((t) => ({ role: t.role, text: t.text.slice(0, 4000) })),
+        next_page_token: start + max < turns.length ? String(start + max) : null,
+        prev_page_token: start > 0 ? String(Math.max(0, start - max)) : null
+      }
     },
     end_conversation: async () => ({ ended: true, note: 'The conversation is closed for this turn.' }),
+    ...fableImplementations(ctx),
 
     weather_fetch: async (input, { abortSignal }) => {
       const lat = Number(input.latitude)
@@ -337,7 +348,7 @@ function implementations(ctx: ToolContext, base: ToolSet): Record<string, Run> {
       return {
         shown: false,
         servers: found,
-        note: 'Deskmates has no install card for connectors. Ask the user with ask_user_input_v0 whether to add one; on yes, add it with add_mcp_server (a remote_url as an HTTP server, a package with the command that runs it), then tell them it is in the Connectors list.'
+        note: 'Deskmates has no install card for connectors. Ask the user (AskUserQuestion) whether to add one; on yes, add it with add_mcp_server (a remote_url as an HTTP server, a package with the command that runs it), then tell them it is in the Connectors list.'
       }
     },
     search_skills: async (input) => {
@@ -352,8 +363,8 @@ function implementations(ctx: ToolContext, base: ToolSet): Record<string, Run> {
       const matches = plugins.filter((p) => words.some((w) => p.name.toLowerCase().includes(w))).map((p) => ({ name: p.name, source: p.source }))
       return matches.length ? matches : { matches: [], note: 'No installed plugin matches. install_plugin can add one from a folder or a GitHub repo the user names.' }
     },
-    suggest_skills: async (input) => ({ shown: false, keywords: input.keywords, note: 'Deskmates has no install card for skills. Name the skill to the user and ask with ask_user_input_v0; on yes, install it with install_skill.' }),
-    suggest_plugin_install: async (input) => ({ shown: false, plugins: input.plugins, note: 'Deskmates has no install card for plugins. Name the plugin to the user and ask with ask_user_input_v0; on yes, install it with install_plugin.' }),
+    suggest_skills: async (input) => ({ shown: false, keywords: input.keywords, note: 'Deskmates has no install card for skills. Name the skill to the user and ask (AskUserQuestion); on yes, install it with install_skill.' }),
+    suggest_plugin_install: async (input) => ({ shown: false, plugins: input.plugins, note: 'Deskmates has no install card for plugins. Name the plugin to the user and ask (AskUserQuestion); on yes, install it with install_plugin.' }),
     suggest_research: async (input) => ({ shown: false, note: `Deskmates has no research button. If deeper research would help (${str(input.rationale)}), say so in one sentence and do it when the user asks.` }),
 
     ask_user_input_v0: async (input) => ({
@@ -371,7 +382,8 @@ function implementations(ctx: ToolContext, base: ToolSet): Record<string, Run> {
       return ctx.connectors.readResource(str(input.source), str(input.uri))
     },
 
-    mcp__visualize__read_me: async () =>
+    mcp__visualize__read_me: async (input) =>
+      visualizeGuide(Array.isArray(input.modules) ? input.modules.map(str) : []) ??
       [
         'Widgets you send with mcp__visualize__show_widget are drawn in the chat in a sandboxed frame that fits their height.',
         '- Send SVG (starting with <svg) or an HTML fragment; no <html>, <head> or <body> needed.',
@@ -381,13 +393,25 @@ function implementations(ctx: ToolContext, base: ToolSet): Record<string, Run> {
         '- sendPrompt is not available; links open in the browser.'
       ].join('\n'),
     mcp__visualize__show_widget: async (input) => {
+      if (!ctx.dataDir) throw new Error('Widgets are not set up in this run.')
       const code = str(input.widget_code)
       const title = str(input.title) || 'Widget'
-      return widget(title, /^\s*<svg/i.test(code) ? `<div class="card">${code}</div>` : code)
+      return saveWidget(ctx.dataDir, title, visualPage(title, code))
     },
     Artifact: async (input) => {
       const action = str(input.action) || 'publish'
-      if (action !== 'publish') return { note: `Deskmates keeps artifacts as files in the project; "${action}" isn't needed here. Use present_files to show a file again.` }
+      if (action === 'list') {
+        const { readdirSync } = await import('node:fs')
+        const pages = readdirSync(ctx.root).filter((name) => /\.html?$/i.test(name))
+        return { scope: str(input.scope) || 'mine', types: [], artifacts: pages, note: input.scope === 'types' ? 'Deskmates has no artifact types (Slides, Docs, Sheets, Design…): no types are listed, so make the page by hand as usual (or a Claude Docs document, or a file with the office tools).' : 'These are the project\'s HTML pages; any of them can be shown with Artifact (publish, with its file_path).' }
+      }
+      if (action === 'read' || action === 'open') {
+        const target = str(input.file_path) || str(input.path)
+        if (!target) return { note: `Deskmates artifacts are files in the project folder; claude.ai links can't be ${action === 'read' ? 'read' : 'opened'} here. Give file_path to ${action === 'read' ? 'read' : 'show'} one.` }
+        if (action === 'read') return callTool(need('Read'), { file_path: target })
+      } else if (action !== 'publish') {
+        return { note: `Deskmates keeps artifacts as files in the project; "${action}" isn't needed here. Use SendUserFile to show a file again.` }
+      }
       const path = str(input.file_path)
       if (!path) throw new Error('Artifact needs file_path: write the page to a file first, then publish it.')
       const abs = resolveInside(ctx.root, nativePath(path))
@@ -396,12 +420,33 @@ function implementations(ctx: ToolContext, base: ToolSet): Record<string, Run> {
       const content = readFileSync(abs, 'utf8')
       const title = str(input.title) || path
       const page = /\.md$/i.test(path) ? widgetPage(title, `<div class="card" style="white-space:pre-wrap">${content.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!)}</div>`) : content
-      return { ...widget(title, page, `Shown in the chat. Deskmates has no claude.ai link; the page is the file ${path} in the project folder.`), file: path }
+      return { ...widget(title, page, `Shown in the chat. Deskmates has no claude.ai link or gallery card; the page is the file ${path} in the project folder, so say so in one line instead of giving a link. To change it, edit the file and call Artifact again with the same path.`), file: path }
     }
   }
   for (const name of DISPLAY_TOOLS) impl[name] = display(name)
   Object.assign(impl, claudeDocsImplementations(ctx, need))
+  // The Fable prompt's names for tools Deskmates had under the older prompt's names.
+  for (const [name, older] of Object.entries(RENAMED)) if (!impl[name] && impl[older]) impl[name] = impl[older]!
   return impl
+}
+
+/** Fable 5.2's names → the names the older prompt used for the same tool. */
+const RENAMED: Record<string, string> = {
+  SearchMcpRegistry: 'search_mcp_registry',
+  SearchPlugins: 'search_plugins',
+  SuggestConnectors: 'suggest_connectors',
+  SuggestPluginInstall: 'suggest_plugin_install',
+  SuggestSkills: 'suggest_skills'
+}
+
+/** Servers whose tools the Fable prompt names with an mcp__server__ prefix, for tools Deskmates has unprefixed. */
+const PREFIXED_SERVERS = /^mcp__(memory|widgets|claude_ai)__(.+)$/
+
+/** The implementation for a prompt tool's name: its own, or the unprefixed one it stands for. */
+export function implementationName(name: string, known: (candidate: string) => boolean): string | null {
+  if (known(name)) return name
+  const bare = PREFIXED_SERVERS.exec(name)?.[2]
+  return bare && known(bare) ? bare : null
 }
 
 /** Why a tool the prompt names can't run here yet, in words the model can pass on to the user. */
@@ -423,11 +468,15 @@ export function promptTools(ctx: ToolContext, base: ToolSet): ToolSet {
   const out: ToolSet = {}
   // Every tool the prompt describes exists in the run, so the model never has to imagine one. A tool
   // whose service isn't set up (Google before sign-in) answers with what to do, instead of being absent.
-  for (const [name, spec] of specs) {
+  for (const [name] of specs) {
     if (impl[name] || name in base) continue
-    impl[name] = async () => {
-      throw new Error(unavailableReason(name))
-    }
+    // mcp__widgets__chart_display_v0 is chart_display_v0, mcp__memory__memory_read is memory_read…
+    const bare = implementationName(name, (candidate) => Boolean(impl[candidate]))
+    impl[name] = bare
+      ? impl[bare]!
+      : async () => {
+          throw new Error(unavailableReason(name))
+        }
   }
   for (const [name, run] of Object.entries(impl)) {
     const spec = specs.get(name)
