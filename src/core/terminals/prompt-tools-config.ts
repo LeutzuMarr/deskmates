@@ -9,7 +9,7 @@
  * OpenCode gets it through OPENCODE_CONFIG_CONTENT on the servers Deskmates starts, so the user's
  * own opencode.json is untouched.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -27,8 +27,37 @@ function commandLine(command: string): { command: string; args: string[] } {
 }
 
 /**
- * Adds (or refreshes) the server in ~/.agents/mcp.json. Leaves the file alone when it isn't valid
- * JSON, so a hand-edited file is never clobbered. Returns what happened, for the log.
+ * Takes Deskmates' server back out of ~/.agents/mcp.json, which every Freebuff session on the PC
+ * reads (the user's own ones too). Deskmates added it on Nov 21, 2026; Freebuff is left as it was
+ * before. Only Deskmates' own entry goes; a file that held nothing else is removed, and anything
+ * else the user keeps there stays. Returns what happened, for the log.
+ */
+export function removeFreebuffPromptTools(home = homedir()): 'removed' | 'absent' | 'skipped' {
+  const file = join(home, '.agents', 'mcp.json')
+  if (!existsSync(file)) return 'absent'
+  let config: { mcpServers?: Record<string, unknown> } & Record<string, unknown>
+  try {
+    const raw = readFileSync(file, 'utf8').replace(/^﻿/, '')
+    config = raw.trim() ? JSON.parse(raw) : {}
+    if (!config || typeof config !== 'object' || Array.isArray(config)) return 'skipped'
+  } catch {
+    return 'skipped'
+  }
+  const servers = config.mcpServers && typeof config.mcpServers === 'object' ? { ...config.mcpServers } : {}
+  if (!(PROMPT_MCP_KEY in servers)) return 'absent'
+  delete servers[PROMPT_MCP_KEY]
+  const { mcpServers: _old, ...rest } = config
+  if (Object.keys(servers).length === 0 && Object.keys(rest).length === 0) {
+    rmSync(file, { force: true })
+    return 'removed'
+  }
+  writeFileSync(file, `${JSON.stringify(Object.keys(servers).length ? { ...rest, mcpServers: servers } : rest, null, 2)}\n`, 'utf8')
+  return 'removed'
+}
+
+/**
+ * No longer used: Deskmates doesn't add itself to Freebuff's config any more (see
+ * removeFreebuffPromptTools). Kept for the tests of the file handling.
  */
 export function ensureFreebuffPromptTools(command: string, home = homedir()): 'written' | 'unchanged' | 'skipped' {
   const dir = join(home, '.agents')

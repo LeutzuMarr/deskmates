@@ -173,9 +173,9 @@ export function deskmatesToolsGuide(kind: 'work' | 'design', cli: boolean, baseP
 
 /** How an agent on this provider sets the task list: its own tool, the deskmates-prompt server
  *  (Freebuff, OpenCode), or not at all (Antigravity, which has neither). */
-function planReach(provider: ProviderId): 'tool' | 'mcp' | 'none' {
+function planReach(provider: ProviderId): 'tool' | 'mcp' | 'command' | 'none' {
   if (!isCliProvider(provider)) return 'tool'
-  return provider === 'freebuff' || provider === 'opencode' ? 'mcp' : 'none'
+  return provider === 'opencode' ? 'mcp' : provider === 'freebuff' ? 'command' : 'none'
 }
 
 /** What each response style asks for; Normal adds nothing. */
@@ -195,7 +195,7 @@ export function buildInstructions(input: BuildInstructionsInput): string {
   // One prompt per tab: the Design tab reads claude-design.md, the Work tab the user's own prompt
   // (prompts/fable/claude-fable-5.2.md). Only bare facts about this setup follow it, so nothing competes with it.
   const cli = isCliProvider(model.provider)
-  const basePrompt = isDesign ? loadBasePrompt('design') : myPromptBrief(cli ? 'file' : 'tool', undefined, { promptTools: !cli ? true : model.provider === 'freebuff' || model.provider === 'opencode' ? 'mcp' : false })
+  const basePrompt = isDesign ? loadBasePrompt('design') : myPromptBrief(cli ? 'file' : 'tool', undefined, { promptTools: !cli ? true : model.provider === 'opencode' ? 'mcp' : model.provider === 'freebuff' ? 'command' : false, ...(input.agentCommand ? { command: input.agentCommand } : {}) })
   if (basePrompt) {
     parts.push(basePrompt)
     parts.push('')

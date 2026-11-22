@@ -45,7 +45,7 @@ import { RemoteAccess, type RemoteConfig } from './phone/remote'
 import { DuoService } from './duo/service'
 import { prepareDuoWorkspace } from './duo/workspace'
 import { duoTools } from './tools/duo'
-import { ensureFreebuffPromptTools, setPromptToolsCommand } from './terminals/prompt-tools-config'
+import { removeFreebuffPromptTools, setPromptToolsCommand } from './terminals/prompt-tools-config'
 import { webFetchText, webSearchResults } from './tools/web'
 import { myPromptBrief, myPromptPath, promptSectionTool } from './engine/my-prompt'
 import { setEffortSource, setThinkingSource } from './engine/effort'
@@ -239,8 +239,10 @@ async function main(): Promise<void> {
   setPromptToolsCommand(commandPath)
   try {
     // Test runs use a throwaway data folder: they must not point the user's Freebuff at it.
-    const outcome = process.env.DESKMATES_NO_HOME_CONFIG === '1' ? 'unchanged' : ensureFreebuffPromptTools(commandPath)
-    if (outcome === 'skipped') console.warn("[core] ~/.agents/mcp.json isn't valid JSON, so Freebuff wasn't given the prompt's tools. Fix or remove that file.")
+    // Freebuff is left as it was before Deskmates touched it: Deskmates' tool server, which it once
+    // added to ~/.agents/mcp.json (read by every Freebuff session on the PC), is taken back out.
+    const outcome = process.env.DESKMATES_NO_HOME_CONFIG === '1' ? 'absent' : removeFreebuffPromptTools()
+    if (outcome === 'skipped') console.warn("[core] ~/.agents/mcp.json isn't valid JSON, so Deskmates couldn't take its entry out. Remove the deskmates-prompt entry by hand.")
   } catch (error) {
     console.error("[core] couldn't give Freebuff the prompt's tools", error)
   }
