@@ -1253,3 +1253,55 @@ dialog:modal {
 .step-spinner {
   color: var(--clay);
 }
+
+/* ---- Images attached to a message (in the box, and in the sent bubble) ---- */
+.attach-thumb {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--rule);
+  background: var(--oat);
+}
+.attach-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.attach-thumb-remove {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 999px;
+  background: color-mix(in srgb, #000 62%, transparent);
+  color: #fff;
+  cursor: pointer;
+}
+.attach-thumb-remove:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+.sent-images {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.sent-images img {
+  min-width: 56px;
+  min-height: 56px;
+  max-width: 220px;
+  max-height: 180px;
+  background: var(--oat);
+  border-radius: 12px;
+  border: 1px solid var(--rule);
+  object-fit: cover;
+}

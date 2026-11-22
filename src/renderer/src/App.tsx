@@ -10,6 +10,7 @@ import { ExtrasSidebar } from './components/ExtrasSidebar'
 import { Toast } from './components/Toast'
 import { BrowserPanel } from './components/BrowserPanel'
 import { CommandPalette } from './components/CommandPalette'
+import { ShortcutsDialog } from './components/ShortcutsDialog'
 import { usePrefs } from './lib/prefs'
 import { useGlobalShortcuts } from './lib/shortcuts'
 import { HomeView } from './views/HomeView'
@@ -88,6 +89,7 @@ export function App() {
       <BrowserPanel docked={view.name === 'task'} />
       <Toast />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      <ShortcutsDialog />
     </div>
   )
 }

@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, useId, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
 import type { ClipboardEvent, DragEvent, KeyboardEvent } from 'react'
-import { ArrowUp, Square, X } from 'lucide-react'
+import { ArrowUp, Paperclip, Square, X } from 'lucide-react'
 import { Glass } from 'glisse'
 import { core } from '../lib/rpc'
 import { useStore } from '../lib/store'
@@ -8,6 +8,8 @@ import { concentricVars, decorateWithSelection } from '../lib/design'
 import type { Selection } from '../lib/design'
 import { FOCUS_COMPOSER_EVENT } from '../lib/shortcuts'
 import { ModelPicker } from './ModelPicker'
+import { ContextMeter } from './ContextMeter'
+import { BUILT_IN_COMMANDS, runBuiltIn } from '../lib/commands'
 
 /** Unsent text per task (or per project's new-task box), so switching away and back keeps a draft. */
 const drafts = new Map<string, string>()
@@ -101,10 +103,14 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       try {
         const found =
           mention.kind === 'skill'
-            ? (await core.call('skills.list', {}))
-                .filter((skill) => skill.enabled && skill.name.toLowerCase().includes(mention.query.toLowerCase()))
-                .map((skill) => skill.name)
-                .slice(0, 30)
+            ? [
+                // The app's own commands first, then installed skills.
+                ...BUILT_IN_COMMANDS.map((c) => c.name.slice(1)).filter((name) => name.startsWith(mention.query.toLowerCase())),
+                ...(await core.call('skills.list', {}))
+                  .filter((skill) => skill.enabled && skill.name.toLowerCase().includes(mention.query.toLowerCase()))
+                  .map((skill) => skill.name)
+                  .slice(0, 30)
+              ]
             : await core.call('projects.findFiles', { projectId, query: mention.query })
         if (!cancelled) {
           setMenuItems(found)
@@ -186,16 +192,57 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     return true
   }
 
+  /** Pictures attached to the next message (pasted, dropped or picked), as Claude takes them. */
+  const [images, setImages] = useState<Array<{ dataUrl: string; name: string }>>([])
+  const imageInputRef = useRef<HTMLInputElement>(null)
+  const isImage = (file: File): boolean => /^image\/(png|jpeg|gif|webp)$/.test(file.type)
+  const attachImages = (files: File[]): void => {
+    const room = 6 - images.length
+    if (room <= 0) {
+      showToast('A message can carry at most 6 images.')
+      return
+    }
+    for (const file of files.slice(0, room)) {
+      if (file.size > 8 * 1024 * 1024) {
+        showToast(`${file.name || 'That image'} is larger than 8 MB.`)
+        continue
+      }
+      const reader = new FileReader()
+      reader.onload = () => {
+        const dataUrl = typeof reader.result === 'string' ? reader.result : ''
+        if (dataUrl) setImages((current) => (current.length >= 6 ? current : [...current, { dataUrl, name: file.name || 'Pasted image' }]))
+      }
+      reader.readAsDataURL(file)
+    }
+  }
+
   const onDrop = (event: DragEvent<HTMLDivElement>): void => {
     setDragging(false)
     if (event.dataTransfer.files.length === 0) return
     event.preventDefault()
-    if (!insertPaths(event.dataTransfer.files)) showToast('Only files saved on this PC can be dropped here.')
+    // Pictures are attached for the model to see; other files go in as their paths.
+    const all = Array.from(event.dataTransfer.files)
+    const pictures = all.filter(isImage)
+    if (pictures.length) attachImages(pictures)
+    const others = all.filter((file) => !isImage(file))
+    if (others.length) {
+      const list = new DataTransfer()
+      others.forEach((file) => list.items.add(file))
+      if (!insertPaths(list.files)) showToast('Only files saved on this PC can be dropped here.')
+    }
   }
 
   const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>): void => {
-    // Files copied in Explorer arrive with a path; a pasted screenshot has none and is left to the default.
-    if (event.clipboardData.files.length > 0 && insertPaths(event.clipboardData.files)) event.preventDefault()
+    const files = Array.from(event.clipboardData.files)
+    if (files.length === 0) return
+    // A pasted screenshot or copied picture is attached; files copied in Explorer go in as paths.
+    const pictures = files.filter(isImage)
+    if (pictures.length) {
+      event.preventDefault()
+      attachImages(pictures)
+      return
+    }
+    if (insertPaths(event.clipboardData.files)) event.preventDefault()
   }
 
   useEffect(() => {
@@ -206,21 +253,31 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   }, [text])
 
   const send = async (): Promise<void> => {
-    const message = text.trim()
-    if (!message || busy || awaitingApproval) return
+    const typed = text.trim()
+    if ((!typed && images.length === 0) || busy || awaitingApproval) return
+    // The app's own commands, as Claude has them; they never reach the agent.
+    const command = BUILT_IN_COMMANDS.find((c) => c.name === typed.toLowerCase())
+    if (command) {
+      setText('')
+      runBuiltIn(command.name, { taskId, projectId })
+      return
+    }
+    const message = typed || 'Here is an image.'
     const outgoing = selection ? decorateWithSelection(selection, message) : message
+    const attached = images.map(({ dataUrl, name }) => ({ dataUrl, name }))
     setBusy(true)
     try {
       if (taskId !== undefined) {
-        await core.call('tasks.send', { id: taskId, text: outgoing })
+        await core.call('tasks.send', { id: taskId, text: outgoing, ...(attached.length ? { images: attached } : {}) })
       } else {
         const created = await createTask(projectId)
         if (!created) return
-        await core.call('tasks.send', { id: created.id, text: outgoing })
+        await core.call('tasks.send', { id: created.id, text: outgoing, ...(attached.length ? { images: attached } : {}) })
         if (project?.kind === 'design') navigate({ name: 'design', projectId })
         else navigate({ name: 'task', projectId, taskId: created.id })
       }
       setText('')
+      setImages([])
       historyAt.current = -1
       onClearSelection?.()
     } catch (error) {
@@ -390,6 +447,23 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         }}
         onDrop={onDrop}
       >
+        {images.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-2 px-1 pt-1" aria-label="Attached images">
+            {images.map((image, index) => (
+              <div key={`${index}-${image.name}`} className="attach-thumb">
+                <img src={image.dataUrl} alt={image.name} />
+                <button
+                  type="button"
+                  className="attach-thumb-remove"
+                  aria-label={`Remove ${image.name}`}
+                  onClick={() => setImages((current) => current.filter((_, i) => i !== index))}
+                >
+                  <X size={11} aria-hidden="true" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         <label htmlFor={inputId} className="sr-only">
           Message
         </label>
@@ -422,7 +496,28 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         />
         <div className="mt-2 flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
+            <button
+              type="button"
+              className="copy-btn h-8 w-8 justify-center p-0"
+              aria-label="Attach images"
+              title="Attach images (or paste a screenshot)"
+              onClick={() => imageInputRef.current?.click()}
+            >
+              <Paperclip size={15} aria-hidden="true" />
+            </button>
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/gif,image/webp"
+              multiple
+              className="hidden"
+              onChange={(event) => {
+                attachImages(Array.from(event.target.files ?? []))
+                event.target.value = ''
+              }}
+            />
             <ModelPicker projectId={projectId} />
+            <ContextMeter taskId={taskId} />
             {showSuggestion && (
               <span className="truncate text-[12px] text-ink-faint">
                 <kbd className="kbd">Tab</kbd> to use the suggestion
@@ -444,7 +539,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             <button
               type="button"
               aria-label="Send"
-              disabled={!text.trim() || awaitingApproval || busy}
+              disabled={(!text.trim() && images.length === 0) || awaitingApproval || busy}
               className="send-btn r-concentric flex h-8 w-9 items-center justify-center bg-clay text-white disabled:cursor-not-allowed disabled:opacity-50 enabled:hover:bg-clay-deep"
               style={concentricVars(8)}
               onClick={() => void send()}

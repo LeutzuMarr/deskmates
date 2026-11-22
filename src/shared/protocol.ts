@@ -108,9 +108,14 @@ export interface Appearance {
   workingAnimation: AnimationChoice | null
 }
 
+/** How replies are written, as Claude's styles: the default, shorter, more teaching, or more formal. */
+export type ResponseStyle = 'normal' | 'concise' | 'explanatory' | 'formal'
+
 export interface Settings {
   defaultModel: ModelRef | null
   globalInstructions: string
+  /** How every agent writes its replies. */
+  responseStyle: ResponseStyle
   /** Base URL for the OpenAI-compatible provider (OpenRouter, Ollama, LM Studio…), ending in /v1. */
   compatibleBaseUrl: string
   /** Base URL of the local Ollama server's OpenAI-compatible API, ending in /v1. */
@@ -175,6 +180,7 @@ export interface PhoneInfo {
 export const DEFAULT_SETTINGS: Settings = {
   defaultModel: null,
   globalInstructions: '',
+  responseStyle: 'normal',
   compatibleBaseUrl: 'https://openrouter.ai/api/v1',
   ollamaBaseUrl: 'http://localhost:11434/v1',
   lmstudioBaseUrl: 'http://localhost:1234/v1',
@@ -239,6 +245,8 @@ export interface Task {
   /** Risky tools the user chose to always allow for this task. */
   autoApprove: string[]
   error: string | null
+  /** Kept at the top of the project's chats. */
+  pinned: boolean
   createdAt: number
   updatedAt: number
 }
@@ -258,7 +266,8 @@ export interface ToolItem {
 }
 
 export type TimelineItem =
-  | { kind: 'user'; id: string; at: number; text: string }
+  /** images: data: URLs of the pictures sent with the message. */
+  | { kind: 'user'; id: string; at: number; text: string; images?: string[] }
   | { kind: 'assistant'; id: string; at: number; text: string }
   /** The model's reasoning before it answers or acts, for models that share it (Gemini 2.5+, DeepSeek R1 and the like). */
   | { kind: 'thinking'; id: string; at: number; text: string }
@@ -654,11 +663,16 @@ export interface RpcMethods {
   'tasks.create': { params: { projectId: string }; result: Task }
   'tasks.get': { params: { id: string }; result: { task: Task; timeline: TimelineItem[] } }
   'tasks.rename': { params: { id: string; title: string }; result: Task }
+  /** Pins a chat to the top of its project's list, or unpins it. */
+  'tasks.pin': { params: { id: string; pinned: boolean }; result: Task }
   'tasks.delete': { params: { id: string }; result: null }
-  'tasks.send': { params: { id: string; text: string }; result: null }
+  /** Sends a message; images are data: URLs of pasted or dropped pictures (at most 6). */
+  'tasks.send': { params: { id: string; text: string; images?: Array<{ dataUrl: string; name?: string }> }; result: null }
   'tasks.stop': { params: { id: string }; result: null }
   /** Messages sent while the task works, waiting to go out when its reply ends. */
   'tasks.queued': { params: { id: string }; result: string[] }
+  /** How full the model's context was after the task's last step. */
+  'tasks.context': { params: { id: string }; result: { used: number; window: number } | null }
   /** Edit (with text) or Retry (without): replaces the last message and its reply, then sends again. */
   'tasks.resend': { params: { id: string; text?: string }; result: null }
   /** The likely next message for the task, when its last reply ended (Tab accepts it). */
@@ -935,6 +949,8 @@ export type CoreEvent =
   | { type: 'task.item'; taskId: string; item: TimelineItem }
   | { type: 'task.timeline'; taskId: string; timeline: TimelineItem[] }
   | { type: 'task.queued'; taskId: string; queued: string[] }
+  /** Tokens the model read in the task's last step, against its context window. */
+  | { type: 'task.context'; taskId: string; used: number; window: number }
   /** The likely next message once a reply ends (null clears it). */
   | { type: 'task.suggestion'; taskId: string; text: string | null }
   | { type: 'changes.updated'; taskId: string; changes: FileChange[] }

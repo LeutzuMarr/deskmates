@@ -93,7 +93,8 @@ export const MIGRATIONS: string[] = [
      created_at INTEGER NOT NULL, decided_at INTEGER, sent_at INTEGER);
    CREATE TABLE duo_todos (id TEXT PRIMARY KEY, text TEXT NOT NULL, due TEXT, done INTEGER NOT NULL DEFAULT 0, source TEXT NOT NULL, created_at INTEGER NOT NULL);
    CREATE TABLE duo_sent (domain TEXT NOT NULL, company TEXT NOT NULL, kind TEXT NOT NULL, at INTEGER NOT NULL);
-   CREATE INDEX duo_sent_by_domain ON duo_sent(domain);`
+   CREATE INDEX duo_sent_by_domain ON duo_sent(domain);`,
+  `ALTER TABLE tasks ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;`
 ]
 
 export function openDatabase(file: string): DatabaseSync {

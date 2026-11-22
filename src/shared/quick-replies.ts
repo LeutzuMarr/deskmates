@@ -46,10 +46,11 @@ export function yesNoQuestion(text: string): string | null {
 }
 
 export function quickReplies(text: string): QuickReplies | null {
-  const listed = listedReplies(text)
-  if (listed) return listed
+  // A closing yes/no question ("Want me to make a bigger one?") is answered Yes or No, even after a
+  // bulleted list: those bullets are facts the reply gave, not the options.
   const question = yesNoQuestion(text)
-  return question ? { question, options: ['Yes', 'No'] } : null
+  if (question) return { question, options: ['Yes', 'No'] }
+  return listedReplies(text)
 }
 
 function listedReplies(text: string): QuickReplies | null {

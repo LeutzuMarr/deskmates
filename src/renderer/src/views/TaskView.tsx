@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { KeyboardEvent } from 'react'
-import { ListChecks, Undo2 } from 'lucide-react'
+import { Download, ListChecks, Undo2 } from 'lucide-react'
+import { exportChat } from '../lib/commands'
 import { PlanCard, PlanRow } from '../components/PlanCard'
 import { core } from '../lib/rpc'
 import { useStore } from '../lib/store'
@@ -149,6 +150,10 @@ export function TaskView({ projectId, taskId }: { projectId: string; taskId: str
           {project && model?.provider === 'freebuff' && <FreebuffStatusLine folder={project.folder} modelId={model.modelId} />}
           {stats && <DiffChip stats={stats} />}
           <DockBrowserButton />
+          <button type="button" className="btn btn-outline" title="Save this chat as a Markdown file" onClick={() => exportChat(taskId)}>
+            <Download size={14} aria-hidden="true" className="mr-1.5" />
+            Export
+          </button>
           <button
             type="button"
             aria-expanded={panelOpen}

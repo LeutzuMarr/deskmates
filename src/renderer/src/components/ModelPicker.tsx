@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { OPEN_MODEL_PICKER_EVENT } from '../lib/commands'
 import { Check, ChevronDown, Loader2 } from 'lucide-react'
 import { core } from '../lib/rpc'
 import { useStore } from '../lib/store'
@@ -30,6 +31,12 @@ export function ModelPicker({ projectId }: { projectId: string }) {
   const [loadError, setLoadError] = useState<string | null>(null)
   const filterRef = useRef<HTMLInputElement>(null)
   const menuRef = useDismissableMenu<HTMLDivElement>(open, () => setOpen(false))
+  // /model in the message box opens this menu.
+  useEffect(() => {
+    const show = (): void => setOpen(true)
+    window.addEventListener(OPEN_MODEL_PICKER_EVENT, show)
+    return () => window.removeEventListener(OPEN_MODEL_PICKER_EVENT, show)
+  }, [])
 
   const current: ModelRef | null = project?.model ?? defaultModel
   const provider = current?.provider

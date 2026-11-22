@@ -10,7 +10,7 @@ import { setPrefs, usePrefs } from '../lib/prefs'
 import { DEFAULT_SETTINGS, PROVIDERS, PROVIDER_LABELS, isCliProvider, isLocalProvider } from '../../../shared/protocol'
 import { freebuffModelLabel } from '../../../shared/freebuff'
 import type { ThemeChoice } from '../../../shared/desktop-api'
-import type { Appearance, PcCloudConnection, PcHostKind, PhoneInfo, ProviderId } from '../../../shared/protocol'
+import type { Appearance, PcCloudConnection, PcHostKind, PhoneInfo, ProviderId, ResponseStyle } from '../../../shared/protocol'
 
 type LocalUrlField = 'ollamaBaseUrl' | 'lmstudioBaseUrl'
 const LOCAL_URL_FIELD: Partial<Record<ProviderId, LocalUrlField>> = { ollama: 'ollamaBaseUrl', lmstudio: 'lmstudioBaseUrl' }
@@ -452,6 +452,35 @@ export function SettingsView() {
               >
                 Save default model
               </button>
+            </div>
+          </div>
+        </section>
+
+        <section className="mt-8">
+          <h2 className="caption">Response style</h2>
+          <div className="mt-3 rounded-3xl border border-rule bg-card p-4">
+            <div className="field">
+              <label className="field-label" htmlFor="response-style">
+                How every agent writes its replies
+              </label>
+              <select
+                id="response-style"
+                className="select"
+                value={settings?.responseStyle ?? 'normal'}
+                onChange={async (event) => {
+                  try {
+                    await core.call('settings.update', { responseStyle: event.target.value as ResponseStyle })
+                    showToast('Response style saved')
+                  } catch (error) {
+                    showToast(`Couldn't save the style: ${error instanceof Error ? error.message : String(error)}`)
+                  }
+                }}
+              >
+                <option value="normal">Normal: the default</option>
+                <option value="concise">Concise: shorter, straight to the point</option>
+                <option value="explanatory">Explanatory: teaches as it goes</option>
+                <option value="formal">Formal: clear and professional</option>
+              </select>
             </div>
           </div>
         </section>

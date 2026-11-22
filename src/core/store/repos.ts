@@ -163,18 +163,19 @@ const toTask = (r: Row): Task => ({
   plan: JSON.parse(r.plan as string) as PlanItem[],
   autoApprove: JSON.parse(r.auto_approve as string) as string[],
   error: (r.error as string | null) ?? null,
+  pinned: Number(r.pinned ?? 0) === 1,
   createdAt: r.created_at as number,
   updatedAt: r.updated_at as number
 })
 
-export type TaskPatch = Partial<Pick<Task, 'title' | 'status' | 'plan' | 'autoApprove' | 'error'>>
+export type TaskPatch = Partial<Pick<Task, 'title' | 'status' | 'plan' | 'autoApprove' | 'error' | 'pinned'>>
 
 export class TasksRepo {
   constructor(private readonly db: DatabaseSync) {}
 
   list(projectId: string): Task[] {
     return (
-      this.db.prepare('SELECT * FROM tasks WHERE project_id = ? ORDER BY updated_at DESC').all(projectId) as Row[]
+      this.db.prepare('SELECT * FROM tasks WHERE project_id = ? ORDER BY pinned DESC, updated_at DESC').all(projectId) as Row[]
     ).map(toTask)
   }
 
@@ -201,9 +202,15 @@ export class TasksRepo {
   update(id: string, patch: TaskPatch): Task {
     const next: Task = { ...this.require(id), ...definedOnly(patch), updatedAt: Date.now() }
     this.db
-      .prepare('UPDATE tasks SET title = ?, status = ?, plan = ?, auto_approve = ?, error = ?, updated_at = ? WHERE id = ?')
-      .run(next.title, next.status, JSON.stringify(next.plan), JSON.stringify(next.autoApprove), next.error, next.updatedAt, id)
+      .prepare('UPDATE tasks SET title = ?, status = ?, plan = ?, auto_approve = ?, error = ?, pinned = ?, updated_at = ? WHERE id = ?')
+      .run(next.title, next.status, JSON.stringify(next.plan), JSON.stringify(next.autoApprove), next.error, next.pinned ? 1 : 0, next.updatedAt, id)
     return next
+  }
+
+  /** Pins or unpins a chat without touching its updated time (pinning isn't activity). */
+  setPinned(id: string, pinned: boolean): Task {
+    this.db.prepare('UPDATE tasks SET pinned = ? WHERE id = ?').run(pinned ? 1 : 0, id)
+    return this.require(id)
   }
 
   delete(id: string): void {
@@ -227,15 +234,20 @@ export class TasksRepo {
    * Drops the task's last user message and everything after it (for Edit and Retry), and returns
    * that message's text, or null when there is no user message.
    */
-  dropFromLastUserMessage(id: string): string | null {
+  dropFromLastUserMessage(id: string): { text: string; images: Array<{ dataUrl: string }> } | null {
     const rows = this.db.prepare('SELECT seq, body FROM messages WHERE task_id = ? ORDER BY seq').all(id) as Array<{ seq: number; body: string }>
     for (let i = rows.length - 1; i >= 0; i--) {
       const message = JSON.parse(rows[i]!.body) as ModelMessage
       if (message.role !== 'user') continue
       const content = message.content as unknown
-      const text = typeof content === 'string' ? content : Array.isArray(content) ? content.map((part) => (part && typeof part === 'object' && 'text' in part ? String((part as { text: unknown }).text) : '')).join('\n') : ''
+      const parts = Array.isArray(content) ? (content as Array<Record<string, unknown>>) : []
+      const text = typeof content === 'string' ? content : parts.filter((part) => part?.type === 'text').map((part) => String(part.text ?? '')).join('\n')
+      // The message's images go out again with it (Retry, or Edit of its text).
+      const images = parts
+        .filter((part) => part?.type === 'image' && typeof part.image === 'string')
+        .map((part) => ({ dataUrl: `data:${String(part.mediaType ?? 'image/png')};base64,${String(part.image)}` }))
       this.db.prepare('DELETE FROM messages WHERE task_id = ? AND seq >= ?').run(id, rows[i]!.seq)
-      return text
+      return { text, images }
     }
     return null
   }

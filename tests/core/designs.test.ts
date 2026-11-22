@@ -441,7 +441,11 @@ describe('the kind migration', () => {
     const old = new DatabaseSync(file)
     old.exec(
       `CREATE TABLE projects (
-         id TEXT PRIMARY KEY, name TEXT NOT NULL, folder TEXT NOT NULL, model TEXT, created_at INTEGER NOT NULL);`
+         id TEXT PRIMARY KEY, name TEXT NOT NULL, folder TEXT NOT NULL, model TEXT, created_at INTEGER NOT NULL);
+       CREATE TABLE tasks (
+         id TEXT PRIMARY KEY, project_id TEXT NOT NULL, title TEXT NOT NULL, status TEXT NOT NULL,
+         plan TEXT NOT NULL DEFAULT '[]', auto_approve TEXT NOT NULL DEFAULT '[]', error TEXT,
+         created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);`
     )
     old.prepare('INSERT INTO projects (id, name, folder, model, created_at) VALUES (?, ?, ?, NULL, ?)').run(
       'p1', 'Old project', 'C:\\old', 1000

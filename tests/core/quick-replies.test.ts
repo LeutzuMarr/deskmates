@@ -29,3 +29,16 @@ describe('quick replies', () => {
     expect(quickReplies('What colour do you want?')).toBeNull()
   })
 })
+
+describe('quick replies after facts', () => {
+  it('answers a closing yes/no question with Yes and No, not the bullets above it', () => {
+    expect(quickReplies('That is a square.\n\n- Format: PNG\n- Size: tiny\n\nWant me to make a bigger one?')).toEqual({
+      question: 'Want me to make a bigger one?',
+      options: ['Yes', 'No']
+    })
+    expect(quickReplies('Which one should I send?\n1. The short one\n2. The long one')).toEqual({
+      question: 'Which one should I send?',
+      options: ['The short one', 'The long one']
+    })
+  })
+})

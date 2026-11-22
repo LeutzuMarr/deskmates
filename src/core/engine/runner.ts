@@ -21,7 +21,8 @@ import { PROVIDER_LABELS } from '../../shared/protocol'
 import { approvalFor } from './approvals'
 import { compactHistory } from './history'
 import { suggestNextMessage } from './suggest'
-import { historyBudgetChars, toolsChars } from '../models/context'
+import { textWithSavedImages, userMessageWithImages, type ImageAttachment } from './attachments'
+import { contextTokens, historyBudgetChars, toolsChars } from '../models/context'
 import { guardRiskyTools, pickPromptTools } from '../tools/shared-prompt-tools'
 import { resolve as resolvePath } from 'node:path'
 import { buildInstructions, readProjectInstructions } from './instructions'
@@ -118,6 +119,7 @@ export class TaskRunner {
   private readonly runs = new Map<string, RunState>()
   private readonly queued = new Map<string, string[]>()
   private readonly suggestions = new Map<string, string>()
+  private readonly contexts = new Map<string, { used: number; window: number }>()
   /** In-memory collected (but not yet appended) approval answers. */
   private readonly answers = new Map<string, ApprovalAnswer[]>()
   private readonly idleWaiters = new Map<string, Array<() => void>>()
@@ -129,8 +131,11 @@ export class TaskRunner {
     this.deps = deps
   }
 
-  async send(taskId: string, text: string): Promise<void> {
+  async send(taskId: string, text: string, images: ImageAttachment[] = []): Promise<void> {
     const task = this.deps.repos.tasks.require(taskId)
+    if (images.length > 0 && this.runs.has(taskId)) {
+      throw new Error('Images can be sent once this reply ends. Your text can go now.')
+    }
 
     // The suggestion is for the message the user hasn't written yet; now they have.
     if (this.suggestions.delete(taskId)) this.deps.bus.emit({ type: 'task.suggestion', taskId, text: null })
@@ -146,8 +151,16 @@ export class TaskRunner {
       throw new Error('Answer the pending approval first.')
     }
 
-    // Append user message
-    this.deps.repos.tasks.appendMessages(taskId, [{ role: 'user', content: text }])
+    // Append user message: images as image parts for an API model, as saved files for a CLI one.
+    if (images.length > 0) {
+      const project = this.deps.repos.projects.require(task.projectId)
+      const cli = this.deps.models.resolve(project.model).cli === true
+      this.deps.repos.tasks.appendMessages(taskId, [
+        cli ? { role: 'user', content: textWithSavedImages(text, images, project.folder) } : userMessageWithImages(text, images)
+      ])
+    } else {
+      this.deps.repos.tasks.appendMessages(taskId, [{ role: 'user', content: text }])
+    }
 
     // Set title from first message if still default
     if (task.title === 'New task') {
@@ -248,9 +261,14 @@ export class TaskRunner {
     if (this.runs.has(taskId)) throw new Error('Stop the task first, then edit or retry.')
     const previous = this.deps.repos.tasks.dropFromLastUserMessage(taskId)
     if (previous === null) throw new Error('There is no message to edit or retry yet.')
-    const next = text?.trim() || previous
+    const next = text?.trim() || previous.text
     this.deps.repos.tasks.update(taskId, { status: 'idle', error: null })
-    await this.send(taskId, next)
+    await this.send(taskId, next, previous.images)
+  }
+
+  /** How full the model's context was after the task's last step, or null before one. */
+  contextUse(taskId: string): { used: number; window: number } | null {
+    return this.contexts.get(taskId) ?? null
   }
 
   /** The likely next message for a task whose reply just ended, or null (see suggest.ts). */
@@ -560,7 +578,14 @@ export class TaskRunner {
         const p = part as any
         if (p.type === 'finish-step') {
           const usage = p.usage
-          repos.usage.add(provider, 1, usage?.inputTokens?.total ?? usage?.inputTokens ?? 0, usage?.outputTokens?.total ?? usage?.outputTokens ?? 0)
+          const inputTokens = usage?.inputTokens?.total ?? usage?.inputTokens ?? 0
+          repos.usage.add(provider, 1, inputTokens, usage?.outputTokens?.total ?? usage?.outputTokens ?? 0)
+          // How full the model's context is after this step, for the meter by the message box.
+          if (typeof inputTokens === 'number' && inputTokens > 0) {
+            const context = { used: inputTokens, window: contextTokens(provider, modelId) }
+            this.contexts.set(taskId, context)
+            bus.emit({ type: 'task.context', taskId, ...context })
+          }
         }
         if (p.type === 'error' && !firstError) {
           firstError = p.error

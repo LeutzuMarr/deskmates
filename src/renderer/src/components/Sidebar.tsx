@@ -34,6 +34,14 @@ export function Sidebar() {
     }
   }
 
+  const pin = async (task: Task, pinned: boolean): Promise<void> => {
+    try {
+      await core.call('tasks.pin', { id: task.id, pinned })
+    } catch (error) {
+      showToast(`Couldn't ${pinned ? 'pin' : 'unpin'} the task: ${errorText(error)}`)
+    }
+  }
+
   const remove = async (task: Task): Promise<void> => {
     const name = task.title.trim() || 'Untitled task'
     if (!window.confirm(`Delete "${name}"? Its conversation is removed. Files it changed stay as they are.`)) return
@@ -113,11 +121,15 @@ export function Sidebar() {
                   renameValue={task.title}
                   active={selectedTaskId === task.id}
                   mark={taskMark(task.status, unread[task.id])}
+                  detail={task.pinned ? 'Pinned' : undefined}
                   onOpen={() => {
                     if (selectedTaskId !== task.id) navigate({ name: 'task', projectId: project.id, taskId: task.id })
                   }}
                   onRename={(title) => void rename(task, title)}
-                  menu={[{ label: 'Delete', danger: true, onSelect: () => void remove(task) }]}
+                  menu={[
+                    { label: task.pinned ? 'Unpin' : 'Pin', onSelect: () => void pin(task, !task.pinned) },
+                    { label: 'Delete', danger: true, onSelect: () => void remove(task) }
+                  ]}
                 />
               ))}
               {tasks.length === 0 && <SidebarEmpty>No tasks yet.</SidebarEmpty>}

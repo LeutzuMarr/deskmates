@@ -23,7 +23,13 @@ export function buildTimeline(stored: StoredMessage[]): TimelineItem[] {
             .filter((p: any) => p.type === 'text')
             .map((p: any) => p.text ?? p.value ?? '')
         : [String(msg.content)]
-      items.push({ kind: 'user', id: `m${i}`, at, text: parts.join('\n') })
+      // Pictures sent with the message, shown as thumbnails above its text.
+      const images = Array.isArray(msg.content)
+        ? msg.content
+            .filter((p: any) => p.type === 'image' && typeof p.image === 'string')
+            .map((p: any) => `data:${p.mediaType ?? 'image/png'};base64,${p.image}`)
+        : []
+      items.push({ kind: 'user', id: `m${i}`, at, text: parts.join('\n'), ...(images.length ? { images } : {}) })
     } else if (msg.role === 'assistant') {
       // CLI-backed providers (OpenCode/agy) store their reply as a plain string.
       const content =

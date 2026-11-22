@@ -169,6 +169,14 @@ function planReach(provider: ProviderId): 'tool' | 'mcp' | 'none' {
   return provider === 'freebuff' || provider === 'opencode' ? 'mcp' : 'none'
 }
 
+/** What each response style asks for; Normal adds nothing. */
+const RESPONSE_STYLES: Record<string, string | null> = {
+  normal: null,
+  concise: 'Concise. Answer in as few words as the task allows: no preamble, no recap, short bullets over paragraphs. Keep every fact the user needs.',
+  explanatory: 'Explanatory. Teach as you go: say why, not only what, define terms the user may not know, and add a short example when it helps.',
+  formal: 'Formal. Clear, professional and precise wording, complete sentences, no slang or jokes.'
+}
+
 /** Builds the full system instructions for the assistant. */
 export function buildInstructions(input: BuildInstructionsInput): string {
   const { project, settings, memories, projectInstructions, now, model } = input
@@ -308,6 +316,13 @@ function pushUserContext(parts: string[], input: BuildInstructionsInput): void {
     parts.push('')
     parts.push('Installed skills — when a task matches one, load it first (load_skill, Skill or read_skill_prompt with its name) and follow it:')
     parts.push(input.skills.map((name) => `- ${name}`).join('\n'))
+  }
+
+  // 8.7 Response style, chosen in Settings
+  const style = RESPONSE_STYLES[settings.responseStyle ?? 'normal']
+  if (style) {
+    parts.push('')
+    parts.push(`Response style (the user chose it; it applies to every reply): ${style}`)
   }
 
   // 9. User instructions (global) — only if not blank

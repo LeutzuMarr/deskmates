@@ -103,6 +103,8 @@ interface StoreState {
   queued: Record<string, string[]>
   /** The likely next message per task (Tab puts it in the box). */
   suggestions: Record<string, string | null>
+  /** How full each task's model context is (tokens read in its last step, and the window). */
+  contexts: Record<string, { used: number; window: number }>
   changes: Record<string, FileChange[]>
   memories: Record<string, Memory[]>
   keyStatus: ProviderId[]
@@ -226,9 +228,12 @@ interface StoreState {
   importConnectorConfig: (path: string) => Promise<Connector[] | null>
 }
 
+/** Pinned chats first, then the most recently active. */
+const byPinnedThenRecent = (a: Task, b: Task): number => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || b.updatedAt - a.updatedAt
+
 function upsertTask(tasks: Task[], task: Task): Task[] {
   const list = [...tasks.filter((t) => t.id !== task.id), task]
-  list.sort((a, b) => b.updatedAt - a.updatedAt)
+  list.sort(byPinnedThenRecent)
   return list
 }
 
@@ -293,6 +298,9 @@ export const useStore = create<StoreState>()((set, get) => {
         set({ timelines: { ...state.timelines, [event.taskId]: upsertById(timeline, event.item) } })
         break
       }
+      case 'task.context':
+        set({ contexts: { ...state.contexts, [event.taskId]: { used: event.used, window: event.window } } })
+        break
       case 'task.suggestion':
         set({ suggestions: { ...state.suggestions, [event.taskId]: event.text } })
         break
@@ -476,7 +484,7 @@ export const useStore = create<StoreState>()((set, get) => {
       await Promise.all(
         projects.map(async (project) => {
           const tasks = await core.call('tasks.list', { projectId: project.id })
-          tasks.sort((a, b) => b.updatedAt - a.updatedAt)
+          tasks.sort(byPinnedThenRecent)
           tasksByProject[project.id] = tasks
         })
       )
@@ -592,6 +600,7 @@ export const useStore = create<StoreState>()((set, get) => {
     timelines: {},
     queued: {},
     suggestions: {},
+    contexts: {},
     changes: {},
     memories: {},
     keyStatus: [],

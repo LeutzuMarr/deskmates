@@ -7,6 +7,7 @@ import { AgentCard, CARD_TOOLS, QuickReplyCard } from './AgentCards'
 import { quickReplies } from '../../../shared/quick-replies'
 import { BrandMark } from './Mascot'
 import { CopyButton } from './CopyButton'
+import { ReadAloudButton } from './ReadAloudButton'
 import { Thinking } from './Thinking'
 import { ArrowDown, Pencil, RotateCcw } from 'lucide-react'
 import { core } from '../lib/rpc'
@@ -215,7 +216,16 @@ export function Conversation({ taskId, mode = 'task', timeline, running, emptyHi
                 </button>
               )}
               <CopyButton text={item.text} label="Copy message" className="msg-action mt-2.5" />
-              <div className="user-bubble max-w-[75%] whitespace-pre-wrap">{item.text}</div>
+              <div className="flex max-w-[75%] flex-col items-end">
+                {item.images && item.images.length > 0 && (
+                  <div className="sent-images">
+                    {item.images.map((src, index) => (
+                      <img key={index} src={src} alt={`Image ${index + 1} you sent`} />
+                    ))}
+                  </div>
+                )}
+                <div className="user-bubble whitespace-pre-wrap">{item.text}</div>
+              </div>
             </>
           )}
         </div>
@@ -262,6 +272,7 @@ export function Conversation({ taskId, mode = 'task', timeline, running, emptyHi
             {finished && (
               <div className={`mt-1.5 flex items-center gap-1 ${isLast ? '' : 'msg-action'}`}>
                 <CopyButton text={() => turnText(timeline, at)} label="Copy reply" showLabel />
+                <ReadAloudButton text={() => turnText(timeline, at)} />
                 {isLast && editable && !running && (
                   <button type="button" className="copy-btn" aria-label="Retry this reply" title="Retry" onClick={() => void retry()}>
                     <RotateCcw size={12} aria-hidden="true" />

@@ -323,6 +323,11 @@ export function createHandlers(services: HandlerServices): Handlers {
       return { task, timeline: runner.timeline(params.id) }
     },
 
+    'tasks.pin': (params: { id: string; pinned: boolean }) => {
+      const task = repos.tasks.setPinned(params.id, params.pinned)
+      bus.emit({ type: 'task.updated', task })
+      return task
+    },
     'tasks.rename': (params: { id: string; title: string }) => {
       const title = params.title.trim()
       if (!title) throw new Error('The task title can\'t be empty.')
@@ -343,9 +348,10 @@ export function createHandlers(services: HandlerServices): Handlers {
       return null
     },
 
-    'tasks.send': (params: { id: string; text: string }) => runner.send(params.id, params.text),
+    'tasks.send': (params: { id: string; text: string; images?: Array<{ dataUrl: string; name?: string }> }) => runner.send(params.id, params.text, params.images ?? []),
 
     'tasks.queued': (params: { id: string }) => runner.queuedMessages(params.id),
+    'tasks.context': (params: { id: string }) => runner.contextUse(params.id),
     'tasks.resend': async (params: { id: string; text?: string }) => {
       await runner.resend(params.id, params.text)
       return null
