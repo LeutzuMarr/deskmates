@@ -242,7 +242,7 @@ export function ComputerUsePanel() {
             className="r-concentric w-full resize-none border border-rule bg-transparent px-3 py-2 text-[14px] leading-normal text-ink outline-none placeholder:text-ink-faint"
             style={concentricVars(20)}
           />
-          <div className="mt-3 grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-2">
+          <div className="mt-3 grid grid-cols-[minmax(min(190px,100%),1fr)_minmax(0,1.4fr)] gap-2">
             <div className="field">
               <label className="field-label" htmlFor={providerId}>
                 Provider

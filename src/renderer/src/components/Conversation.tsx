@@ -261,9 +261,10 @@ export function Conversation({ taskId, mode = 'task', timeline, running, emptyHi
       continue
     }
     if (item.kind === 'assistant') {
-      // Thinking that came just before the reply doesn't count: the reply still opens the turn.
+      // The turn's first reply text carries the mark and the time, even after steps or a card
+      // (thinking and tool activity before it don't count); later texts line up under it.
       let p = i - 1
-      while (p >= 0 && timeline[p].kind === 'thinking') p--
+      while (p >= 0 && timeline[p].kind !== 'user' && timeline[p].kind !== 'assistant') p--
       const previous = p >= 0 ? timeline[p] : undefined
       const firstOfTurn = !previous || previous.kind === 'user'
       const started = turnStart(timeline, i)
@@ -282,12 +283,17 @@ export function Conversation({ taskId, mode = 'task', timeline, running, emptyHi
       // The latest finished reply keeps its actions in view; earlier ones show them on hover.
       const isLast = finished && !timeline.slice(i + 1).some((later) => later.kind === 'user')
       const at = i
+      // A rating belongs to the reply it was given on, not to whatever another version put here.
+      const rated = feedback[item.id]
+      const rating = rated && (!rated.start || turnText(timeline, at).slice(0, 200) === rated.start) ? rated : undefined
       nodes.push(
         <div key={item.id} className="msg-row flex gap-3">
-          {firstOfTurn && (
+          {firstOfTurn ? (
             <div className="mt-1 shrink-0">
               <BrandMark size={20} working={running} />
             </div>
+          ) : (
+            <div className="w-5 shrink-0" />
           )}
           <div className="min-w-0 flex-1">
             {firstOfTurn && replyTime}
@@ -298,10 +304,10 @@ export function Conversation({ taskId, mode = 'task', timeline, running, emptyHi
             })()}
             {finished && item.sources && item.sources.length > 0 && <SourcesChip sources={item.sources} />}
             {finished && (
-              <div className={`mt-1.5 flex flex-wrap items-center gap-1 ${isLast || feedback[item.id] ? '' : 'msg-action'}`}>
+              <div className={`mt-1.5 flex flex-wrap items-center gap-1 ${isLast || rating ? '' : 'msg-action'}`}>
                 <CopyButton text={() => turnText(timeline, at)} label="Copy reply" showLabel />
                 <ReadAloudButton text={() => turnText(timeline, at)} />
-                {mode === 'task' && <FeedbackButtons taskId={taskId} itemId={item.id} text={() => turnText(timeline, at)} current={feedback[item.id]} onChange={setFeedback} />}
+                {mode === 'task' && <FeedbackButtons key={rating ? `${item.id}-rated` : item.id} taskId={taskId} itemId={item.id} text={() => turnText(timeline, at)} current={rating} onChange={setFeedback} />}
                 {isLast && editable && !running && (
                   <button type="button" className="copy-btn" aria-label="Retry this reply" title="Retry" onClick={() => void retry()}>
                     <RotateCcw size={12} aria-hidden="true" />

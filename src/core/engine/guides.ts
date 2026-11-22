@@ -164,6 +164,7 @@ export function chromeInstructionsDue(runKey: string, dir?: string): boolean {
 /** Forgets which runs had which guides (tests). */
 export function resetChromeInstructions(): void {
   given.clear()
+  inInstructions.clear()
 }
 export const resetGuides = resetChromeInstructions
 
@@ -347,6 +348,9 @@ const GUIDE_TITLES: Record<GuideKind, string> = {
   visualize: 'Visuals in the chat (the Visualizer guide)'
 }
 
+/** The guides each task's instructions carry, and what was asked (for the Visualizer's modules). */
+const inInstructions = new Map<string, { kinds: Set<GuideKind>; asked: string }>()
+
 /** One guide's full text for the task, or null when its file isn't there. */
 function guideText(kind: GuideKind, text: string, dir?: string): string | null {
   if (kind === 'chrome') return chromeInstructions(undefined, dir)
@@ -360,10 +364,21 @@ function guideText(kind: GuideKind, text: string, dir?: string): string | null {
  * given, so the tools don't hand it over again. Empty when no guide applies.
  */
 export function guideInstructions(runKey: string, text: string, dir?: string): string {
-  const blocks: string[] = []
+  // A task's instructions are built afresh for every run, so a guide put there stays there for the
+  // rest of the task (the agent would otherwise lose it on the next message).
+  const sticky = inInstructions.get(runKey) ?? { kinds: new Set<GuideKind>(), asked: '' }
   for (const kind of guidesForMessage(text)) {
-    if (!guideDue(runKey, kind, dir)) continue
-    const body = guideText(kind, text, dir)
+    if (sticky.kinds.has(kind) || !guideDue(runKey, kind, dir)) continue
+    sticky.kinds.add(kind)
+  }
+  if (sticky.kinds.size === 0) return ''
+  sticky.asked = `${sticky.asked}\n${text}`.slice(-4000)
+  inInstructions.delete(runKey)
+  inInstructions.set(runKey, sticky)
+  if (inInstructions.size > 300) inInstructions.delete(inInstructions.keys().next().value as string)
+  const blocks: string[] = []
+  for (const kind of sticky.kinds) {
+    const body = guideText(kind, sticky.asked, dir)
     if (!body) continue
     markGuideGiven(runKey, kind)
     blocks.push(`## ${GUIDE_TITLES[kind]}\n\n${body}`)

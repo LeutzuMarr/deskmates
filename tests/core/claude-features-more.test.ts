@@ -201,7 +201,9 @@ describe('the user’s guides, loaded when a task needs them', () => {
     expect(first).toContain('# Guides for this task')
     expect(first).toContain('Ask one clarifying question first.')
     expect(first).toContain('rank above any skill')
-    expect(guideInstructions('t1', 'research more')).toBe('')
+    // Instructions are rebuilt every run: the guide stays in them for the rest of the task.
+    expect(guideInstructions('t1', 'Thanks, now summarise it')).toContain('Ask one clarifying question first.')
+    expect(guideInstructions('other', 'Thanks, now summarise it')).toBe('')
     expect(guideReminder('Research the market')).toContain('read_research_instructions')
   })
 

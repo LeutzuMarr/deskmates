@@ -127,7 +127,7 @@ export function createHandlers(services: HandlerServices): Handlers {
   const { repos, bus, runner, changes, models, keys, version, dataDir, agentKit, onDesignWritten } = services
   const systemDictation = new SystemDictation()
   /** A task's ratings, without the reply text kept for matching. */
-  const feedbackOf = (id: string) => Object.fromEntries(Object.entries(repos.tasks.feedback(id)).map(([itemId, f]) => [itemId, { rating: f.rating, comment: f.comment }]))
+  const feedbackOf = (id: string) => Object.fromEntries(Object.entries(repos.tasks.feedback(id)).map(([itemId, f]) => [itemId, { rating: f.rating, comment: f.comment, start: f.text.slice(0, 200) }]))
 
   // Freebuff's model list: the last one read off its picker (saved across launches), refreshed in the
   // background whenever the picker is opened and an idle Freebuff is running.

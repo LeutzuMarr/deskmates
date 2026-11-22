@@ -123,7 +123,7 @@ export function TaskView({ projectId, taskId }: { projectId: string; taskId: str
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex shrink-0 items-center justify-between gap-4 border-b border-rule px-8 py-3">
+      <header className="task-header flex shrink-0 items-center justify-between gap-4 border-b border-rule px-8 py-3">
         <div className="min-w-0">
           {renaming ? (
             <label className="field">
@@ -158,18 +158,20 @@ export function TaskView({ projectId, taskId }: { projectId: string; taskId: str
           {project && model?.provider === 'freebuff' && <FreebuffStatusLine folder={project.folder} modelId={model.modelId} />}
           {stats && <DiffChip stats={stats} />}
           <DockBrowserButton />
-          <button type="button" className="btn btn-outline" title="Save this chat as a Markdown file" onClick={() => exportChat(taskId)}>
-            <Download size={14} aria-hidden="true" className="mr-1.5" />
-            Export
+          <button type="button" className="btn btn-outline" aria-label="Export" title="Save this chat as a Markdown file" onClick={() => exportChat(taskId)}>
+            <Download size={14} aria-hidden="true" className="hdr-icon mr-1.5" />
+            <span className="hdr-label">Export</span>
           </button>
           <button
             type="button"
             aria-expanded={panelOpen}
+            aria-label="Plan and changes"
+            title="Plan and changes"
             className="btn btn-outline"
             onClick={() => setPanelOpen((open) => !open)}
           >
-            <ListChecks size={14} aria-hidden="true" className="mr-1.5" />
-            Plan and changes
+            <ListChecks size={14} aria-hidden="true" className="hdr-icon mr-1.5" />
+            <span className="hdr-label">Plan and changes</span>
           </button>
         </div>
       </header>

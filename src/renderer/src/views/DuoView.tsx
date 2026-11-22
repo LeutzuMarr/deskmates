@@ -408,7 +408,7 @@ function Setup({ duo, onDone }: { duo: DuoState; onDone: () => void }): ReactNod
     void call(() => core.call('browser.tool', { name: 'browser_open', input: { url } }), toast).then(() => setBrowserOpen(true))
   }
   const row = (label: string, child: ReactNode): ReactNode => (
-    <label className="flex flex-col gap-1 text-[13px] text-ink-muted">
+    <label className="flex flex-col justify-between gap-1 text-[13px] text-ink-muted">
       {label}
       {child}
     </label>
@@ -431,13 +431,16 @@ function Setup({ duo, onDone }: { duo: DuoState; onDone: () => void }): ReactNod
         {row('Your LinkedIn', <input className={field} value={p.linkedinUrl} onChange={(e) => set('linkedinUrl', e.target.value)} />)}
         {row('Morning brief at', <input type="time" className={field} value={p.briefTime} onChange={(e) => set('briefTime', e.target.value)} />)}
         {row('Check-ins at (comma separated)', <input className={field} value={p.checkIns.join(', ')} onChange={(e) => set('checkIns', e.target.value.split(',').map((t) => t.trim()).filter(Boolean))} />)}
-        {row('Quiet from – to', (
-          <div className="flex gap-2">
-            <input type="time" className={field} value={p.quietFrom} onChange={(e) => set('quietFrom', e.target.value)} />
-            <input type="time" className={field} value={p.quietTo} onChange={(e) => set('quietTo', e.target.value)} />
-          </div>
-        ))}
         {row('Never contact (comma separated)', <input className={field} value={p.doNotContact.join(', ')} onChange={(e) => set('doNotContact', e.target.value.split(',').map((t) => t.trim()).filter(Boolean))} />)}
+        {/* Two times side by side need the full width, or their AM/PM is cut off. */}
+        <div className="md:col-span-2">
+          {row('Quiet from – to', (
+            <div className="flex min-w-0 gap-2">
+              <input type="time" aria-label="Quiet from" className={`${field} min-w-0 flex-1`} value={p.quietFrom} onChange={(e) => set('quietFrom', e.target.value)} />
+              <input type="time" aria-label="Quiet to" className={`${field} min-w-0 flex-1`} value={p.quietTo} onChange={(e) => set('quietTo', e.target.value)} />
+            </div>
+          ))}
+        </div>
         <div className="md:col-span-2">
           <DuoModelField value={p.model} onChange={(model) => set('model', model)} />
         </div>
