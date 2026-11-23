@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { Copy, CopyPlus, Palette, Sticker, Trash2 } from 'lucide-react'
+import { Copy, CopyPlus, Palette, Spline, Sticker, Trash2 } from 'lucide-react'
 import type { StickyData, TextData } from '../model'
 import { fontFor } from '../ink/paint'
 import type { NotesEngine } from './engine'
@@ -148,6 +148,11 @@ function SelectionBar({ engine, notice }: { engine: NotesEngine; notice: (text: 
         <button type="button" className="press flex items-center gap-1 rounded-full px-2.5 py-1.5" onClick={() => void sticker()}>
           <Sticker size={15} /> Make sticker
         </button>
+        {engine.tools.advanced && (
+          <button type="button" aria-pressed={Boolean(selection.warp)} className={`press flex items-center gap-1 rounded-full px-2.5 py-1.5 ${selection.warp ? 'bg-[#8e44ad]/15 text-[#8e44ad]' : ''}`} onClick={() => selection.toggleWarp()}>
+            <Spline size={15} /> {selection.warp ? 'Done' : 'Distort'}
+          </button>
+        )}
         <button type="button" aria-label="Delete" className="press rounded-full px-2.5 py-1.5 text-[#c8372d]" onClick={() => selection.remove()}>
           <Trash2 size={15} />
         </button>

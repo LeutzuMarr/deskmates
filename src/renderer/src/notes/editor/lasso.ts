@@ -6,15 +6,17 @@ import type { Item } from '../model'
 import { itemBounds, paintItem } from '../ink/paint'
 import type { Bounds } from '../ink/stroke'
 import type { NotesEngine, PagePoint, ToolHandler } from './engine'
-import { IDENTITY, apply, lassoTakes, transformItem, type Similarity } from './transform'
+import { IDENTITY, apply, lassoTakes, transformItem, warpItem, type Quad, type Similarity } from './transform'
 
-type Mode = { kind: 'lasso'; points: Array<[number, number]> } | { kind: 'move' | 'scale' | 'rotate'; start: [number, number]; t: Similarity } | null
+type Mode = { kind: 'lasso'; points: Array<[number, number]> } | { kind: 'move' | 'scale' | 'rotate'; start: [number, number]; t: Similarity } | { kind: 'corner'; index: number } | null
 
 export class Selection {
   pageId: string | null = null
   items: Item[] = []
   /** The transform being dragged, not yet applied. */
   live: Similarity = IDENTITY
+  /** Distort mode: the four corners (page space) the selection is being bent onto. */
+  warp: Quad | null = null
   private listeners = new Set<() => void>()
 
   constructor(private readonly engine: NotesEngine) {}
@@ -33,6 +35,7 @@ export class Selection {
   }
 
   set(pageId: string, items: Item[]): void {
+    this.warp = null
     this.clearHidden()
     this.pageId = pageId
     this.items = items
@@ -44,6 +47,7 @@ export class Selection {
 
   clear(): void {
     if (!this.active && !this.pageId) return
+    this.warp = null
     this.clearHidden()
     this.items = []
     this.pageId = null
@@ -80,6 +84,25 @@ export class Selection {
       const [tx, ty] = apply(this.live, x, y)
       return this.engine.pageToScreen(this.pageId!, tx, ty)
     })
+  }
+
+  /** Starts or stops distorting: four corner handles that bend the selection. */
+  toggleWarp(): void {
+    const b = this.bounds()
+    this.warp = this.warp || !b ? null : [[b.minX, b.minY], [b.maxX, b.minY], [b.maxX, b.maxY], [b.minX, b.maxY]]
+    this.engine.requestOverlay()
+    this.emit()
+  }
+
+  /** Bends the selection onto the current corners, as one undoable step. */
+  commitWarp(): void {
+    const b = this.bounds()
+    if (!this.warp || !b) return
+    const q = this.warp
+    this.change((item) => warpItem(item, b, q))
+    const nb = this.bounds()
+    this.warp = nb ? [[nb.minX, nb.minY], [nb.maxX, nb.minY], [nb.maxX, nb.maxY], [nb.minX, nb.maxY]] : null
+    this.emit()
   }
 
   /** Applies a transform to the selection as one undoable step. */
@@ -128,8 +151,34 @@ export class Selection {
     const pageCtx = this.engine.pageContext(this.pageId)
     if (!page || !pageCtx) return
     pageCtx.save()
-    for (const item of this.items) paintItem(pageCtx, transformItem(item, this.live), this.engine.cache, page.color)
+    const b0 = this.bounds()
+    for (const item of this.items) paintItem(pageCtx, this.warp && b0 ? warpItem(item, b0, this.warp) : transformItem(item, this.live), this.engine.cache, page.color)
     pageCtx.restore()
+    if (this.warp) {
+      const dpr = Math.min(2, window.devicePixelRatio || 1)
+      ctx.save()
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      const pts = this.warp.map(([x, y]) => this.engine.pageToScreen(this.pageId!, x, y))
+      ctx.beginPath()
+      pts.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)))
+      ctx.closePath()
+      ctx.setLineDash([6, 5])
+      ctx.lineWidth = 1.5
+      ctx.strokeStyle = '#8e44ad'
+      ctx.stroke()
+      ctx.setLineDash([])
+      for (const [x, y] of pts) {
+        ctx.beginPath()
+        ctx.rect(x - 8, y - 8, 16, 16)
+        ctx.fillStyle = '#ffffff'
+        ctx.fill()
+        ctx.lineWidth = 2
+        ctx.strokeStyle = '#8e44ad'
+        ctx.stroke()
+      }
+      ctx.restore()
+      return
+    }
     const corners = this.screenCorners()
     if (!corners) return
     const dpr = Math.min(2, window.devicePixelRatio || 1)
@@ -203,6 +252,15 @@ export function lassoTool(engine: NotesEngine): ToolHandler {
   return {
     down(at: PagePoint): boolean {
       const screen = at.screen
+      if (selection.active && selection.pageId && selection.warp) {
+        const pts = selection.warp.map(([x, y]) => engine.pageToScreen(selection.pageId!, x, y))
+        const index = pts.findIndex((p) => near(screen, p, 26))
+        if (index >= 0) {
+          mode = { kind: 'corner', index }
+          return true
+        }
+        selection.warp = null
+      }
       if (selection.active && selection.pageId) {
         const corners = selection.screenCorners()!
         const b = selection.bounds()!
@@ -228,6 +286,13 @@ export function lassoTool(engine: NotesEngine): ToolHandler {
       if (!mode) return
       if (mode.kind === 'lasso') {
         if (at.page.id === pageId) mode.points.push([at.x, at.y])
+        return
+      }
+      if (mode.kind === 'corner') {
+        if (selection.warp && at.page.id === selection.pageId) {
+          selection.warp[mode.index] = [at.x, at.y]
+          selection.emit()
+        }
         return
       }
       const b = selection.bounds()!
@@ -257,6 +322,10 @@ export function lassoTool(engine: NotesEngine): ToolHandler {
         const polygon = m.points
         const items = engine.itemsOn(pageId).filter((item) => lassoTakes(item, polygon, itemBounds(item, engine.cache)))
         if (items.length) selection.set(pageId, items)
+        return
+      }
+      if (m.kind === 'corner') {
+        selection.commitWarp()
         return
       }
       selection.commitTransform(selection.live)

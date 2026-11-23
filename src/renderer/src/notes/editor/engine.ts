@@ -117,6 +117,10 @@ export class NotesEngine {
   readonly hidden = new Set<string>()
   /** While a recording plays: ink written later than `at` in it is drawn faint. */
   audioFilter: { recordingId: string; at: number } | null = null
+  /** Lets tools change the tool settings (the eyedropper picks a colour and hands back to the pen). */
+  requestTools: ((next: ToolState) => void) | null = null
+  /** Lets tools tell the user something short. */
+  say: ((text: string) => void) | null = null
   /** A quick one-finger tap on a page (audio jump, tape reveal…); return true if handled. */
   onTap: ((at: PagePoint) => boolean) | null = null
   topInset = 0
@@ -1054,6 +1058,15 @@ export class NotesEngine {
   /** The page point at the middle of the screen. */
   centerPoint(): PagePoint | null {
     return this.pageAt([this.width / 2, this.height / 2], true)
+  }
+
+  /** The colour shown at a screen point (what the eyedropper picks). */
+  colorAt(screen: Vec): string | null {
+    const x = Math.round(screen[0] * this.dpr)
+    const y = Math.round(screen[1] * this.dpr)
+    if (x < 0 || y < 0 || x >= this.baseCanvas.width || y >= this.baseCanvas.height) return null
+    const [r, g, b] = this.base.getImageData(x, y, 1, 1).data
+    return `#${[r, g, b].map((c) => (c ?? 0).toString(16).padStart(2, '0')).join('')}`
   }
 
   /** Index of a page by id. */
