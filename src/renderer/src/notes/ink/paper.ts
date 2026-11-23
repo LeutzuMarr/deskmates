@@ -14,8 +14,13 @@ const MARGIN: Record<PaperColor, string> = { white: 'rgba(214,92,92,.45)', cream
 
 /** The ink colour that reads on this paper when the chosen colour is "auto" black. */
 export function inkOn(color: PaperColor, ink: string): string {
-  if (color === 'dark' && (ink === '#1c1c1e' || ink === '#000000')) return '#f4f4f2'
-  return ink
+  if (color !== 'dark') return ink
+  // Any near-black ink (pen black, pencil grey…) would vanish on dark paper: it shows light instead.
+  const m = /^#?([0-9a-f]{6})$/i.exec(ink)
+  if (!m) return ink
+  const n = parseInt(m[1]!, 16)
+  const luminance = (0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255
+  return luminance < 0.3 ? '#f4f4f2' : ink
 }
 
 function hLines(ctx: CanvasRenderingContext2D, area: Bounds, step: number, from: number, x0: number, x1: number): void {

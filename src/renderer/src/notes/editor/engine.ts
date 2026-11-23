@@ -859,7 +859,7 @@ export class NotesEngine {
 
   /** Hold-to-shape: if the pen rests at the end of a line, the line is straightened into a shape. */
   private watchStillness(live: LiveStroke): void {
-    if (!this.tools.holdToShape || live.data.tool === 'highlighter' || isBrush(live.data.tool)) return
+    if (!this.tools.holdToShape || live.data.tool === 'highlighter' || (isBrush(live.data.tool) && live.data.tool !== 'pencil')) return
     const last = live.data.points[live.data.points.length - 1]
     if (!last) return
     const now = performance.now()
@@ -874,6 +874,10 @@ export class NotesEngine {
         live.data = { ...live.data, points: shape.points, shape: shape.kind }
         live.shaped = true
         live.predicted = []
+        // Grain brushes build up on the top canvas: start it again for the clean shape.
+        live.drawnUpTo = 0
+        this.wet.setTransform(1, 0, 0, 1, 0, 0)
+        this.wet.clearRect(0, 0, this.wetCanvas.width, this.wetCanvas.height)
         navigator.vibrate?.(8)
         this.requestOverlay()
       }, 750)

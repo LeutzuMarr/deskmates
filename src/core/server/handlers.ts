@@ -388,7 +388,7 @@ export function createHandlers(services: HandlerServices): Handlers {
     // A question from a notebook becomes a chat in the "Notes" project, answered by Freebuff (the
     // model it has selected), so it also shows in the Work tab. Pictures of the page go along; for a
     // command-line model they're saved in the project and their paths added to the message.
-    'notes.ask': async (params: { text: string; images?: Array<{ dataUrl: string; name?: string }>; taskId?: string; title?: string }) => {
+    'notes.ask': async (params: { text: string; images?: Array<{ dataUrl: string; name?: string }>; taskId?: string; title?: string; freebuffModel?: string }) => {
       const text = String(params.text ?? '').trim()
       if (!text) throw new Error('Ask something first.')
       const folder = join(dataDir, 'notes-ai')
@@ -398,6 +398,12 @@ export function createHandlers(services: HandlerServices): Handlers {
       if (!project) {
         project = repos.projects.create('Notes', real)
         project = repos.projects.update(project.id, { model: { provider: 'freebuff', modelId: FREEBUFF_CURRENT_MODEL } })
+        bus.emit({ type: 'project.updated', project })
+      }
+      // The model picked in the notes app (a Freebuff model, or "current": whatever Freebuff has selected).
+      const wanted = String(params.freebuffModel ?? '').trim()
+      if (wanted && (project.model?.provider !== 'freebuff' || project.model.modelId !== wanted)) {
+        project = repos.projects.update(project.id, { model: { provider: 'freebuff', modelId: wanted } })
         bus.emit({ type: 'project.updated', project })
       }
       let taskId = params.taskId && repos.tasks.list(project.id).some((t) => t.id === params.taskId) ? params.taskId : null

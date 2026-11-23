@@ -952,7 +952,7 @@ export interface RpcMethods {
   'remote.remove': { params: { id: string }; result: RemoteStatusInfo }
   'remote.notesLink': { params: NoParams; result: { url: string } }
   /** A question from the notes app: a chat in the "Notes" project, answered by Freebuff. */
-  'notes.ask': { params: { text: string; images?: Array<{ dataUrl: string; name?: string }>; taskId?: string; title?: string }; result: { taskId: string } }
+  'notes.ask': { params: { text: string; images?: Array<{ dataUrl: string; name?: string }>; taskId?: string; title?: string; freebuffModel?: string }; result: { taskId: string } }
   /** The replies in a notes chat after `after` (ms), and whether it's still answering. */
   'notes.reply': { params: { taskId: string; after?: number }; result: { status: TaskStatus; error: string | null; replies: Array<{ id: string; at: number; text: string }> } }
   /** The relay (Supabase project URL and publishable key) and the web app's address. */

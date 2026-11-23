@@ -77,6 +77,10 @@ describe('notes.ask', () => {
     expect(second.taskId).toBe(first.taskId)
     expect(repos.projects.list().filter((p) => p.name === 'Notes')).toHaveLength(1)
 
+    // A model picked in the notes app answers from then on.
+    await api['notes.ask']({ text: 'Altă întrebare', taskId: first.taskId, freebuffModel: 'GLM 5.3 Flash' })
+    expect(repos.projects.list().find((p) => p.name === 'Notes')!.model).toEqual({ provider: 'freebuff', modelId: 'GLM 5.3 Flash' })
+
     await expect(api['notes.ask']({ text: '   ' })).rejects.toThrow('Ask something first.')
   })
 })

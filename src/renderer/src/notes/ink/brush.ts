@@ -8,7 +8,8 @@ import type { InkPoint, PaperColor, PenTool, StrokeData } from '../model'
 import { inkOn } from './paper'
 import { boundsOf, outlinePath, strokeOutline } from './stroke'
 
-const BRUSHES: ReadonlySet<PenTool> = new Set(['graphite', 'charcoal', 'airbrush', 'watercolor'])
+// The pencil is laid down in see-through grains too, so going over the same place darkens it.
+const BRUSHES: ReadonlySet<PenTool> = new Set(['pencil', 'graphite', 'charcoal', 'airbrush', 'watercolor'])
 
 export function isBrush(tool: PenTool): boolean {
   return BRUSHES.has(tool)
@@ -45,10 +46,10 @@ function tip(tool: PenTool, color: string): HTMLCanvasElement {
   } else {
     const rand = random(tool === 'charcoal' ? 99 : 7)
     c.fillStyle = color
-    const grains = tool === 'charcoal' ? 260 : 420
+    const grains = tool === 'charcoal' ? 260 : tool === 'pencil' ? 520 : 420
     for (let i = 0; i < grains; i++) {
       const a = rand() * Math.PI * 2
-      const d = Math.sqrt(rand()) * r * (tool === 'charcoal' ? 0.95 : 0.8)
+      const d = Math.sqrt(rand()) * r * (tool === 'charcoal' ? 0.95 : tool === 'pencil' ? 0.7 : 0.8)
       const s = tool === 'charcoal' ? 1 + rand() * 3.2 : 0.8 + rand() * 1.4
       c.globalAlpha = tool === 'charcoal' ? 0.25 + rand() * 0.6 : 0.3 + rand() * 0.5
       c.fillRect(r + Math.cos(a) * d, r + Math.sin(a) * d, s, s)
@@ -59,6 +60,8 @@ function tip(tool: PenTool, color: string): HTMLCanvasElement {
 }
 
 const SETTINGS: Record<string, { spacing: number; flow: number; jitter: number }> = {
+  // A single pass is a soft grey; every pass over it adds more graphite.
+  pencil: { spacing: 0.1, flow: 0.32, jitter: 0.04 },
   graphite: { spacing: 0.12, flow: 0.55, jitter: 0.08 },
   charcoal: { spacing: 0.18, flow: 0.7, jitter: 0.25 },
   airbrush: { spacing: 0.08, flow: 0.12, jitter: 0 }
