@@ -8,6 +8,7 @@ import '@fontsource-variable/newsreader/opsz.css'
 import './notes.css'
 import { keepDataForGood, restoreDevice } from '../remote/device'
 import { NotesApp } from './App'
+import './features'
 
 async function registerServiceWorker(): Promise<void> {
   if (!('serviceWorker' in navigator)) return
