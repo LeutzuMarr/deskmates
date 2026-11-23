@@ -1,10 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { MessageCircle, MoreHorizontal, Plus, QrCode, WifiOff, X } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { MessageCircle, QrCode, WifiOff } from 'lucide-react'
+import { TabBar } from 'glisse'
 import type { RemoteDevice } from '../remote/relay'
-import { COVERS, createNotebook, listNotebooks, trashNotebook, type Notebook } from './db'
+import type { Notebook } from './db'
 import { NotebookView } from './editor/NotebookView'
+import { NotesTab } from './library/NotesTab'
+import { SearchTab, TrashTab } from './library/SearchTrash'
+import { StoreView } from './store/StoreView'
+import { loadTemplates } from './templates/registry'
+import { useLiquid } from './ui/liquid'
 
-function useOnline(): boolean {
+export function useOnline(): boolean {
   const [online, setOnline] = useState(() => navigator.onLine)
   useEffect(() => {
     const update = (): void => setOnline(navigator.onLine)
@@ -18,107 +24,36 @@ function useOnline(): boolean {
   return online
 }
 
-function shortDate(ms: number): string {
-  return new Date(ms).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
-}
+type Tab = 'notes' | 'store' | 'search' | 'trash'
 
-function Cover({ cover, title }: { cover: string; title: string }) {
-  return (
-    <div
-      className="relative aspect-[3/4] w-full overflow-hidden rounded-l-md rounded-r-2xl shadow-[0_1px_2px_rgba(0,0,0,.12),0_8px_22px_rgba(0,0,0,.12)]"
-      style={{ background: `var(--cover-${cover}, var(--cover-clay))` }}
-    >
-      {/* The spine, and a soft light across the cover. */}
-      <div className="absolute inset-y-0 left-0 w-[9%] bg-black/15" />
-      <div className="absolute inset-0 bg-[linear-gradient(115deg,rgba(255,255,255,.18),transparent_45%)]" />
-      <div className="absolute inset-x-[16%] top-[14%] rounded-md bg-white/85 px-2 py-1.5 text-center font-serif text-[13px] leading-tight text-[#141413] break-words hyphens-auto line-clamp-3">
-        {title}
-      </div>
-    </div>
-  )
-}
+const TITLES: Record<Tab, string> = { notes: 'Notes', store: 'Store', search: 'Search', trash: 'Trash' }
 
-function NewNotebookSheet({ onClose, onCreate }: { onClose: () => void; onCreate: (title: string, cover: string) => void }) {
-  const [title, setTitle] = useState('')
-  const [cover, setCover] = useState<string>(COVERS[0])
-  const input = useRef<HTMLInputElement>(null)
-  useEffect(() => input.current?.focus(), [])
-  return (
-    <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/30 sm:items-center" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
-      <form
-        className="glass m-3 w-full max-w-md rounded-[28px] p-5 shadow-2xl"
-        onSubmit={(e) => {
-          e.preventDefault()
-          onCreate(title, cover)
-        }}
-      >
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="font-serif text-2xl">New notebook</h2>
-          <button type="button" aria-label="Close" className="press rounded-full p-2 hover:bg-black/5" onClick={onClose}>
-            <X size={20} />
-          </button>
-        </div>
-        <div className="flex gap-4">
-          <div className="w-24 shrink-0">
-            <Cover cover={cover} title={title || 'Untitled notebook'} />
-          </div>
-          <div className="flex min-w-0 flex-1 flex-col gap-3">
-            <input
-              ref={input}
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Name, e.g. Math"
-              maxLength={80}
-              className="w-full rounded-xl border border-rule bg-card px-3 py-2.5 text-[16px] outline-none focus:border-clay"
-            />
-            <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Cover colour">
-              {COVERS.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  role="radio"
-                  aria-checked={cover === c}
-                  aria-label={c}
-                  onClick={() => setCover(c)}
-                  className="press size-8 rounded-full ring-offset-2 ring-offset-[var(--card)]"
-                  style={{ background: `var(--cover-${c})`, boxShadow: cover === c ? '0 0 0 2px var(--card), 0 0 0 4px var(--ink)' : undefined }}
-                />
-              ))}
-            </div>
-          </div>
-        </div>
-        <button type="submit" className="press mt-5 w-full rounded-full bg-clay py-3 text-[15px] font-semibold text-white">
-          Create
-        </button>
-      </form>
-    </div>
-  )
-}
+/** Hooks for parts that need the app's state (sync status, AI). */
+export const appExtras: { headerStart?: (device: RemoteDevice | null, online: boolean) => ReactNode; onDevice?: (device: RemoteDevice | null) => void } = {}
 
 export function NotesApp({ initialDevice }: { initialDevice: RemoteDevice | null }) {
   const online = useOnline()
   const [device, setDevice] = useState(initialDevice)
-  const [notebooks, setNotebooks] = useState<Notebook[] | null>(null)
-  const [creating, setCreating] = useState(false)
+  const [tab, setTab] = useState<Tab>('notes')
   const [notice, setNotice] = useState<string | null>(null)
   const [pairing, setPairing] = useState(false)
-  const [open, setOpen] = useState<Notebook | null>(null)
+  const [open, setOpen] = useState<{ notebook: Notebook; pageId?: string } | null>(null)
+  const [libraryKey, setLibraryKey] = useState(0)
+  const tabsRef = useRef<HTMLDivElement>(null)
+  useLiquid(tabsRef, { reach: 20 })
 
-  const reload = useCallback(() => {
-    void listNotebooks()
-      .then(setNotebooks)
-      .catch(() => {
-        setNotebooks([])
-        setNotice('Notes can’t be saved in this browser. Add Deskmates to the Home Screen and open it from there.')
-      })
+  useEffect(() => {
+    void loadTemplates()
   }, [])
-  useEffect(reload, [reload])
+  useEffect(() => appExtras.onDevice?.(device), [device])
 
   useEffect(() => {
     if (!notice) return
     const timer = setTimeout(() => setNotice(null), 5000)
     return () => clearTimeout(timer)
   }, [notice])
+
+  const say = useCallback((text: string) => setNotice(text), [])
 
   const pair = async (): Promise<void> => {
     setPairing(true)
@@ -143,19 +78,23 @@ export function NotesApp({ initialDevice }: { initialDevice: RemoteDevice | null
   if (open)
     return (
       <NotebookView
-        notebook={open}
+        notebook={open.notebook}
+        startPageId={open.pageId}
+        device={device}
+        online={online}
         onClose={() => {
           setOpen(null)
-          reload()
+          setLibraryKey((k) => k + 1)
         }}
       />
     )
 
   return (
     <div className="flex h-full flex-col">
-      <header className="sticky top-0 z-20 flex items-end justify-between gap-3 px-6 pb-3 pt-[calc(env(safe-area-inset-top)+18px)]">
-        <h1 className="font-serif text-[40px] leading-none tracking-tight">Notes</h1>
+      <header className="flex items-end justify-between gap-3 px-6 pb-4 pt-[calc(env(safe-area-inset-top)+18px)]">
+        <h1 className="font-serif text-[40px] leading-none tracking-tight">{TITLES[tab]}</h1>
         <div className="flex items-center gap-2">
+          {appExtras.headerStart?.(device, online)}
           {!online && (
             <span className="flex items-center gap-1.5 rounded-full bg-oat px-3 py-1.5 text-[13px] text-ink-muted">
               <WifiOff size={14} /> Offline
@@ -177,53 +116,31 @@ export function NotesApp({ initialDevice }: { initialDevice: RemoteDevice | null
         </div>
       </header>
 
-      <main className="flex-1 overflow-y-auto px-6 pb-[calc(env(safe-area-inset-bottom)+24px)] pt-4">
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(132px,1fr))] gap-x-6 gap-y-8">
-          <button type="button" onClick={() => setCreating(true)} className="press flex flex-col gap-2 text-left">
-            <div className="flex aspect-[3/4] w-full items-center justify-center rounded-2xl border-2 border-dashed border-rule text-ink-muted">
-              <Plus size={34} strokeWidth={1.6} />
-            </div>
-            <div className="text-[14px] font-medium">New notebook</div>
-          </button>
-          {notebooks?.map((n) => (
-            <div key={n.id} className="flex flex-col gap-2">
-              <button type="button" className="press" onClick={() => setOpen(n)}>
-                <Cover cover={n.cover} title={n.title} />
-              </button>
-              <div className="flex items-start justify-between gap-1">
-                <div className="min-w-0">
-                  <div className="truncate text-[14px] font-medium">{n.title}</div>
-                  <div className="text-[12px] text-ink-muted">{shortDate(n.updatedAt)}</div>
-                </div>
-                <button
-                  type="button"
-                  aria-label={`Move ${n.title} to the trash`}
-                  className="press -mr-1 rounded-full p-1 text-ink-muted"
-                  onClick={() => {
-                    if (confirm(`Move “${n.title}” to the trash?`)) void trashNotebook(n.id).then(reload)
-                  }}
-                >
-                  <MoreHorizontal size={18} />
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-        {notebooks?.length === 0 && <p className="mt-10 max-w-sm text-[15px] leading-relaxed text-ink-muted">Your notebooks live on this device and open even without internet.</p>}
+      <main className="flex-1 overflow-y-auto pb-[calc(env(safe-area-inset-bottom)+96px)]">
+        {tab === 'notes' && <NotesTab key={libraryKey} onOpen={(notebook) => setOpen({ notebook })} notice={say} />}
+        {tab === 'store' && <StoreView online={online} notice={say} />}
+        {tab === 'search' && <SearchTab onOpen={(notebook, pageId) => setOpen({ notebook, pageId })} />}
+        {tab === 'trash' && <TrashTab />}
       </main>
 
-      {creating && (
-        <NewNotebookSheet
-          onClose={() => setCreating(false)}
-          onCreate={(title, cover) => {
-            setCreating(false)
-            void createNotebook({ title, cover }).then(reload)
-          }}
-        />
-      )}
+      <div className="pointer-events-none fixed inset-x-0 bottom-[calc(env(safe-area-inset-bottom)+14px)] z-30 flex justify-center">
+        <div ref={tabsRef} className="pointer-events-auto">
+          <TabBar
+            aria-label="Sections"
+            items={[
+              { value: 'notes', label: 'Notes' },
+              { value: 'store', label: 'Store' },
+              { value: 'search', label: 'Search' },
+              { value: 'trash', label: 'Trash' }
+            ]}
+            value={tab}
+            onValueChange={(v) => setTab(v as Tab)}
+          />
+        </div>
+      </div>
 
       {notice && (
-        <div role="status" className="glass fixed bottom-[calc(env(safe-area-inset-bottom)+20px)] left-1/2 z-50 w-[min(92vw,460px)] -translate-x-1/2 rounded-2xl px-4 py-3 text-center text-[14px] shadow-xl">
+        <div role="status" className="glass fixed bottom-[calc(env(safe-area-inset-bottom)+86px)] left-1/2 z-50 w-[min(92vw,460px)] -translate-x-1/2 rounded-2xl px-4 py-3 text-center text-[14px] shadow-xl">
           {notice}
         </div>
       )}

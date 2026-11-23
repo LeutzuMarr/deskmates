@@ -30,6 +30,8 @@ export interface Notebook {
   folderId: string | null
   /** The paper new pages get. */
   pageStyle?: PageStyle
+  /** The template new pages get (built-in, store or own). */
+  pageTemplate?: string
   /** The page last open, to come back to it. */
   lastPageId?: string
   favorite?: boolean
@@ -234,7 +236,7 @@ export function makePage(notebookId: string, order: number, style: PageStyle, no
 }
 
 export async function createNotebook(
-  input: { title: string; cover?: string; folderId?: string | null; pageStyle?: PageStyle; firstPage?: Partial<Page> },
+  input: { title: string; cover?: string; folderId?: string | null; pageStyle?: PageStyle; pageTemplate?: string; firstPages?: Array<Partial<Page>> },
   now = Date.now()
 ): Promise<Notebook> {
   const pageStyle = input.pageStyle ?? DEFAULT_PAGE_STYLE
@@ -244,18 +246,44 @@ export async function createNotebook(
     cover: input.cover ?? COVERS[0],
     folderId: input.folderId ?? null,
     pageStyle,
+    pageTemplate: input.pageTemplate,
     createdAt: now,
     updatedAt: now,
     trashedAt: null
   }
-  const page = makePage(notebook.id, 0, pageStyle, now, input.firstPage)
-  await save({ notebooks: [notebook], pages: [page] })
+  const firsts = input.firstPages?.length ? input.firstPages : [{ template: input.pageTemplate }]
+  const pages = firsts.map((extra, i) => makePage(notebook.id, i, pageStyle, now, extra))
+  await save({ notebooks: [notebook], pages })
   return notebook
+}
+
+/** The size of a picture (for pages made from pictures). */
+export async function pictureSize(blob: Blob): Promise<[number, number]> {
+  try {
+    const bitmap = await createImageBitmap(blob)
+    const size: [number, number] = [bitmap.width, bitmap.height]
+    bitmap.close()
+    return size
+  } catch {
+    return [794, 1123]
+  }
+}
+
+/** Page fields for pages showing pictures (a picture template, an imported PDF): A4 width, the picture's shape. */
+export async function backgroundPages(assetIds: string[]): Promise<Array<Partial<Page>>> {
+  const out: Array<Partial<Page>> = []
+  for (const id of assetIds) {
+    const asset = await getAsset(id)
+    const [w, h] = asset ? await pictureSize(asset.blob) : [794, 1123]
+    const width = w > h ? 1123 : 794
+    out.push({ background: { assetId: id }, paper: 'blank', width, height: Math.round((width * h) / w) })
+  }
+  return out
 }
 
 export async function updateNotebook(
   id: string,
-  changes: Partial<Pick<Notebook, 'title' | 'cover' | 'folderId' | 'pageStyle' | 'lastPageId' | 'favorite'>>,
+  changes: Partial<Pick<Notebook, 'title' | 'cover' | 'folderId' | 'pageStyle' | 'pageTemplate' | 'lastPageId' | 'favorite'>>,
   now = Date.now()
 ): Promise<Notebook | null> {
   const current = await getNotebook(id)
@@ -343,4 +371,108 @@ export async function clearOutbox(sent: OutboxEntry[]): Promise<void> {
     }
   }
   await finished(tx)
+}
+
+// ---- folders ----
+
+export async function listFolders(): Promise<Folder[]> {
+  const all = await getAllRecords<Folder>('folders')
+  return all.filter((f) => !f.deletedAt).sort((a, b) => a.name.localeCompare(b.name))
+}
+
+export async function createFolder(name: string, parentId: string | null, now = Date.now()): Promise<Folder> {
+  const folder: Folder = { id: newId(), name: name.trim() || 'New folder', parentId, createdAt: now, updatedAt: now, deletedAt: null }
+  await save({ folders: [folder] })
+  return folder
+}
+
+export async function renameFolder(id: string, name: string, now = Date.now()): Promise<void> {
+  const folder = await getRecord<Folder>('folders', id)
+  if (!folder || !name.trim()) return
+  await save({ folders: [{ ...folder, name: name.trim(), updatedAt: now }] })
+}
+
+/** Removes a folder; what was in it moves up to its parent. */
+export async function deleteFolder(id: string, now = Date.now()): Promise<void> {
+  const folder = await getRecord<Folder>('folders', id)
+  if (!folder) return
+  const folders = (await listFolders()).filter((f) => f.parentId === id).map((f) => ({ ...f, parentId: folder.parentId, updatedAt: now }))
+  const notebooks = (await getAllRecords<Notebook>('notebooks')).filter((n) => n.folderId === id).map((n) => ({ ...n, folderId: folder.parentId, updatedAt: now }))
+  await save({ folders: [...folders, { ...folder, deletedAt: now, updatedAt: now }], notebooks })
+}
+
+// ---- copying ----
+
+/** Copies pages (with everything on them) into a notebook, after `afterOrder`. Returns the new pages. */
+export async function copyPages(pageIds: string[], toNotebook: string, afterOrder: number, beforeOrder: number | null, now = Date.now()): Promise<Page[]> {
+  const sources = (await Promise.all(pageIds.map((id) => getRecord<Page>('pages', id)))).filter((p): p is Page => Boolean(p && !p.deletedAt))
+  const span = beforeOrder === null ? sources.length + 1 : beforeOrder - afterOrder
+  const pages: Page[] = []
+  const items: Item[] = []
+  for (const [i, source] of sources.entries()) {
+    const page: Page = { ...source, id: newId(), notebookId: toNotebook, order: afterOrder + (span * (i + 1)) / (sources.length + 1), bookmarked: false, createdAt: now, updatedAt: now, deletedAt: null }
+    pages.push(page)
+    for (const item of await listPageItems(source.id)) items.push({ ...item, id: newId(), pageId: page.id, notebookId: toNotebook, createdAt: now, updatedAt: now, deletedAt: null })
+  }
+  await save({ pages, items })
+  return pages
+}
+
+export async function duplicateNotebook(id: string, now = Date.now()): Promise<Notebook | null> {
+  const source = await getNotebook(id)
+  if (!source) return null
+  const copy: Notebook = { ...source, id: newId(), title: `${source.title} (copy)`, createdAt: now, updatedAt: now, lastPageId: undefined, trashedAt: null, deletedAt: null }
+  await save({ notebooks: [copy] })
+  const pages = await listPages(id)
+  await copyPages(pages.map((p) => p.id), copy.id, -1, pages.length, now)
+  return copy
+}
+
+/** Reorders pages to the given order of ids. */
+export async function reorderPages(ordered: Page[], now = Date.now()): Promise<Page[]> {
+  const next = ordered.map((p, i) => ({ ...p, order: i, updatedAt: now }))
+  await save({ pages: next })
+  return next
+}
+
+// ---- search (typed text only) ----
+
+export interface SearchHit {
+  notebook: Notebook
+  pageId?: string
+  pageNumber?: number
+  /** The matching text, a little either side of the match. */
+  snippet?: string
+}
+
+function snippetOf(text: string, query: string): string {
+  const at = text.toLocaleLowerCase().indexOf(query)
+  const start = Math.max(0, at - 30)
+  return (start > 0 ? '…' : '') + text.slice(start, at + query.length + 50).replace(/\s+/g, ' ') + (at + query.length + 50 < text.length ? '…' : '')
+}
+
+/** Finds a query in notebook titles, page titles, text boxes and sticky notes. */
+export async function searchNotes(raw: string): Promise<SearchHit[]> {
+  const query = raw.trim().toLocaleLowerCase()
+  if (!query) return []
+  const notebooks = await listNotebooks()
+  const byId = new Map(notebooks.map((n) => [n.id, n]))
+  const hits: SearchHit[] = notebooks.filter((n) => n.title.toLocaleLowerCase().includes(query)).map((notebook) => ({ notebook }))
+  const pages = (await getAllRecords<Page>('pages')).filter((p) => !p.deletedAt && byId.has(p.notebookId))
+  const pageNumber = new Map<string, number>()
+  const perNotebook = new Map<string, Page[]>()
+  for (const p of pages) perNotebook.set(p.notebookId, [...(perNotebook.get(p.notebookId) ?? []), p])
+  for (const list of perNotebook.values()) list.sort((a, b) => a.order - b.order).forEach((p, i) => pageNumber.set(p.id, i + 1))
+  for (const p of pages) {
+    if (p.title?.toLocaleLowerCase().includes(query)) hits.push({ notebook: byId.get(p.notebookId)!, pageId: p.id, pageNumber: pageNumber.get(p.id), snippet: p.title })
+  }
+  const items = await getAllRecords<Item>('items')
+  for (const item of items) {
+    if (item.deletedAt || !byId.has(item.notebookId)) continue
+    if (item.kind !== 'text' && item.kind !== 'sticky') continue
+    const text = (item.data as { text: string }).text
+    if (!text.toLocaleLowerCase().includes(query)) continue
+    hits.push({ notebook: byId.get(item.notebookId)!, pageId: item.pageId, pageNumber: pageNumber.get(item.pageId), snippet: snippetOf(text, query) })
+  }
+  return hits.slice(0, 200)
 }
