@@ -35,6 +35,12 @@ notebookExtras.setup = [
     engine.handlers.lasso = lassoTool(engine)
     engine.handlers.text = textTool(engine)
     engine.handlers.tape = tapeTool(engine)
+    // Undo and redo work on the page as saved: drop a selection or a text being typed first.
+    const release = (): void => {
+      finishEditing(engine)
+      selectionOf(engine).clear()
+    }
+    engine.beforeHistory.add(release)
     return () => undefined
   }
 ]

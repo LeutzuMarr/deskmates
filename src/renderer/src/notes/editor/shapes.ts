@@ -113,6 +113,9 @@ export function recognizeShape(points: InkPoint[]): Shape | null {
   const pts: P[] = points.map((p) => [p[0], p[1]])
   const length = pathLength(pts)
   if (length < 12) return null
+  // Handwriting is small: only something at least ~1 cm across is straightened.
+  const span = Math.hypot(Math.max(...pts.map((p) => p[0])) - Math.min(...pts.map((p) => p[0])), Math.max(...pts.map((p) => p[1])) - Math.min(...pts.map((p) => p[1])))
+  if (span < 36) return null
   const first = pts[0]!
   const last = pts[pts.length - 1]!
   const gap = Math.hypot(last[0] - first[0], last[1] - first[1])

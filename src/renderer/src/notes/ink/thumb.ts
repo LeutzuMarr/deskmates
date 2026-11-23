@@ -3,7 +3,7 @@ import { useEffect, useRef } from 'react'
 import type { Item, Page, PageStyle } from '../model'
 import { pageDimensions } from '../model'
 import { drawPaper } from './paper'
-import { InkCache, paintItem } from './paint'
+import { InkCache, itemBounds, paintItem } from './paint'
 import { templateById } from '../templates/registry'
 import { drawTemplate, type TemplateSpec } from '../templates/spec'
 import { assetBlob } from '../db'
@@ -24,6 +24,10 @@ export function thumbCache(): InkCache {
 
 export function drawPageThumb(canvas: HTMLCanvasElement, page: Pick<Page, 'paper' | 'color' | 'width' | 'height' | 'template' | 'background'>, items: Item[], width: number, template?: TemplateSpec | null): void {
   const dpr = Math.min(2, window.devicePixelRatio || 1)
+  if (page.width >= 10000) {
+    drawWhiteboardThumb(canvas, page, items, width, dpr)
+    return
+  }
   const height = Math.round((width * page.height) / page.width)
   canvas.width = Math.round(width * dpr)
   canvas.height = Math.round(height * dpr)
@@ -42,6 +46,34 @@ export function drawPageThumb(canvas: HTMLCanvasElement, page: Pick<Page, 'paper
     const picture = cache.picture(page.background.assetId)
     if (picture) ctx.drawImage(picture, 0, 0, page.width, page.height)
   }
+  for (const item of items) paintItem(ctx, item, cache, page.color)
+}
+
+/** A whiteboard is endless: its picture shows the part with something on it (or the middle). */
+function drawWhiteboardThumb(canvas: HTMLCanvasElement, page: Pick<Page, 'paper' | 'color' | 'width' | 'height'>, items: Item[], width: number, dpr: number): void {
+  const cache = thumbCache()
+  const bounds = items.map((i) => itemBounds(i, cache))
+  const cx = page.width / 2
+  const cy = page.height / 2
+  const minX = Math.min(cx - 400, ...bounds.map((b) => b.minX)) - 40
+  const minY = Math.min(cy - 300, ...bounds.map((b) => b.minY)) - 40
+  const maxX = Math.max(cx + 400, ...bounds.map((b) => b.maxX)) + 40
+  const maxY = Math.max(cy + 300, ...bounds.map((b) => b.maxY)) + 40
+  const w = maxX - minX
+  const h = maxY - minY
+  const height = Math.round((width * h) / w)
+  canvas.width = Math.round(width * dpr)
+  canvas.height = Math.round(height * dpr)
+  canvas.style.width = `${width}px`
+  canvas.style.height = `${height}px`
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  const scale = (width * dpr) / w
+  ctx.setTransform(scale, 0, 0, scale, -minX * scale, -minY * scale)
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(minX, minY, w, h)
+  // Dots only when they'd be few enough to draw quickly.
+  if (w * h < 3_000_000) drawPaper(ctx, page, { minX, minY, maxX, maxY }, scale / dpr / 1.4)
   for (const item of items) paintItem(ctx, item, cache, page.color)
 }
 

@@ -47,6 +47,7 @@ export interface PressureOptions {
 export class PressureTracker {
   private last: PenSample | null = null
   private smoothed = 0.6
+  private speed = 0
   /** Set once the pen reports pressures that change (a pressure-sensitive pen). */
   sawRealPressure = false
   private firstPressure: number | null = null
@@ -62,16 +63,19 @@ export class PressureTracker {
     if ((this.options.devicePressure || this.sawRealPressure) && sample.pointerType === 'pen' && sample.pressure > 0) {
       raw = sample.pressure
     } else {
-      let speed = 0
       if (this.last) {
-        const dt = Math.max(1, sample.time - this.last.time)
-        speed = Math.hypot(sample.x - this.last.x, sample.y - this.last.y) / dt
+        // Events can arrive a fraction of a millisecond apart (or batched with one time): a floor on
+        // the time step keeps a tiny gap from reading as a huge speed, and the speed is smoothed.
+        const dt = Math.max(6, sample.time - this.last.time)
+        const instant = Math.hypot(sample.x - this.last.x, sample.y - this.last.y) / dt
+        this.speed = this.speed * 0.7 + instant * 0.3
       }
       // ~0 px/ms is a slow, heavy line; ~3 px/ms and faster is light.
-      raw = 0.92 - Math.min(1, speed / 3) * 0.5 * this.options.speedEffect
+      raw = 0.9 - Math.min(1, this.speed / 3) * 0.5 * this.options.speedEffect
     }
-    // Smooth it so the width flows instead of jittering.
-    this.smoothed = this.last ? this.smoothed * 0.65 + raw * 0.35 : raw
+    // Smooth it so the width flows instead of jittering; the first point starts from a middle
+    // weight, so the line doesn't begin with a blob.
+    this.smoothed = this.last ? this.smoothed * 0.7 + raw * 0.3 : 0.7 * 0.5 + raw * 0.5
     this.last = sample
     return applyCurve(this.smoothed, this.options.curve)
   }

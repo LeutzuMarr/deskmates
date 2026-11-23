@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { useLiquid } from './liquid'
 
 /** A glass card that opens under a toolbar button and closes on a tap outside it. */
@@ -38,7 +39,8 @@ export function Popover({
   }, [open, onClose])
   if (!open || !anchor) return null
   const left = Math.max(12, Math.min(window.innerWidth - width - 12, anchor.x - width / 2))
-  return (
+  // Into <body>: inside a liquid bar, the bar's transform would become this card's frame.
+  return createPortal(
     <div
       ref={ref}
       role="dialog"
@@ -47,7 +49,8 @@ export function Popover({
       style={{ left, top: anchor.y + 10, width, animation: 'pop-in .32s cubic-bezier(.2,.9,.3,1.25)', transformOrigin: 'top center' }}
     >
       {children}
-    </div>
+    </div>,
+    document.body
   )
 }
 

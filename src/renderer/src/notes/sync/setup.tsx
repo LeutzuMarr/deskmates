@@ -5,6 +5,12 @@ import { notebookExtras } from '../editor/NotebookView'
 import { restoreLibrary } from '../../remote/device'
 import { SyncBadge } from './SyncBadge'
 import { syncer } from './sync'
+import { loadTemplates } from '../templates/registry'
+
+// Templates made or installed on another device show up without reopening the app.
+syncer.onChange((change) => {
+  if (change.stores.has('templates')) void loadTemplates()
+})
 
 localChange.add(() => syncer.soon())
 

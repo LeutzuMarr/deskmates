@@ -93,6 +93,9 @@ export function NotebookView({
   const wetRef = useRef<HTMLCanvasElement>(null)
   const barRef = useRef<HTMLDivElement>(null)
   const pageBarRef = useRef<HTMLDivElement>(null)
+  const topRef = useRef<HTMLDivElement>(null)
+  const leftRef = useRef<HTMLDivElement>(null)
+  const rightRef = useRef<HTMLDivElement>(null)
   const engineRef = useRef<NotesEngine | null>(null)
   const [tools, setToolsState] = useState<ToolState | null>(null)
   const [, refresh] = useBump()
@@ -106,6 +109,8 @@ export function NotebookView({
   const flushTimer = useRef(0)
   useLiquid(barRef, { reach: 22 })
   useLiquid(pageBarRef, { reach: 18 })
+  useLiquid(leftRef, { reach: 18 })
+  useLiquid(rightRef, { reach: 18 })
 
   const flush = useCallback(() => {
     window.clearTimeout(flushTimer.current)
@@ -122,7 +127,9 @@ export function NotebookView({
     let cleanupExtras: (() => void) | undefined
     const observer = new ResizeObserver(() => {
       const el = host.current
-      if (el && engine) engine.resize(el.clientWidth, el.clientHeight, window.devicePixelRatio || 1)
+      if (!el || !engine) return
+      engine.topInset = topRef.current ? topRef.current.getBoundingClientRect().height : 64
+      engine.resize(el.clientWidth, el.clientHeight, window.devicePixelRatio || 1)
     })
     void (async () => {
       let [pages, items, savedTools] = await Promise.all([listPages(initial.id), listItems(initial.id), getMeta<Partial<ToolState>>('tools')])
@@ -142,7 +149,7 @@ export function NotebookView({
         loadAsset: (id) => assetBlob(id),
         audioStamp: () => notebookAudio.stamp?.(initial.id)
       })
-      engine.topInset = 64
+      engine.topInset = topRef.current ? topRef.current.getBoundingClientRect().height : 64
       engine.say = setToastRef.current
       engine.dark = matchMedia('(prefers-color-scheme: dark)').matches
       engine.load(pages, items)
@@ -306,25 +313,26 @@ export function NotebookView({
       </div>
 
       {/* Top bar */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-center px-2 pt-[calc(env(safe-area-inset-top)+8px)]">
-        <div ref={barRef} className="toolbar-capsule glass pointer-events-auto flex max-w-full items-center gap-1 overflow-x-auto px-2 py-1.5 [scrollbar-width:none]">
+      <div ref={topRef} className="pointer-events-none absolute inset-x-0 top-0 flex flex-wrap items-start justify-between gap-2 px-2 pt-[calc(env(safe-area-inset-top)+8px)]">
+        <div ref={leftRef} className="toolbar-capsule glass pointer-events-auto order-1 flex shrink-0 items-center px-1.5 py-1.5">
           <button type="button" onClick={close} className="press flex shrink-0 items-center gap-0.5 rounded-full py-1.5 pl-1 pr-2.5 text-[15px] font-medium" aria-label="Back to notes">
             <ChevronLeft size={20} />
             <span className="max-w-[9rem] truncate">{notebook.title}</span>
           </button>
-          <span className="mx-1 h-6 w-px shrink-0 bg-rule" />
+        </div>
+        <div ref={barRef} className="toolbar-capsule glass pointer-events-auto order-3 mx-auto flex max-w-full items-center gap-1 overflow-x-auto px-2 py-1.5 [scrollbar-width:none] xl:order-2">
           {tools && (
             <div className="shrink-0">
               <SegmentedControl
                 aria-label="Tools"
-                items={toolList.map((t) => ({ value: t.value, label: <span aria-label={t.label} title={t.label} className="flex px-1">{t.icon}</span> }))}
+                items={toolList.map((t) => ({ value: t.value, label: <span aria-label={t.label} title={t.label} className="flex px-0.5">{t.icon}</span> }))}
                 value={tool ?? null}
                 onValueChange={(v) => selectTool(v)}
               />
             </div>
           )}
           {quick.length > 0 && (
-            <>
+            <span className="hidden shrink-0 items-center min-[900px]:flex">
               <span className="mx-1 h-6 w-px shrink-0 bg-rule" />
               {quick.map((f, i) => {
                 const active = tools && tools.tool === f.tool && tools.pens[f.tool].color === f.color && tools.pens[f.tool].width === f.width
@@ -340,7 +348,7 @@ export function NotebookView({
                   />
                 )
               })}
-            </>
+            </span>
           )}
           {tools && optionsLabel && (
             <button
@@ -353,7 +361,8 @@ export function NotebookView({
               <span aria-hidden>▾</span>
             </button>
           )}
-          <span className="mx-1 h-6 w-px shrink-0 bg-rule" />
+        </div>
+        <div ref={rightRef} className="toolbar-capsule glass pointer-events-auto order-2 flex shrink-0 items-center gap-0.5 px-1.5 py-1.5 xl:order-3">
           <button type="button" aria-label="Undo" disabled={!engine?.history.canUndo} onClick={() => engine?.undo()} className="press shrink-0 rounded-full p-2 disabled:opacity-30">
             <Undo2 size={19} />
           </button>
