@@ -36,7 +36,23 @@ function tip(tool: PenTool, color: string): HTMLCanvasElement {
   canvas.height = size
   const c = canvas.getContext('2d')!
   const r = size / 2
-  if (tool === 'airbrush') {
+  if (tool === 'pencil') {
+    const g = c.createRadialGradient(r, r, 0, r, r, r)
+    g.addColorStop(0, color)
+    g.addColorStop(0.82, color)
+    g.addColorStop(1, 'transparent')
+    c.globalAlpha = 0.55
+    c.fillStyle = g
+    c.fillRect(0, 0, size, size)
+    const rand = random(11)
+    c.fillStyle = color
+    for (let i = 0; i < 360; i++) {
+      const a = rand() * Math.PI * 2
+      const d = Math.sqrt(rand()) * r * 0.85
+      c.globalAlpha = 0.25 + rand() * 0.55
+      c.fillRect(r + Math.cos(a) * d, r + Math.sin(a) * d, 1.6, 1.6)
+    }
+  } else if (tool === 'airbrush') {
     const g = c.createRadialGradient(r, r, 0, r, r, r)
     g.addColorStop(0, color)
     g.addColorStop(1, 'transparent')
@@ -46,10 +62,10 @@ function tip(tool: PenTool, color: string): HTMLCanvasElement {
   } else {
     const rand = random(tool === 'charcoal' ? 99 : 7)
     c.fillStyle = color
-    const grains = tool === 'charcoal' ? 260 : tool === 'pencil' ? 520 : 420
+    const grains = tool === 'charcoal' ? 260 : 420
     for (let i = 0; i < grains; i++) {
       const a = rand() * Math.PI * 2
-      const d = Math.sqrt(rand()) * r * (tool === 'charcoal' ? 0.95 : tool === 'pencil' ? 0.7 : 0.8)
+      const d = Math.sqrt(rand()) * r * (tool === 'charcoal' ? 0.95 : 0.8)
       const s = tool === 'charcoal' ? 1 + rand() * 3.2 : 0.8 + rand() * 1.4
       c.globalAlpha = tool === 'charcoal' ? 0.25 + rand() * 0.6 : 0.3 + rand() * 0.5
       c.fillRect(r + Math.cos(a) * d, r + Math.sin(a) * d, s, s)
@@ -61,7 +77,7 @@ function tip(tool: PenTool, color: string): HTMLCanvasElement {
 
 const SETTINGS: Record<string, { spacing: number; flow: number; jitter: number }> = {
   // A single pass is a soft grey; every pass over it adds more graphite.
-  pencil: { spacing: 0.1, flow: 0.32, jitter: 0.04 },
+  pencil: { spacing: 0.1, flow: 0.2, jitter: 0.03 },
   graphite: { spacing: 0.12, flow: 0.55, jitter: 0.08 },
   charcoal: { spacing: 0.18, flow: 0.7, jitter: 0.25 },
   airbrush: { spacing: 0.08, flow: 0.12, jitter: 0 }
@@ -124,9 +140,8 @@ function watercolor(ctx: CanvasRenderingContext2D, data: StrokeData, color: stri
 }
 
 const pictures = new WeakMap<InkPoint[], { canvas: HTMLCanvasElement; x: number; y: number; scale: number; key: string }>()
-/** Finished brush strokes are drawn at this many pixels per page pixel. */
-const CACHE_SCALE = 2
-const MAX_SIDE = 2048
+/** Largest side of a finished stroke's picture (beyond that it's drawn directly). */
+const MAX_SIDE = 4096
 
 function drawRaw(ctx: CanvasRenderingContext2D, data: StrokeData, paper: PaperColor): void {
   const color = inkOn(paper, data.color)
@@ -137,15 +152,24 @@ function drawRaw(ctx: CanvasRenderingContext2D, data: StrokeData, paper: PaperCo
 /** Paints a brush stroke (context in page space), from its cached picture when it has one. */
 export function paintBrush(ctx: CanvasRenderingContext2D, data: StrokeData, paper: PaperColor): void {
   const key = `${data.tool}|${data.color}|${data.width}|${data.opacity ?? ''}|${paper}`
+  // Device pixels per page pixel right now: the picture is made at least this sharp, so a finished
+  // stroke looks exactly like the one being drawn, at any zoom.
+  const t = ctx.getTransform()
+  const needed = Math.max(1, Math.hypot(t.a, t.b))
   const hit = pictures.get(data.points)
-  if (hit && hit.key === key) {
+  if (hit && hit.key === key && hit.scale >= needed * 0.95) {
     ctx.drawImage(hit.canvas, hit.x, hit.y, hit.canvas.width / hit.scale, hit.canvas.height / hit.scale)
     return
   }
   const b = boundsOf(data.points, data.width)
   const w = b.maxX - b.minX
   const h = b.maxY - b.minY
-  const scale = Math.min(CACHE_SCALE, MAX_SIDE / Math.max(w, h, 1))
+  if (Math.max(w, h) * needed > MAX_SIDE) {
+    drawRaw(ctx, data, paper)
+    return
+  }
+  // A little extra, so small zooms in don't redraw it straight away.
+  const scale = Math.min(needed * 1.25, MAX_SIDE / Math.max(w, h, 1))
   const canvas = document.createElement('canvas')
   canvas.width = Math.max(1, Math.ceil(w * scale))
   canvas.height = Math.max(1, Math.ceil(h * scale))
