@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto'
 import { afterEach, describe, expect, it } from 'vitest'
-import { closeNotesDb, createNotebook, DB_NAME, getMeta, getNotebook, listNotebooks, setMeta, trashNotebook, updateNotebook } from '../../src/renderer/src/notes/db'
+import { clearOutbox, closeNotesDb, createNotebook, DB_NAME, deleteNotebookForGood, getMeta, getNotebook, listNotebooks, listOutbox, listPages, listTrash, restoreNotebook, save, setMeta, trashNotebook, updateNotebook } from '../../src/renderer/src/notes/db'
 
 afterEach(async () => {
   await closeNotesDb()
@@ -42,5 +42,42 @@ describe('notes library', () => {
     expect(await getMeta('lastOpened')).toBeNull()
     await setMeta('lastOpened', { id: 'abc' })
     expect(await getMeta('lastOpened')).toEqual({ id: 'abc' })
+  })
+
+  it('gives a new notebook its first page and queues both for sync', async () => {
+    const notebook = await createNotebook({ title: 'Biology', pageStyle: { paper: 'grid', color: 'cream', size: 'a4' } })
+    const pages = await listPages(notebook.id)
+    expect(pages).toHaveLength(1)
+    expect(pages[0]).toMatchObject({ paper: 'grid', color: 'cream', width: 794, height: 1123 })
+    const outbox = await listOutbox()
+    expect(outbox.map((e) => e.store).sort()).toEqual(['notebooks', 'pages'])
+    await clearOutbox(outbox)
+    expect(await listOutbox()).toEqual([])
+  })
+
+  it('keeps a change queued if it changed again while syncing', async () => {
+    const notebook = await createNotebook({ title: 'Physics' })
+    const sent = await listOutbox()
+    await new Promise((r) => setTimeout(r, 2))
+    await updateNotebook(notebook.id, { title: 'Physics II' })
+    await clearOutbox(sent)
+    expect((await listOutbox()).map((e) => e.key)).toEqual([`notebooks:${notebook.id}`])
+  })
+
+  it('does not queue what came from another device', async () => {
+    await save({ folders: [{ id: 'f1', name: 'School', parentId: null, createdAt: 1, updatedAt: 1 }] }, { fromSync: true })
+    expect(await listOutbox()).toEqual([])
+  })
+
+  it('restores from the trash and deletes for good', async () => {
+    const notebook = await createNotebook({ title: 'Anatomy' })
+    await trashNotebook(notebook.id)
+    expect((await listTrash()).map((n) => n.id)).toEqual([notebook.id])
+    await restoreNotebook(notebook.id)
+    expect((await listNotebooks()).map((n) => n.id)).toEqual([notebook.id])
+    await deleteNotebookForGood(notebook.id)
+    expect(await listNotebooks()).toEqual([])
+    expect(await listTrash()).toEqual([])
+    expect(await listPages(notebook.id)).toEqual([])
   })
 })

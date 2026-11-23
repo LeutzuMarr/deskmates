@@ -50,6 +50,9 @@ importers:
       pdf-lib:
         specifier: ^1.17.1
         version: 1.17.1
+      perfect-freehand:
+        specifier: 1.2.2
+        version: 1.2.2
       pptxgenjs:
         specifier: ^4.0.1
         version: 4.0.1
@@ -2789,6 +2792,9 @@ packages:
   pe-library@0.4.1:
     resolution: {integrity: sha512-eRWB5LBz7PpDu4PUlwT0PhnQfTQJlDDdPa35urV4Osrm0t0AqQFGn+UIkU3klZvwJ8KPO3VbBFsXquA6p6kqZw==}
     engines: {node: '>=12', npm: '>=6'}
+
+  perfect-freehand@1.2.2:
+    resolution: {integrity: sha512-eh31l019WICQ03pkF3FSzHxB8n07ItqIQ++G5UV8JX0zVOXzgTGCqnRR0jJ2h9U8/2uW4W4mtGJELt9kEV0CFQ==}
 
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
@@ -6384,6 +6390,8 @@ snapshots:
       tslib: 1.14.1
 
   pe-library@0.4.1: {}
+
+  perfect-freehand@1.2.2: {}
 
   picocolors@1.1.1: {}
 

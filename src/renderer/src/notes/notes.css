@@ -103,3 +103,64 @@ textarea {
     transform: none;
   }
 }
+
+/* ---- Glisse (the liquid-glass controls), in the notes' palette ---- */
+:root {
+  --lg-fill: var(--clay);
+  --lg-on: var(--olive);
+  --lg-destructive: #c8372d;
+  --lg-foreground: var(--ink);
+  --lg-muted: var(--ink-muted);
+  --lg-ring: var(--ink);
+}
+
+/* The writing surface: nothing of the browser's own touch handling. */
+.ink-surface {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.toolbar-capsule {
+  border-radius: 999px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08), 0 10px 30px rgba(0, 0, 0, 0.12);
+}
+
+.swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  flex: none;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+  transition: transform 0.3s cubic-bezier(0.2, 0.9, 0.3, 1.4);
+}
+.swatch[aria-pressed='true'] {
+  transform: scale(1.12);
+  box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--ink);
+}
+.swatch:active {
+  transform: scale(0.9);
+  transition-duration: 0.06s;
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.92) translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes sheet-up {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
