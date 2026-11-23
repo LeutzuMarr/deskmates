@@ -10,6 +10,7 @@ import { keepDataForGood, libraryFromHash, restoreDevice, saveLibrary } from '..
 import { NotesApp } from './App'
 import './features'
 import './features-pro'
+import './features-ai'
 import './sync/setup'
 
 async function registerServiceWorker(): Promise<void> {

@@ -7,7 +7,7 @@ import type { TaskScheduler } from '../schedules/task-scheduler'
 import type { DuoService } from '../duo/service'
 import type { RemoteAccess } from '../phone/remote'
 import type { DuoProfile } from '../../shared/duo'
-import { freebuffModels, setFreebuffModels, type FreebuffModelList } from '../../shared/freebuff'
+import { FREEBUFF_CURRENT_MODEL, freebuffModels, setFreebuffModels, type FreebuffModelList } from '../../shared/freebuff'
 import { removeWidgetsOf } from '../tools/widgets'
 import { promptToolInfos, runTool } from '../tools/shared-prompt-tools'
 import { findFiles } from '../fs/find-files'
@@ -42,7 +42,8 @@ import type {
   RpcMethod,
   ScreenMark,
   Settings,
-  TerminalTool
+  TerminalTool,
+  TimelineItem
 } from '../../shared/protocol'
 import { MANAGED_TERMINAL_TOOLS } from '../../shared/protocol'
 import type { ScreenGuideService } from '../screen/guide'
@@ -381,6 +382,43 @@ export function createHandlers(services: HandlerServices): Handlers {
     'tasks.send': (params: { id: string; text: string; images?: Array<{ dataUrl: string; name?: string }>; research?: boolean }) => {
       if (params.research) runner.researchNext(params.id)
       return runner.send(params.id, params.text, params.images ?? [])
+    },
+
+    // ---- the notes app's Deskmates bar (iPad/phone, through the relay) ----
+    // A question from a notebook becomes a chat in the "Notes" project, answered by Freebuff (the
+    // model it has selected), so it also shows in the Work tab. Pictures of the page go along; for a
+    // command-line model they're saved in the project and their paths added to the message.
+    'notes.ask': async (params: { text: string; images?: Array<{ dataUrl: string; name?: string }>; taskId?: string; title?: string }) => {
+      const text = String(params.text ?? '').trim()
+      if (!text) throw new Error('Ask something first.')
+      const folder = join(dataDir, 'notes-ai')
+      mkdirSync(folder, { recursive: true })
+      const real = realpathSync.native(folder)
+      let project = repos.projects.list().find((p) => p.folder === real)
+      if (!project) {
+        project = repos.projects.create('Notes', real)
+        project = repos.projects.update(project.id, { model: { provider: 'freebuff', modelId: FREEBUFF_CURRENT_MODEL } })
+        bus.emit({ type: 'project.updated', project })
+      }
+      let taskId = params.taskId && repos.tasks.list(project.id).some((t) => t.id === params.taskId) ? params.taskId : null
+      if (!taskId) {
+        const title = String(params.title ?? '').trim().slice(0, 80) || 'From my notes'
+        const task = repos.tasks.create(project.id, title, false)
+        bus.emit({ type: 'task.updated', task })
+        taskId = task.id
+      }
+      await runner.send(taskId, text, (params.images ?? []).slice(0, 4))
+      return { taskId }
+    },
+    /** The replies in a notes chat after a moment (no pictures, so polling over the relay stays light). */
+    'notes.reply': (params: { taskId: string; after?: number }) => {
+      const task = repos.tasks.require(params.taskId)
+      const after = Number(params.after ?? 0)
+      const replies = runner
+        .timeline(params.taskId)
+        .filter((item): item is Extract<TimelineItem, { kind: 'assistant' }> => item.kind === 'assistant' && item.at > after)
+        .map((item) => ({ id: item.id, at: item.at, text: item.text }))
+      return { status: task.status, error: task.error, replies }
     },
 
     'tasks.queued': (params: { id: string }) => runner.queuedMessages(params.id),

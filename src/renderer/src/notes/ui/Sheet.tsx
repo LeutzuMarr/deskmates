@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { useLiquid } from './liquid'
 
@@ -13,7 +14,7 @@ export function Sheet({ title, onClose, children, width = 520 }: { title: string
     window.addEventListener('keydown', key)
     return () => window.removeEventListener('keydown', key)
   }, [onClose])
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/30 sm:items-center" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
       <div
         ref={ref}
@@ -30,7 +31,8 @@ export function Sheet({ title, onClose, children, width = 520 }: { title: string
         </div>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 

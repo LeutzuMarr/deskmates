@@ -260,6 +260,9 @@ export class NotesEngine {
 
   resize(width: number, height: number, dpr: number): void {
     const first = this.width === 0
+    const turned = !first && Math.abs(width - this.width) > 40
+    // Turning the iPad: keep the same spot in the middle, with the page fitted to the new width.
+    const keep = turned ? toDoc(this.camera, [this.width / 2, this.height / 2]) : null
     this.width = width
     this.height = height
     this.dpr = Math.min(2, dpr)
@@ -270,8 +273,22 @@ export class NotesEngine {
       canvas.style.height = `${height}px`
     }
     if (first) this.showPage(0, false)
+    else if (keep) {
+      const slot = this.slots[this.currentPageIndex()]
+      if (slot && slot.width < 10000 && Math.abs(this.camera.rotation) < 0.001) {
+        const fitted = fitPage(slot, width, height, this.topInset)
+        this.camera = { scale: fitted.scale, rotation: 0, x: 0, y: 0 }
+        const [sx, sy] = toScreen(this.camera, keep)
+        this.camera = { ...this.camera, x: width / 2 - sx, y: height / 2 - sy }
+      }
+    }
     this.snapshot = null
     this.render()
+  }
+
+  /** The page canvas (what's on screen), e.g. to send a picture of the page. */
+  get baseCanvasElement(): HTMLCanvasElement {
+    return this.baseCanvas
   }
 
   get size(): { width: number; height: number } {
