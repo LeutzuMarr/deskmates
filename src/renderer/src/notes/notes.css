@@ -186,3 +186,12 @@ textarea {
   --lg-tab-width: 58px;
   --lg-lens-grow-x: 12px;
 }
+
+/* Glisse places the selection by the control's width, while each segment is a fixed width: a control
+   stretched to fill its box put the selection beside the chosen option. Keep it at its own width. */
+.lg-segmented {
+  width: max-content;
+  max-width: 100%;
+  flex: none;
+  align-self: flex-start;
+}

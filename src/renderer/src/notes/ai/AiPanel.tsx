@@ -120,6 +120,17 @@ export function AiPanel({
   const [busy, setBusy] = useState<string | null>(null)
   const [sendPage, setSendPage] = useState(true)
   const taskKey = `aiTask:${engine.notebookId}`
+  // The Freebuff model that answers ("current" = whatever Freebuff has selected), remembered.
+  const [model, setModel] = useState('current')
+  const [models, setModels] = useState<Array<{ name: string; cost: string | null; note?: string }>>([])
+  useEffect(() => {
+    void getMeta<string>('aiModel').then((m) => m && setModel(m))
+    if (!device || !online) return
+    void pcClient(device)
+      .call('freebuff.models', {})
+      .then((list) => setModels(list.models))
+      .catch(() => undefined)
+  }, [device, online])
   const taskId = useRef<string | null>(null)
   const panel = useRef<HTMLDivElement>(null)
   const list = useRef<HTMLDivElement>(null)
@@ -155,7 +166,7 @@ export function AiPanel({
       const page = engine.currentPageIndex() + 1
       const { taskId: id, text: reply } = await askAndWait(
         pcClient(device),
-        { text: message, images: picture ? [{ dataUrl: picture, name: `pagina-${page}.jpg` }] : [], taskId: taskId.current ?? undefined, title: `${notebookTitle}, p. ${page}` },
+        { text: message, images: picture ? [{ dataUrl: picture, name: `pagina-${page}.jpg` }] : [], taskId: taskId.current ?? undefined, title: `${notebookTitle}, p. ${page}`, freebuffModel: model },
         setBusy,
         controller.signal
       )
@@ -195,6 +206,27 @@ export function AiPanel({
       <div className="flex items-center justify-between px-4 pb-2 pt-3">
         <div className="flex items-center gap-2 font-serif text-[20px]">
           <Sparkles size={18} className="text-clay" /> Deskmates
+          {device && online && (
+            <select
+              aria-label="AI model"
+              value={model}
+              disabled={Boolean(busy)}
+              onChange={(e) => {
+                setModel(e.target.value)
+                void setMeta('aiModel', e.target.value)
+              }}
+              className="ml-1 max-w-[11rem] truncate rounded-full border border-rule bg-card px-2.5 py-1 font-sans text-[12px] outline-none focus:border-clay"
+            >
+              <option value="current">Freebuff’s current model</option>
+              {models.map((m) => (
+                <option key={m.name} value={m.name}>
+                  {m.name}
+                  {m.cost ? ` · ${m.cost}` : ' · free'}
+                </option>
+              ))}
+              {model !== 'current' && !models.some((m) => m.name === model) && <option value={model}>{model}</option>}
+            </select>
+          )}
         </div>
         <button type="button" aria-label="Close" className="press rounded-full bg-black/5 p-1.5 dark:bg-white/10" onClick={onClose}>
           <X size={16} />
