@@ -35,17 +35,28 @@ const BASE_TOOLS: ToolDef[] = [
 /** Tools added by later parts of the app (lasso, text, stickers, brushes…). */
 export const EXTRA_TOOLS: ToolDef[] = []
 
+/** What extra parts get to work with. */
+export interface NotebookContext {
+  notebook: Notebook
+  notice: (text: string) => void
+  setTool: (tool: ActiveTool) => void
+  device: RemoteDevice | null
+  online: boolean
+}
+
 export interface NotebookExtras {
-  /** Extra controls in the top bar (AI, audio…). */
-  topRight?: (engine: NotesEngine) => ReactNode
+  /** Extra controls in the top bar (insert, audio, AI…). */
+  topRight?: Array<(engine: NotesEngine, context: NotebookContext) => ReactNode>
   /** Sets up tool handlers on a new engine. */
-  setup?: (engine: NotesEngine, context: { notebook: Notebook; refresh: () => void }) => () => void
+  setup?: Array<(engine: NotesEngine, context: { notebook: Notebook; refresh: () => void }) => () => void>
   /** Options shown for non-ink tools. */
   toolOptions?: (tool: ActiveTool, tools: ToolState, update: (next: ToolState) => void, engine: NotesEngine) => ReactNode
   /** Extra entries for the "more" menu. */
-  menu?: (engine: NotesEngine, notebook: Notebook) => Array<{ label: string; onSelect: () => void }>
+  menu?: Array<(engine: NotesEngine, context: NotebookContext) => Array<{ label: string; onSelect: () => void }>>
   /** Overlays above the page (text editing, selection handles…). */
-  overlay?: (engine: NotesEngine) => ReactNode
+  overlay?: Array<(engine: NotesEngine, context: NotebookContext) => ReactNode>
+  /** Called when the tool changes. */
+  toolChanged?: Array<(engine: NotesEngine, tool: ActiveTool) => void>
 }
 
 export const notebookExtras: NotebookExtras = {}
@@ -66,6 +77,8 @@ function useBump(): [number, () => void] {
 export function NotebookView({
   notebook: initial,
   startPageId,
+  device = null,
+  online = false,
   onClose
 }: {
   notebook: Notebook
@@ -131,7 +144,8 @@ export function NotebookView({
       engine.dark = matchMedia('(prefers-color-scheme: dark)').matches
       engine.load(pages, items)
       engineRef.current = engine
-      cleanupExtras = notebookExtras.setup?.(engine, { notebook: initial, refresh })
+      const cleanups = (notebookExtras.setup ?? []).map((setup) => setup(engine!, { notebook: initial, refresh }))
+      cleanupExtras = () => cleanups.forEach((c) => c())
       setToolsState(state)
       observer.observe(host.current)
       const wanted = startPageId ?? initial.lastPageId
@@ -179,6 +193,7 @@ export function NotebookView({
     const engine = engineRef.current
     if (engine) {
       if (next.rotationLocked && !engine.tools.rotationLocked) engine.straighten()
+      if (next.tool !== engine.tools.tool) for (const changed of notebookExtras.toolChanged ?? []) changed(engine, next.tool)
       engine.tools = next
       engine.requestOverlay()
     }
@@ -187,7 +202,22 @@ export function NotebookView({
     metaTimer.current = window.setTimeout(() => void setMeta('tools', next), 500)
   }, [])
 
+  const [toast, setToast] = useState<string | null>(null)
+  useEffect(() => {
+    if (!toast) return
+    const timer = setTimeout(() => setToast(null), 4500)
+    return () => clearTimeout(timer)
+  }, [toast])
   const engine = engineRef.current
+  const context: NotebookContext | null = tools
+    ? {
+        notebook,
+        notice: setToast,
+        setTool: (tool) => updateTools({ ...(engine?.tools ?? tools), tool, lastInk: isInk(tool) ? tool : (engine?.tools ?? tools).lastInk }),
+        device,
+        online
+      }
+    : null
   const close = (): void => {
     flush()
     const page = engine?.pages[engine.currentPageIndex()]
@@ -264,7 +294,7 @@ export function NotebookView({
       <div ref={host} className="absolute inset-0">
         <canvas ref={baseRef} className="absolute inset-0" />
         <canvas ref={wetRef} className="ink-surface absolute inset-0" aria-label="Page" />
-        {engine && notebookExtras.overlay?.(engine)}
+        {engine && context && (notebookExtras.overlay ?? []).map((o, i) => <div key={i}>{o(engine, context)}</div>)}
       </div>
 
       {/* Top bar */}
@@ -333,7 +363,7 @@ export function NotebookView({
               {tools.rotationLocked ? <Lock size={18} /> : <Unlock size={18} />}
             </button>
           )}
-          {engine && notebookExtras.topRight?.(engine)}
+          {engine && context && (notebookExtras.topRight ?? []).map((t, i) => <span key={i} className="flex shrink-0 items-center">{t(engine, context)}</span>)}
           {engine && tools && (
             <Menu
               aria-label="More"
@@ -350,7 +380,7 @@ export function NotebookView({
                 { label: tools.fingerDraws ? 'Finger moves the page' : 'Finger draws', onSelect: () => updateTools({ ...tools, fingerDraws: !tools.fingerDraws }) },
                 { label: tools.holdToShape ? 'Turn off hold to shape' : 'Hold to straighten shapes', onSelect: () => updateTools({ ...tools, holdToShape: !tools.holdToShape }) },
                 { label: tools.advanced ? 'Hide drawing tools' : 'Show drawing tools', onSelect: () => updateTools({ ...tools, advanced: !tools.advanced }) },
-                ...(notebookExtras.menu?.(engine, notebook) ?? []),
+                ...(context ? (notebookExtras.menu ?? []).flatMap((m) => m(engine, context)) : []),
                 'separator',
                 { label: 'Delete this page', destructive: true, disabled: pageCount <= 1, onSelect: () => void deletePage() }
               ]}
@@ -441,6 +471,11 @@ export function NotebookView({
           />
         </Popover>
       )}
+      {toast && (
+        <div role="status" className="glass fixed bottom-[calc(env(safe-area-inset-bottom)+70px)] left-1/2 z-50 w-[min(92vw,460px)] -translate-x-1/2 rounded-2xl px-4 py-3 text-center text-[14px] shadow-xl">
+          {toast}
+        </div>
+      )}
       {overview && engine && (
         <PageOverview
           engine={engine}
@@ -521,6 +556,3 @@ export function NotebookView({
 
 /** Set by the audio recorder: the time stamp to give new ink. */
 export const notebookAudio: { stamp?: (notebookId: string) => Item['audio'] } = {}
-
-/** Set by the page overview (stage 2). */
-export const pageOverview: { open?: (engine: NotesEngine, notebook: Notebook) => void } = {}

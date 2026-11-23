@@ -113,6 +113,12 @@ export class NotesEngine {
   private rotationSpring: Spring | null = null
   private zCounter = 0
   handlers: Partial<Record<string, ToolHandler>> = {}
+  /** Items drawn elsewhere for now (being moved, or edited as text). */
+  readonly hidden = new Set<string>()
+  /** While a recording plays: ink written later than `at` in it is drawn faint. */
+  audioFilter: { recordingId: string; at: number } | null = null
+  /** A quick one-finger tap on a page (audio jump, tape reveal…); return true if handled. */
+  onTap: ((at: PagePoint) => boolean) | null = null
   topInset = 0
   dark = false
 
@@ -458,8 +464,12 @@ export class NotesEngine {
       if (picture) ctx.drawImage(picture, 0, 0, page.width, page.height)
     }
     for (const item of this.itemsOn(page.id)) {
+      if (this.hidden.has(item.id)) continue
       if (!boundsOverlap(local, itemBounds(item, this.cache))) continue
+      const later = this.audioFilter && item.audio?.recordingId === this.audioFilter.recordingId && item.audio.at > this.audioFilter.at
+      if (later) ctx.globalAlpha = 0.18
       paintItem(ctx, item, this.cache, page.color)
+      if (later) ctx.globalAlpha = 1
     }
     ctx.restore()
   }
@@ -698,6 +708,13 @@ export class NotesEngine {
     this.touches.delete(e.pointerId)
     if (this.touches.size > 0) return
     const quick = performance.now() - this.gestureStart < 320 && this.gestureMoved < 12
+    if (quick && this.maxTouches === 1 && this.onTap) {
+      const at = this.pageAt(this.screenPoint(e))
+      if (at && this.onTap(at)) {
+        this.settle()
+        return
+      }
+    }
     if (quick && this.maxTouches === 2) this.undo()
     else if (quick && this.maxTouches === 3) this.redo()
     else if (this.maxTouches === 1 && Math.hypot(...this.velocity) > 0.6) this.glide()
@@ -985,6 +1002,58 @@ export class NotesEngine {
     }
     this.requestRender()
     this.host.changed()
+  }
+
+  /** Adds new items (undoable). */
+  addItems(items: Item[]): void {
+    this.commit(items.map((item) => ({ id: item.id, before: null, after: item })))
+  }
+
+  /** Replaces items with changed versions (undoable). */
+  updateItems(pairs: Array<{ before: Item; after: Item }>): void {
+    this.commit(pairs.map(({ before, after }) => ({ id: before.id, before, after })))
+  }
+
+  removeItems(items: Item[]): void {
+    this.commit(items.map((item) => ({ id: item.id, before: item, after: null })))
+  }
+
+  /** The topmost item under a page point (lines within a few pixels count). */
+  itemAt(pageId: string, x: number, y: number, kinds?: Item['kind'][]): Item | null {
+    const slop = 8 / this.camera.scale
+    const list = this.itemsOn(pageId)
+    for (let i = list.length - 1; i >= 0; i--) {
+      const item = list[i]!
+      if (kinds && !kinds.includes(item.kind)) continue
+      const b = itemBounds(item, this.cache)
+      if (x < b.minX - slop || x > b.maxX + slop || y < b.minY - slop || y > b.maxY + slop) continue
+      if (item.kind === 'stroke') {
+        const d = item.data as StrokeData
+        if (!sweepHitsStroke(d, x, y, x, y, slop)) continue
+      }
+      return item
+    }
+    return null
+  }
+
+  /** The wet canvas set up to draw in a page's coordinates (for tools drawing previews). */
+  pageContext(pageId: string): CanvasRenderingContext2D | null {
+    const index = this.pageIndex(pageId)
+    const slot = this.slots[index]
+    if (!slot) return null
+    const m = matrix(this.camera, this.dpr)
+    this.wet.setTransform(m[0], m[1], m[2], m[3], m[4], m[5])
+    this.wet.translate(slot.x, slot.y)
+    return this.wet
+  }
+
+  pageById(id: string): Page | null {
+    return this.pages.find((p) => p.id === id) ?? null
+  }
+
+  /** The page point at the middle of the screen. */
+  centerPoint(): PagePoint | null {
+    return this.pageAt([this.width / 2, this.height / 2], true)
   }
 
   /** Index of a page by id. */
