@@ -37,19 +37,20 @@ export function freehandOptions(stroke: Pick<StrokeData, 'tool' | 'width' | 'sha
   switch (stroke.tool) {
     case 'pencil':
     case 'graphite':
-      return { size: stroke.width, thinning: 0.35, smoothing: 0.55, streamline: 0.35, simulatePressure: false, last, start: { taper: shape ? 0 : 4 }, end: { taper: shape ? 0 : 4 } }
+      return { size: stroke.width, thinning: 0.3, smoothing: 0.6, streamline: 0.35, simulatePressure: false, last, start: { taper: 0, cap: true }, end: { taper: shape ? 0 : 2, cap: true } }
     case 'marker':
       return { size: stroke.width, thinning: 0.05, smoothing: 0.6, streamline: 0.4, simulatePressure: false, last }
     default:
       return {
         size: stroke.width,
-        thinning: shape ? 0.1 : 0.55,
-        smoothing: 0.55,
-        streamline: 0.4,
+        thinning: shape ? 0.1 : 0.5,
+        smoothing: 0.6,
+        streamline: 0.35,
         simulatePressure: false,
         last,
-        start: { taper: shape ? 0 : Math.min(8, stroke.width * 2), cap: true },
-        end: { taper: shape ? 0 : Math.min(10, stroke.width * 2.4), cap: true }
+        // Round ends, like a real pen: a taper at the start shows as a sliver where the pen lands.
+        start: { taper: 0, cap: true },
+        end: { taper: 0, cap: true }
       }
   }
 }
