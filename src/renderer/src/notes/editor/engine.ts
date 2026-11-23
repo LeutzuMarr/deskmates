@@ -19,6 +19,8 @@ import { History, type Change } from './history'
 import { isInk, type ToolState } from './tools'
 import { recognizeShape } from './shapes'
 import { Spring } from '../ui/spring'
+import { templateById } from '../templates/registry'
+import { drawTemplate } from '../templates/spec'
 
 export interface EngineHost {
   /** Saves changed items (deleted ones carry deletedAt). */
@@ -445,6 +447,8 @@ export class NotesEngine {
       ctx.fillRect(-1.5 / this.camera.scale, -1 / this.camera.scale, page.width + 3 / this.camera.scale, page.height + 4 / this.camera.scale)
     }
     drawPaper(ctx, page, local, this.camera.scale)
+    const template = templateById(page.template)
+    if (template) drawTemplate(ctx, template, page.width, page.color, this.camera.scale)
     ctx.save()
     ctx.beginPath()
     ctx.rect(0, 0, page.width, page.height)

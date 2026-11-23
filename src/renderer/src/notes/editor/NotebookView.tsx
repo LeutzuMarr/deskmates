@@ -3,11 +3,19 @@ import { ChevronLeft, Eraser, Highlighter, Lock, MoreHorizontal, Pencil, PenLine
 import { Menu, SegmentedControl, Slider } from 'glisse'
 import { getAsset, getMeta, listItems, listPages, makePage, save, setMeta, updateNotebook, type Notebook } from '../db'
 import { DEFAULT_PAGE_STYLE, type Item, type Page, type PageStyle } from '../model'
+import type { RemoteDevice } from '../../remote/relay'
 import { NotesEngine } from './engine'
 import { isInk, withDefaults, type ActiveTool, type ToolState } from './tools'
 import { PenOptions, toolName } from './PenOptions'
 import { PaperPicker } from './PaperPicker'
 import { Popover, anchorOf } from '../ui/Popover'
+import { Sheet } from '../ui/Sheet'
+import { PageOverview } from './PageOverview'
+import { TemplatePicker, type PageChoice } from '../library/TemplatePicker'
+import { backgroundPages } from '../db'
+import { templateById } from '../templates/registry'
+import { savePageStyleAsTemplate } from '../store/store'
+import { NameSheet } from '../ui/Sheet'
 import { useLiquid } from '../ui/liquid'
 
 export interface ToolDef {
@@ -55,7 +63,17 @@ function useBump(): [number, () => void] {
   return [n, schedule]
 }
 
-export function NotebookView({ notebook: initial, onClose }: { notebook: Notebook; onClose: (notebook: Notebook) => void }) {
+export function NotebookView({
+  notebook: initial,
+  startPageId,
+  onClose
+}: {
+  notebook: Notebook
+  startPageId?: string
+  device?: RemoteDevice | null
+  online?: boolean
+  onClose: (notebook: Notebook) => void
+}) {
   const [notebook, setNotebook] = useState(initial)
   const host = useRef<HTMLDivElement>(null)
   const baseRef = useRef<HTMLCanvasElement>(null)
@@ -66,6 +84,9 @@ export function NotebookView({ notebook: initial, onClose }: { notebook: Noteboo
   const [tools, setToolsState] = useState<ToolState | null>(null)
   const [, refresh] = useBump()
   const [popover, setPopover] = useState<{ kind: 'pen' | 'eraser' | 'paper' | 'feel' | 'tool'; anchor: { x: number; y: number } | null } | null>(null)
+  const [overview, setOverview] = useState(false)
+  const [templates, setTemplates] = useState<PageChoice | null>(null)
+  const [saveTemplate, setSaveTemplate] = useState(false)
   const queue = useRef<Map<string, Item>>(new Map())
   const flushTimer = useRef(0)
   useLiquid(barRef, { reach: 22 })
@@ -113,7 +134,8 @@ export function NotebookView({ notebook: initial, onClose }: { notebook: Noteboo
       cleanupExtras = notebookExtras.setup?.(engine, { notebook: initial, refresh })
       setToolsState(state)
       observer.observe(host.current)
-      const startAt = initial.lastPageId ? pages.findIndex((p) => p.id === initial.lastPageId) : 0
+      const wanted = startPageId ?? initial.lastPageId
+      const startAt = wanted ? pages.findIndex((p) => p.id === wanted) : 0
       engine.resize(host.current.clientWidth, host.current.clientHeight, window.devicePixelRatio || 1)
       if (startAt > 0) engine.showPage(startAt, false)
     })()
@@ -124,7 +146,7 @@ export function NotebookView({ notebook: initial, onClose }: { notebook: Noteboo
       engine?.destroy()
       flush()
     }
-  }, [initial, flush, refresh])
+  }, [initial, startPageId, flush, refresh])
 
   // Save before the app goes to the background (iOS may close it there).
   useEffect(() => {
@@ -172,16 +194,32 @@ export function NotebookView({ notebook: initial, onClose }: { notebook: Noteboo
     void updateNotebook(notebook.id, { lastPageId: page?.id }).then((n) => onClose(n ?? notebook))
   }
 
-  const addPage = async (style?: PageStyle): Promise<void> => {
+  const addPage = async (style?: PageStyle, template?: string | null): Promise<void> => {
     if (!engine) return
     const index = engine.currentPageIndex()
     const pages = engine.pages
     const current = pages[index]
     const next = pages[index + 1]
     const order = current ? (next ? (current.order + next.order) / 2 : current.order + 1) : 0
-    const page = makePage(notebook.id, order, style ?? notebook.pageStyle ?? DEFAULT_PAGE_STYLE)
+    const page = makePage(notebook.id, order, style ?? notebook.pageStyle ?? DEFAULT_PAGE_STYLE, Date.now(), { template: template === null ? undefined : (template ?? (style ? undefined : notebook.pageTemplate)) })
     await save({ pages: [page] })
     engine.setPages([...pages.slice(0, index + 1), page, ...pages.slice(index + 1)])
+    engine.showPage(index + 1)
+  }
+
+  /** Pages from a picture/PDF template, after the current page. */
+  const addBackgroundPages = async (assetIds: string[]): Promise<void> => {
+    if (!engine) return
+    const index = engine.currentPageIndex()
+    const pages = engine.pages
+    const current = pages[index]
+    const next = pages[index + 1]
+    const from = current?.order ?? 0
+    const span = next ? next.order - from : assetIds.length + 1
+    const fields = await backgroundPages(assetIds)
+    const made = fields.map((extra, i) => makePage(notebook.id, from + (span * (i + 1)) / (fields.length + 1), { paper: 'blank', color: 'white', size: 'a4' }, Date.now(), extra))
+    await save({ pages: made })
+    engine.setPages([...pages.slice(0, index + 1), ...made, ...pages.slice(index + 1)])
     engine.showPage(index + 1)
   }
 
@@ -198,12 +236,12 @@ export function NotebookView({ notebook: initial, onClose }: { notebook: Noteboo
     engine.showPage(Math.max(0, index - 1))
   }
 
-  const restylePage = async (style: PageStyle): Promise<void> => {
+  const restylePage = async (style: PageStyle, template?: string | null): Promise<void> => {
     if (!engine) return
     const index = engine.currentPageIndex()
     const page = engine.pages[index]
     if (!page) return
-    const next: Page = { ...page, ...style, width: page.width, height: page.height, updatedAt: Date.now() }
+    const next: Page = { ...page, ...style, size: page.size, width: page.width, height: page.height, template: template === undefined ? page.template : (template ?? undefined), updatedAt: Date.now() }
     await save({ pages: [next] })
     engine.setPages(engine.pages.map((p) => (p.id === next.id ? next : p)))
   }
@@ -303,7 +341,10 @@ export function NotebookView({ notebook: initial, onClose }: { notebook: Noteboo
               icon={<MoreHorizontal size={19} />}
               items={[
                 { label: 'Add a page after this one', onSelect: () => void addPage() },
+                { label: 'Pages…', onSelect: () => setOverview(true) },
                 { label: 'Paper…', onSelect: () => setPopover({ kind: 'paper', anchor: anchorOf(barRef.current) }) },
+                { label: 'Templates…', onSelect: () => setTemplates({ style: notebook.pageStyle ?? DEFAULT_PAGE_STYLE, template: notebook.pageTemplate, name: templateById(notebook.pageTemplate)?.name ?? 'Paper' }) },
+                { label: 'Save this page’s paper as a template', onSelect: () => setSaveTemplate(true) },
                 { label: 'Pen feel…', onSelect: () => setPopover({ kind: 'feel', anchor: anchorOf(barRef.current) }) },
                 'separator',
                 { label: tools.fingerDraws ? 'Finger moves the page' : 'Finger draws', onSelect: () => updateTools({ ...tools, fingerDraws: !tools.fingerDraws }) },
@@ -322,7 +363,7 @@ export function NotebookView({ notebook: initial, onClose }: { notebook: Noteboo
       {engine && engine.pages[pageIndex]?.size !== 'infinite' && (
         <div className="pointer-events-none absolute bottom-[calc(env(safe-area-inset-bottom)+14px)] right-4 flex justify-end">
           <div ref={pageBarRef} className="toolbar-capsule glass pointer-events-auto flex items-center gap-1 px-1.5 py-1">
-            <button type="button" className="press rounded-full px-2.5 py-1.5 text-[13px] font-medium tabular-nums" onClick={() => pageOverview.open?.(engine, notebook)}>
+            <button type="button" className="press rounded-full px-2.5 py-1.5 text-[13px] font-medium tabular-nums" onClick={() => setOverview(true)}>
               {pageIndex + 1} / {pageCount}
             </button>
             <button type="button" aria-label="Add a page" className="press rounded-full p-1.5" onClick={() => void addPage()}>
@@ -399,6 +440,80 @@ export function NotebookView({ notebook: initial, onClose }: { notebook: Noteboo
             }}
           />
         </Popover>
+      )}
+      {overview && engine && (
+        <PageOverview
+          engine={engine}
+          notebookId={notebook.id}
+          onClose={() => setOverview(false)}
+          onPagesChanged={(pages) => engine.setPages(pages)}
+        />
+      )}
+      {templates && engine && (
+        <Sheet title="Templates" onClose={() => setTemplates(null)} width={620}>
+          <TemplatePicker value={templates} onChange={setTemplates} />
+          <div className="mt-4 grid grid-cols-3 gap-2 text-[13px] font-semibold">
+            <button
+              type="button"
+              className="press rounded-full bg-black/5 px-2 py-2.5 dark:bg-white/10"
+              disabled={Boolean(templates.backgrounds)}
+              onClick={() => {
+                void restylePage(templates.style, templates.template ?? null)
+                setTemplates(null)
+              }}
+            >
+              This page
+            </button>
+            <button
+              type="button"
+              className="press rounded-full bg-black/5 px-2 py-2.5 dark:bg-white/10"
+              disabled={Boolean(templates.backgrounds)}
+              onClick={() => {
+                void updateNotebook(notebook.id, { pageStyle: templates.style, pageTemplate: templates.template }).then((n) => n && setNotebook(n))
+                setTemplates(null)
+              }}
+            >
+              New pages
+            </button>
+            <button
+              type="button"
+              className="press rounded-full bg-clay px-2 py-2.5 text-white"
+              onClick={() => {
+                const choice = templates
+                setTemplates(null)
+                if (choice.backgrounds) void addBackgroundPages(choice.backgrounds)
+                else void addPage(choice.style, choice.template ?? null)
+              }}
+            >
+              Add page
+            </button>
+          </div>
+        </Sheet>
+      )}
+      {saveTemplate && engine && (
+        <NameSheet
+          title="Save as a template"
+          initial={notebook.title}
+          action="Save template"
+          onClose={() => setSaveTemplate(false)}
+          onDone={(name) => {
+            setSaveTemplate(false)
+            const page = engine.pages[pageIndex]
+            if (!page) return
+            const base = templateById(page.template)
+            void savePageStyleAsTemplate(name, {
+              id: '',
+              name,
+              group: 'Mine',
+              paper: page.paper,
+              color: page.color,
+              size: page.size === 'infinite' ? 'a4' : page.size,
+              landscape: page.landscape,
+              accent: base?.accent,
+              elements: base?.elements ?? []
+            })
+          }}
+        />
       )}
     </div>
   )

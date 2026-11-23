@@ -3,6 +3,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { notesPrecache } from './scripts/notes-precache'
+import { storeFiles } from './scripts/store-files'
 
 /**
  * The phone web app (Deskmates from anywhere): the same renderer as the desktop app, started by
@@ -16,6 +17,7 @@ export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
+    storeFiles(resolve(__dirname, 'src/renderer/remote-public/store/stickers')),
     notesPrecache({
       entryHtml: 'notes.html',
       pageUrl: '/notes',
