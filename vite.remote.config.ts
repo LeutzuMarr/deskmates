@@ -4,6 +4,7 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { notesPrecache } from './scripts/notes-precache'
 import { storeFiles } from './scripts/store-files'
+import { calmGlisse } from './scripts/calm-glisse'
 
 /**
  * The phone web app (Deskmates from anywhere): the same renderer as the desktop app, started by
@@ -15,6 +16,7 @@ export default defineConfig({
   root: resolve(__dirname, 'src/renderer'),
   publicDir: resolve(__dirname, 'src/renderer/remote-public'),
   plugins: [
+    calmGlisse(),
     react(),
     tailwindcss(),
     storeFiles(resolve(__dirname, 'src/renderer/remote-public/store/stickers')),

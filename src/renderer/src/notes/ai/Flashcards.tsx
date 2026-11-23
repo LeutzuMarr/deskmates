@@ -60,7 +60,7 @@ export function Flashcards({ notebookId, onClose, onMakeWithAi }: { notebookId: 
               className="press relative h-56 w-full [perspective:1200px]"
               aria-label={flipped ? 'Show the question' : 'Show the answer'}
             >
-              <span className="absolute inset-0 transition-transform duration-500 [transform-style:preserve-3d]" style={{ transform: flipped ? 'rotateY(180deg)' : 'none', transitionTimingFunction: 'cubic-bezier(.2,.9,.3,1.15)' }}>
+              <span className="absolute inset-0 transition-transform duration-500 [transform-style:preserve-3d]" style={{ transform: flipped ? 'rotateY(180deg)' : 'none', transitionTimingFunction: 'cubic-bezier(.25,.1,.25,1)' }}>
                 <span className="absolute inset-0 flex items-center justify-center rounded-3xl bg-card p-6 text-center font-serif text-[22px] leading-snug shadow-[0_2px_8px_rgba(0,0,0,.08),0_16px_40px_rgba(0,0,0,.10)] [backface-visibility:hidden]">{card.front}</span>
                 <span className="absolute inset-0 flex items-center justify-center rounded-3xl bg-[#fff8e1] p-6 text-center text-[19px] leading-snug text-[#2b2a28] shadow-[0_2px_8px_rgba(0,0,0,.08),0_16px_40px_rgba(0,0,0,.10)] [backface-visibility:hidden] [transform:rotateY(180deg)]">{card.back}</span>
               </span>

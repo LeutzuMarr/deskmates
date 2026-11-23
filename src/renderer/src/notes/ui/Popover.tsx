@@ -46,7 +46,7 @@ export function Popover({
       role="dialog"
       aria-label={label}
       className="glass fixed z-50 rounded-[26px] p-4 shadow-2xl"
-      style={{ left, top: anchor.y + 10, width, animation: 'pop-in .32s cubic-bezier(.2,.9,.3,1.25)', transformOrigin: 'top center' }}
+      style={{ left, top: anchor.y + 10, width, animation: 'pop-in .26s cubic-bezier(.25,.1,.25,1)', transformOrigin: 'top center' }}
     >
       {children}
     </div>,

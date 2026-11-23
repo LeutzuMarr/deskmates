@@ -202,7 +202,7 @@ export function AiPanel({
   const unavailable = !online ? 'Deskmates needs the internet. Your notes keep working without it.' : !device ? 'Pair with your PC first (Notes → Pair with PC).' : null
 
   return (
-    <div ref={panel} className="glass fixed bottom-3 right-3 top-[calc(env(safe-area-inset-top)+64px)] z-30 flex w-[min(400px,calc(100vw-24px))] flex-col rounded-[28px] shadow-2xl" style={{ animation: 'sheet-up .35s cubic-bezier(.2,.9,.3,1.15)' }}>
+    <div ref={panel} className="glass fixed bottom-3 right-3 top-[calc(env(safe-area-inset-top)+64px)] z-30 flex w-[min(400px,calc(100vw-24px))] flex-col rounded-[28px] shadow-2xl" style={{ animation: 'sheet-up .35s cubic-bezier(.25,.1,.25,1)' }}>
       <div className="flex items-center justify-between px-4 pb-2 pt-3">
         <div className="flex items-center gap-2 font-serif text-[20px]">
           <Sparkles size={18} className="text-clay" /> Deskmates

@@ -96,11 +96,11 @@ textarea {
 
 /* A gentle press for anything tappable; quick in, springy out. */
 .press {
-  transition: transform 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.25);
+  transition: transform 0.32s cubic-bezier(0.25, 0.1, 0.25, 1);
 }
 .press:active {
-  transform: scale(0.96);
-  transition-duration: 0.08s;
+  transform: scale(0.98);
+  transition-duration: 0.12s;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -140,21 +140,21 @@ textarea {
   border-radius: 999px;
   flex: none;
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
-  transition: transform 0.3s cubic-bezier(0.2, 0.9, 0.3, 1.4);
+  transition: transform 0.3s cubic-bezier(0.25, 0.1, 0.25, 1);
 }
 .swatch[aria-pressed='true'] {
-  transform: scale(1.12);
+  transform: scale(1.06);
   box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--ink);
 }
 .swatch:active {
-  transform: scale(0.9);
-  transition-duration: 0.06s;
+  transform: scale(0.95);
+  transition-duration: 0.1s;
 }
 
 @keyframes pop-in {
   from {
     opacity: 0;
-    transform: scale(0.92) translateY(-6px);
+    transform: scale(0.98) translateY(-3px);
   }
   to {
     opacity: 1;
@@ -164,7 +164,7 @@ textarea {
 @keyframes sheet-up {
   from {
     opacity: 0;
-    transform: translateY(24px) scale(0.98);
+    transform: translateY(10px);
   }
   to {
     opacity: 1;
@@ -194,4 +194,11 @@ textarea {
   max-width: 100%;
   flex: none;
   align-self: flex-start;
+}
+
+/* Glisse's lens grows a lot when a segment is pressed; keep the glass effect, smaller. */
+.lg-segmented,
+.lg-tab-bar {
+  --lg-lens-grow-x: 8px !important;
+  --lg-lens-grow-y: 6px !important;
 }
