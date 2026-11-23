@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { MessageCircle, MoreHorizontal, Plus, QrCode, WifiOff, X } from 'lucide-react'
 import type { RemoteDevice } from '../remote/relay'
 import { COVERS, createNotebook, listNotebooks, trashNotebook, type Notebook } from './db'
+import { NotebookView } from './editor/NotebookView'
 
 function useOnline(): boolean {
   const [online, setOnline] = useState(() => navigator.onLine)
@@ -101,6 +102,7 @@ export function NotesApp({ initialDevice }: { initialDevice: RemoteDevice | null
   const [creating, setCreating] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [pairing, setPairing] = useState(false)
+  const [open, setOpen] = useState<Notebook | null>(null)
 
   const reload = useCallback(() => {
     void listNotebooks()
@@ -138,6 +140,17 @@ export function NotesApp({ initialDevice }: { initialDevice: RemoteDevice | null
     else location.assign('/')
   }
 
+  if (open)
+    return (
+      <NotebookView
+        notebook={open}
+        onClose={() => {
+          setOpen(null)
+          reload()
+        }}
+      />
+    )
+
   return (
     <div className="flex h-full flex-col">
       <header className="sticky top-0 z-20 flex items-end justify-between gap-3 px-6 pb-3 pt-[calc(env(safe-area-inset-top)+18px)]">
@@ -174,7 +187,7 @@ export function NotesApp({ initialDevice }: { initialDevice: RemoteDevice | null
           </button>
           {notebooks?.map((n) => (
             <div key={n.id} className="flex flex-col gap-2">
-              <button type="button" className="press" onClick={() => setNotice('Writing in notebooks arrives in the next update.')}>
+              <button type="button" className="press" onClick={() => setOpen(n)}>
                 <Cover cover={n.cover} title={n.title} />
               </button>
               <div className="flex items-start justify-between gap-1">
