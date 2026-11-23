@@ -23,6 +23,10 @@ async function registerServiceWorker(): Promise<void> {
 }
 
 void registerServiceWorker()
+
+// An app, not a web page: Safari's own pinch-to-zoom of the whole screen (outside the page, where
+// two fingers zoom the notebook) is turned off.
+for (const type of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(type, (e) => e.preventDefault(), { passive: false })
 void keepDataForGood()
 
 /** "Open my notes" from the PC: the link carries the library; keep it and take it out of the address. */

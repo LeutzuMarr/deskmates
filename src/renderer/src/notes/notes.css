@@ -62,6 +62,11 @@ body,
   height: 100%;
 }
 
+html {
+  /* No double-tap zoom anywhere; scrolling still works. */
+  touch-action: manipulation;
+}
+
 body {
   margin: 0;
   background: var(--canvas);
