@@ -21,7 +21,7 @@ export function Sheet({ title, onClose, children, width = 520 }: { title: string
         role="dialog"
         aria-label={title}
         className="glass m-3 max-h-[88vh] w-full overflow-y-auto rounded-[30px] p-5 shadow-2xl"
-        style={{ maxWidth: width, animation: 'sheet-up .38s cubic-bezier(.2,.9,.3,1.15)', paddingBottom: 'calc(env(safe-area-inset-bottom) + 20px)' }}
+        style={{ maxWidth: width, animation: 'sheet-up .3s cubic-bezier(.25,.1,.25,1)', paddingBottom: 'calc(env(safe-area-inset-bottom) + 20px)' }}
       >
         <div className="mb-4 flex items-center justify-between gap-3">
           <h2 className="font-serif text-[24px] leading-tight">{title}</h2>

@@ -17,13 +17,17 @@ export interface LiquidOptions {
 }
 
 export function useLiquid(ref: RefObject<HTMLElement | null>, options: LiquidOptions = {}): void {
+  // Gentle by default: a small swell and a short, damped stretch; it should feel like glass, not jelly.
   const { reach = 26, press = 0.035, axis = 'both' } = options
+  const gentleReach = reach * 0.35
+  const gentlePress = press * 0.35
   useEffect(() => {
     const el = ref.current
     if (!el || prefersReducedMotion()) return
-    const swell = new Spring(1, { stiffness: 520, damping: 22 })
-    const pullX = new Spring(0, { stiffness: 300, damping: 14 })
-    const pullY = new Spring(0, { stiffness: 300, damping: 14 })
+    // Close to critically damped (2·√k): it eases back without wobbling.
+    const swell = new Spring(1, { stiffness: 220, damping: 28 })
+    const pullX = new Spring(0, { stiffness: 140, damping: 22 })
+    const pullY = new Spring(0, { stiffness: 140, damping: 22 })
     let frame = 0
     let last = 0
     let pointer: number | null = null
@@ -53,15 +57,15 @@ export function useLiquid(ref: RefObject<HTMLElement | null>, options: LiquidOpt
       if (pointer !== null || e.button > 0) return
       pointer = e.pointerId
       start = [e.clientX, e.clientY]
-      swell.target = 1 + press
+      swell.target = 1 + gentlePress
       run()
     }
     const move = (e: PointerEvent): void => {
       if (e.pointerId !== pointer) return
       const dx = e.clientX - start[0]
       const dy = e.clientY - start[1]
-      if (axis !== 'y') pullX.target = rubberBand(dx, reach)
-      if (axis !== 'x') pullY.target = rubberBand(dy, reach)
+      if (axis !== 'y') pullX.target = rubberBand(dx, gentleReach)
+      if (axis !== 'x') pullY.target = rubberBand(dy, gentleReach)
       run()
     }
     const up = (e: PointerEvent): void => {
@@ -86,5 +90,5 @@ export function useLiquid(ref: RefObject<HTMLElement | null>, options: LiquidOpt
       el.style.transform = ''
       el.style.willChange = ''
     }
-  }, [ref, reach, press, axis])
+  }, [ref, gentleReach, gentlePress, axis])
 }

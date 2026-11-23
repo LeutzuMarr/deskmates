@@ -397,6 +397,10 @@ export class NotesEngine {
       maxX: Math.max(...this.slots.map((s) => s.x + s.width)),
       maxY: Math.max(...this.slots.map((s) => s.y + s.height))
     }
+    if (Math.abs(this.camera.rotation) < 0.001) {
+      this.keepPagesInView(content)
+      return
+    }
     const center = toDoc(this.camera, [this.width / 2, this.height / 2])
     const marginX = this.width / 2 / this.camera.scale
     const marginY = this.height / 2 / this.camera.scale
@@ -405,6 +409,45 @@ export class NotesEngine {
     if (cx === center[0] && cy === center[1]) return
     const [sx, sy] = toScreen(this.camera, [cx, cy])
     this.camera = pan(this.camera, this.width / 2 - sx, this.height / 2 - sy)
+  }
+
+  /**
+   * Keeps the notebook on screen, like Goodnotes: a page narrower than the screen stays centred
+   * (no sliding it sideways and losing it); a wider one (zoomed in) moves only as far as its edges;
+   * up and down it stops at the first page's top and a little past the last page's bottom.
+   * Returns true if it had to hold the view back.
+   */
+  private keepPagesInView(content: Bounds): boolean {
+    const s = this.camera.scale
+    const left = this.camera.x + content.minX * s
+    const right = this.camera.x + content.maxX * s
+    const top = this.camera.y + content.minY * s
+    const bottom = this.camera.y + content.maxY * s
+    let dx = 0
+    let dy = 0
+    const margin = 16
+    if (right - left <= this.width - margin * 2) dx = this.width / 2 - (left + right) / 2
+    else if (left > margin) dx = margin - left
+    else if (right < this.width - margin) dx = this.width - margin - right
+    const topLimit = this.topInset + 16
+    const bottomLimit = this.height - Math.min(200, this.height * 0.3)
+    if (bottom - top <= bottomLimit - topLimit) dy = topLimit - top
+    else if (top > topLimit) dy = topLimit - top
+    else if (bottom < bottomLimit) dy = bottomLimit - bottom
+    if (Math.abs(dx) < 0.01 && Math.abs(dy) < 0.01) return false
+    this.camera = pan(this.camera, dx, dy)
+    return true
+  }
+
+  /** Holds the view inside the notebook while fingers move it (straight pages only). */
+  private holdInView(): boolean {
+    if (this.slots.length === 0 || Math.abs(this.camera.rotation) >= 0.001) return false
+    return this.keepPagesInView({
+      minX: Math.min(...this.slots.map((s) => s.x)),
+      minY: Math.min(...this.slots.map((s) => s.y)),
+      maxX: Math.max(...this.slots.map((s) => s.x + s.width)),
+      maxY: Math.max(...this.slots.map((s) => s.y + s.height))
+    })
   }
 
   // ---- drawing ----
@@ -710,6 +753,7 @@ export class NotesEngine {
       this.camera = pinch(this.camera, a0, b0, [ta.x, ta.y], [tb.x, tb.y], !this.tools.rotationLocked)
       this.velocity = [0, 0]
     }
+    this.holdInView()
     this.cameraMoved()
   }
 
@@ -779,6 +823,7 @@ export class NotesEngine {
     cancelAnimationFrame(this.momentum)
     if (e.ctrlKey || e.metaKey) this.camera = zoomAt(this.camera, this.screenPoint(e as unknown as PointerEvent), Math.exp(-e.deltaY * 0.01))
     else this.camera = pan(this.camera, -e.deltaX, -e.deltaY)
+    this.holdInView()
     this.cameraMoved()
     clearTimeout((this as unknown as { wheelTimer?: number }).wheelTimer)
     ;(this as unknown as { wheelTimer?: number }).wheelTimer = window.setTimeout(() => this.settle(), 140)
@@ -795,6 +840,11 @@ export class NotesEngine {
       vx *= decay
       vy *= decay
       this.camera = pan(this.camera, vx * (dt / 16), vy * (dt / 16))
+      // Reaching an edge ends the glide there.
+      if (this.holdInView()) {
+        vx = 0
+        vy = 0
+      }
       this.cameraMoved()
       if (Math.hypot(vx, vy) > 0.15) this.momentum = requestAnimationFrame(step)
       else this.settle()

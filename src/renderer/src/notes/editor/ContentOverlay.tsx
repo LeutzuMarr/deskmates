@@ -133,7 +133,7 @@ function SelectionBar({ engine, notice }: { engine: NotesEngine; notice: (text: 
 
   return (
     <div className="absolute z-20 -translate-x-1/2" style={{ left, top: Math.max(70, top - 64) }}>
-      <div className="toolbar-capsule glass flex items-center gap-0.5 px-1.5 py-1 text-[13px] font-medium" style={{ animation: 'pop-in .28s cubic-bezier(.2,.9,.3,1.25)' }}>
+      <div className="toolbar-capsule glass flex items-center gap-0.5 px-1.5 py-1 text-[13px] font-medium" style={{ animation: 'pop-in .24s cubic-bezier(.25,.1,.25,1)' }}>
         {canColor && (
           <button type="button" className="press flex items-center gap-1 rounded-full px-2.5 py-1.5" onClick={() => setColors(!colors)}>
             <Palette size={15} /> Colour
@@ -158,7 +158,7 @@ function SelectionBar({ engine, notice }: { engine: NotesEngine; notice: (text: 
         </button>
       </div>
       {colors && (
-        <div className="glass mt-2 flex flex-wrap justify-center gap-2 rounded-2xl p-2.5 shadow-xl" style={{ width: 236, animation: 'pop-in .28s cubic-bezier(.2,.9,.3,1.25)' }}>
+        <div className="glass mt-2 flex flex-wrap justify-center gap-2 rounded-2xl p-2.5 shadow-xl" style={{ width: 236, animation: 'pop-in .24s cubic-bezier(.25,.1,.25,1)' }}>
           {PALETTE.map((c) => (
             <button
               key={c}
