@@ -119,7 +119,8 @@ export async function installPack(id: string, progress?: (done: number, total: n
       const file = await fetch(next.file)
       if (!file.ok) throw new Error('A sticker couldn’t be downloaded.')
       const blob = new Blob([await file.arrayBuffer()], { type: 'image/svg+xml' })
-      const asset = await putAsset(blob, { name: next.name })
+      // Same file for everyone: kept here, never synced (other devices fetch it from the store).
+      const asset = await putAsset(blob, { id: `store:${next.id}`, name: next.name, fromSync: true })
       const [width, height] = await imageSize(blob)
       stickers.push({ id: next.id, packId: pack.id, name: next.name, assetId: asset.id, width, height, createdAt: now, updatedAt: now })
       progress?.(++done, total)

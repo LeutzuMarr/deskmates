@@ -9,6 +9,7 @@ import { SearchTab, TrashTab } from './library/SearchTrash'
 import { StoreView } from './store/StoreView'
 import { loadTemplates } from './templates/registry'
 import { useLiquid } from './ui/liquid'
+import { syncer } from './sync/sync'
 
 export function useOnline(): boolean {
   const [online, setOnline] = useState(() => navigator.onLine)
@@ -46,6 +47,8 @@ export function NotesApp({ initialDevice }: { initialDevice: RemoteDevice | null
     void loadTemplates()
   }, [])
   useEffect(() => appExtras.onDevice?.(device), [device])
+  // Notebooks that arrive from another device show up in the library.
+  useEffect(() => syncer.onChange((change) => (change.stores.has('notebooks') || change.stores.has('folders')) && setLibraryKey((k) => k + 1)), [])
 
   useEffect(() => {
     if (!notice) return

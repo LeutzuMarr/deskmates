@@ -67,6 +67,42 @@ export async function open(key: string, direction: Direction, sealed: string, la
   }
 }
 
+/**
+ * The notes library shared by the user's devices: its id on the relay, the key notes are
+ * encrypted with before they leave a device, and the token that lets a device read and write it.
+ */
+export interface NotesLibrary {
+  id: string
+  key: string
+  token: string
+}
+
+export function newNotesLibrary(): NotesLibrary {
+  return { id: newId(16), key: newKey(), token: newId(32) }
+}
+
+/** What an "Open my notes" link carries in its #fragment: the relay and the library, no phone pairing. */
+export interface LibraryLink {
+  v: 1
+  relay: string
+  anon: string
+  lib: NotesLibrary
+}
+
+export function encodeLibraryLink(link: LibraryLink): string {
+  return toBase64Url(enc.encode(JSON.stringify(link)))
+}
+
+export function decodeLibraryLink(text: string): LibraryLink | null {
+  try {
+    const link = JSON.parse(dec.decode(fromBase64Url(text))) as LibraryLink
+    if (link.v !== 1 || !link.relay || !link.anon || !link.lib?.id || !link.lib.key || !link.lib.token) return null
+    return link
+  } catch {
+    return null
+  }
+}
+
 /** What the "Add a phone" QR code and link carry, in the URL's #fragment (never sent to any server). */
 export interface PairingPayload {
   v: 1
@@ -82,6 +118,8 @@ export interface PairingPayload {
   vapid: string
   /** Pairing must finish before this (ms). */
   until: number
+  /** The notes library, so the device's notes sync with the user's other devices. */
+  lib?: NotesLibrary
 }
 
 export function encodePairing(payload: PairingPayload): string {

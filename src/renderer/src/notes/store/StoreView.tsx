@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Check, Download, ImagePlus, Plus, Trash2 } from 'lucide-react'
-import { getAsset } from '../db'
+import { assetBlob } from '../db'
 import { Sheet, NameSheet } from '../ui/Sheet'
 import { allTemplates, onTemplatesChanged, removeTemplate, type StoredTemplate } from '../templates/registry'
 import { addMyStickers, addMyTemplate, fetchCatalog, installPack, listInstalled, listStickers, MY_PACK, removeSticker, uninstallPack, type CatalogPack, type InstalledPack, type Sticker } from './store'
@@ -11,9 +11,9 @@ export function StickerImage({ sticker, size = 56 }: { sticker: Sticker; size?: 
   const [url, setUrl] = useState<string | null>(null)
   useEffect(() => {
     let made: string | null = null
-    void getAsset(sticker.assetId).then((asset) => {
-      if (!asset) return
-      made = URL.createObjectURL(asset.blob)
+    void assetBlob(sticker.assetId).then((blob) => {
+      if (!blob) return
+      made = URL.createObjectURL(blob)
       setUrl(made)
     })
     return () => {

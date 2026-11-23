@@ -3,7 +3,7 @@
  * broadcast) and WebSocket-like sessions over it, so the app's normal RPC client works unchanged.
  */
 import { createClient, type RealtimeChannel } from '@supabase/supabase-js'
-import { channelFor, newId, open, seal } from '../../../shared/remote-crypto'
+import { channelFor, newId, open, seal, type NotesLibrary } from '../../../shared/remote-crypto'
 
 export interface RemoteDevice {
   relay: string
@@ -12,6 +12,8 @@ export interface RemoteDevice {
   key: string
   pc: string
   vapid: string
+  /** The notes library shared by the user's devices (from pairing). */
+  lib?: NotesLibrary
 }
 
 const PART_SIZE = 150_000

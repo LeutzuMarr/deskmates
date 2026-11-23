@@ -6,9 +6,10 @@ import { createRoot } from 'react-dom/client'
 import '@fontsource-variable/instrument-sans'
 import '@fontsource-variable/newsreader/opsz.css'
 import './notes.css'
-import { keepDataForGood, restoreDevice } from '../remote/device'
+import { keepDataForGood, libraryFromHash, restoreDevice, saveLibrary } from '../remote/device'
 import { NotesApp } from './App'
 import './features'
+import './sync/setup'
 
 async function registerServiceWorker(): Promise<void> {
   if (!('serviceWorker' in navigator)) return
@@ -22,7 +23,16 @@ async function registerServiceWorker(): Promise<void> {
 void registerServiceWorker()
 void keepDataForGood()
 
+/** "Open my notes" from the PC: the link carries the library; keep it and take it out of the address. */
+async function takeLibraryLink(): Promise<void> {
+  const access = libraryFromHash(location.hash)
+  if (!access) return
+  history.replaceState(null, '', location.pathname)
+  await saveLibrary(access)
+}
+
 const root = createRoot(document.getElementById('root')!)
-void restoreDevice()
+void takeLibraryLink()
+  .then(() => restoreDevice())
   .catch(() => null)
   .then((device) => root.render(<NotesApp initialDevice={device} />))

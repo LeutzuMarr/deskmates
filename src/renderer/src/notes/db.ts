@@ -94,6 +94,12 @@ function upgrade(db: IDBDatabase, tx: IDBTransaction, from: number): void {
 
 let opening: Promise<IDBDatabase> | null = null
 
+/** Told after something changes on this device (not from sync), so sync can send it soon. */
+export const localChange = new Set<() => void>()
+function changedLocally(): void {
+  for (const listener of localChange) listener()
+}
+
 export function openNotesDb(): Promise<IDBDatabase> {
   opening ??= new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION)
@@ -185,6 +191,7 @@ export async function save(changes: Partial<Record<SyncedStore, unknown[]>>, opt
     }
   }
   await finished(tx)
+  if (!options.fromSync) changedLocally()
 }
 
 /** Removes records for good from this device (after a sync, or for local-only data). */
@@ -205,11 +212,38 @@ export async function putAsset(blob: Blob, options: { name?: string; id?: string
   tx.objectStore('assets').put(asset)
   if (!options.fromSync) tx.objectStore('outbox').put({ key: `assets:${asset.id}`, store: 'assets', id: asset.id, at: asset.createdAt } satisfies OutboxEntry)
   await finished(tx)
+  if (!options.fromSync) changedLocally()
   return asset
 }
 
 export function getAsset(id: string): Promise<Asset | null> {
   return getRecord<Asset>('assets', id)
+}
+
+/**
+ * Store stickers have ids "store:<pack>:<file>" and aren't synced: they're the same files for
+ * everyone, so a device without one fetches it from the store (when online) and keeps it.
+ */
+export function storeAssetUrl(id: string): string | null {
+  const m = /^store:([a-z0-9-]+):([a-z0-9-]+)$/.exec(id)
+  return m ? `/store/stickers/${m[1]}/${m[2]}.svg` : null
+}
+
+/** An asset's picture/audio, from this device or (for store stickers) the store. */
+export async function assetBlob(id: string): Promise<Blob | null> {
+  const local = await getAsset(id)
+  if (local) return local.blob
+  const url = storeAssetUrl(id)
+  if (!url || !navigator.onLine) return null
+  try {
+    const response = await fetch(url)
+    if (!response.ok) return null
+    const blob = new Blob([await response.arrayBuffer()], { type: 'image/svg+xml' })
+    await putAsset(blob, { id, fromSync: true })
+    return blob
+  } catch {
+    return null
+  }
 }
 
 // ---- notebooks ----
@@ -475,4 +509,25 @@ export async function searchNotes(raw: string): Promise<SearchHit[]> {
     hits.push({ notebook: byId.get(item.notebookId)!, pageId: item.pageId, pageNumber: pageNumber.get(item.pageId), snippet: snippetOf(text, query) })
   }
   return hits.slice(0, 200)
+}
+
+/**
+ * Queues everything on this device for sync: done once per library, so notes made before syncing
+ * was set up (or before the outbox existed) reach the other devices too. Store stickers are skipped.
+ */
+export async function queueEverything(now = Date.now()): Promise<number> {
+  const stores: SyncedStore[] = ['folders', 'notebooks', 'pages', 'items', 'templates', 'packs', 'stickers', 'cards', 'recordings']
+  const db = await openNotesDb()
+  let queued = 0
+  for (const name of [...stores, 'assets' as const]) {
+    const ids = (await done(db.transaction(name, 'readonly').objectStore(name).getAllKeys())) as string[]
+    const tx = db.transaction('outbox', 'readwrite')
+    for (const id of ids) {
+      if (name === 'assets' && storeAssetUrl(id)) continue
+      tx.objectStore('outbox').put({ key: `${name}:${id}`, store: name, id, at: now } satisfies OutboxEntry)
+      queued++
+    }
+    await finished(tx)
+  }
+  return queued
 }
