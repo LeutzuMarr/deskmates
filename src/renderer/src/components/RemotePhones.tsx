@@ -69,7 +69,7 @@ export function RemotePhones(): ReactNode {
             <div className="mt-3 flex items-center gap-4">
               <img src={qr} width={160} height={160} alt="QR code to pair a phone" className="rounded-xl bg-white p-1" />
               <div className="min-w-0 text-[12px] text-ink-muted">
-                <p>Scan this with the phone's camera, or open the link on it. On an iPhone, then tap Share → Add to Home Screen, open it from there, and turn on notifications.</p>
+                <p>Scan this with the phone's camera, or open the link on it. On an iPhone, then tap Share → Add to Home Screen, open it from there, and turn on notifications. Already on the home screen? Tap Pair with PC (or Scan the code) inside the app.</p>
                 <p className="mt-2">Valid for {Math.floor(left / 60)}:{String(left % 60).padStart(2, '0')}.</p>
                 <button type="button" className="btn btn-text px-0" onClick={() => void navigator.clipboard.writeText(pairing.url).then(() => toast('Link copied'))}>
                   Copy the link
@@ -95,6 +95,18 @@ export function RemotePhones(): ReactNode {
               ))}
             </ul>
           )}
+          <button
+            type="button"
+            className="btn btn-text mt-2 px-0"
+            onClick={() =>
+              void core
+                .call('remote.notesLink', {})
+                .then(({ url }) => window.open(url, '_blank'))
+                .catch((error: unknown) => toast(error instanceof Error ? error.message : String(error)))
+            }
+          >
+            Open my notes in the browser
+          </button>
           <p className="mt-2 text-[12px] text-ink-faint">{status.appUrl}</p>
         </>
       )}

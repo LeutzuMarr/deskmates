@@ -950,6 +950,7 @@ export interface RpcMethods {
   'remote.status': { params: NoParams; result: RemoteStatusInfo }
   'remote.pairStart': { params: NoParams; result: { url: string; until: number } }
   'remote.remove': { params: { id: string }; result: RemoteStatusInfo }
+  'remote.notesLink': { params: NoParams; result: { url: string } }
   /** The relay (Supabase project URL and publishable key) and the web app's address. */
   'remote.configure': { params: { relay: string; anon: string; appUrl: string }; result: RemoteStatusInfo }
   /** The agent browser as everyone sees it: tabs, who is driving, and questions waiting for the user. */

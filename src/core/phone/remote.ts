@@ -8,7 +8,7 @@ import { createClient, type RealtimeChannel, type SupabaseClient } from '@supaba
 import webpush from 'web-push'
 import { hostname } from 'node:os'
 import type { EventBus } from '../events'
-import { channelFor, encodePairing, newId, newKey, open, seal } from '../../shared/remote-crypto'
+import { channelFor, encodeLibraryLink, encodePairing, newId, newKey, newNotesLibrary, open, seal, type NotesLibrary } from '../../shared/remote-crypto'
 
 /** The largest piece one relay message carries; bigger messages are split. */
 const PART_SIZE = 150_000
@@ -30,6 +30,8 @@ export interface RemoteConfig {
   appUrl: string
   vapid: { publicKey: string; privateKey: string } | null
   devices: RemoteDevice[]
+  /** The notes library every paired device syncs (made on first use). */
+  notes?: NotesLibrary
 }
 
 export interface RemoteStatus {
@@ -100,6 +102,23 @@ export class RemoteAccess {
     this.channels.clear()
   }
 
+  /** The notes library, made the first time it's needed. */
+  private notesLibrary(): NotesLibrary {
+    const config = this.config()
+    if (config.notes) return config.notes
+    const notes = newNotesLibrary()
+    this.deps.setConfig({ ...config, notes })
+    return notes
+  }
+
+  /** A link that opens the notes (and syncs them) in any browser, e.g. on this PC. */
+  notesLink(): { url: string } {
+    const config = this.config()
+    if (!config.relay || !config.anon || !config.appUrl) throw new Error('Phone access from anywhere isn’t set up on this PC.')
+    const fragment = encodeLibraryLink({ v: 1, relay: config.relay, anon: config.anon, lib: this.notesLibrary() })
+    return { url: `${config.appUrl.replace(/\/+$/, '')}/notes#library=${fragment}` }
+  }
+
   /** Starts pairing a new phone: a link (for a QR code) valid for five minutes. */
   pairStart(): { url: string; until: number } {
     const config = this.config()
@@ -108,7 +127,8 @@ export class RemoteAccess {
     const vapid = this.config().vapid!
     const device: RemoteDevice = { id: newId(), name: 'Phone', key: newKey(), push: null, createdAt: Date.now(), lastSeenAt: null }
     const until = Date.now() + PAIRING_MS
-    const fragment = encodePairing({ v: 1, relay: config.relay, anon: config.anon, device: device.id, key: device.key, pc: hostname(), vapid: vapid.publicKey, until })
+    const lib = this.notesLibrary()
+    const fragment = encodePairing({ v: 1, relay: config.relay, anon: config.anon, device: device.id, key: device.key, pc: hostname(), vapid: vapid.publicKey, until, lib })
     const url = `${config.appUrl.replace(/\/+$/, '')}/#pair=${fragment}`
     if (this.pending) this.unlisten(this.pending.device.id)
     this.pending = { device, until, url }

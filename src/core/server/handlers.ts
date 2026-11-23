@@ -911,6 +911,7 @@ export function createHandlers(services: HandlerServices): Handlers {
     'remote.status': () => requireRemote().status(),
     'remote.pairStart': () => requireRemote().pairStart(),
     'remote.remove': (params: { id: string }) => requireRemote().remove(params.id),
+    'remote.notesLink': () => requireRemote().notesLink(),
     'remote.configure': (params: { relay: string; anon: string; appUrl: string }) => {
       const remote = requireRemote()
       if (!/^https:\/\//.test(params.relay) || !/^https:\/\//.test(params.appUrl) || !params.anon.trim()) throw new Error('Give https addresses and the publishable key.')

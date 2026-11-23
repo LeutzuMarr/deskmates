@@ -3,7 +3,7 @@
  * localStorage (read synchronously at start) and is mirrored into IndexedDB, so one store being
  * cleared on its own doesn't sign the device out. Nothing here is ever sent to a server.
  */
-import { decodePairing } from '../../../shared/remote-crypto'
+import { decodeLibraryLink, decodePairing, type NotesLibrary } from '../../../shared/remote-crypto'
 import type { RemoteDevice } from './relay'
 
 export const DEVICE_STORAGE = 'deskmates:remote-device'
@@ -94,7 +94,7 @@ export function pairingFromText(text: string, now = Date.now()): PairingResult {
   }
   return {
     ok: true,
-    device: { relay: pairing.relay, anon: pairing.anon, device: pairing.device, key: pairing.key, pc: pairing.pc, vapid: pairing.vapid }
+    device: { relay: pairing.relay, anon: pairing.anon, device: pairing.device, key: pairing.key, pc: pairing.pc, vapid: pairing.vapid, ...(pairing.lib ? { lib: pairing.lib } : {}) }
   }
 }
 
@@ -116,4 +116,58 @@ export function deviceName(): string {
   if (/iPhone/.test(ua)) return 'iPhone'
   if (/Android/.test(ua)) return 'Android phone'
   return 'Browser'
+}
+
+// ---- the notes library (synced notes) ----
+
+/** Where synced notes live: the relay to reach and the library on it. */
+export interface LibraryAccess {
+  relay: string
+  anon: string
+  lib: NotesLibrary
+}
+
+const LIBRARY_STORAGE = 'deskmates:notes-library'
+
+function isLibrary(value: unknown): value is LibraryAccess {
+  const v = value as Partial<LibraryAccess> | null
+  return Boolean(v && typeof v.relay === 'string' && typeof v.anon === 'string' && v.lib?.id && v.lib.key && v.lib.token)
+}
+
+export async function saveLibrary(access: LibraryAccess): Promise<void> {
+  try {
+    localStorage.setItem(LIBRARY_STORAGE, JSON.stringify(access))
+  } catch {
+    // The IndexedDB copy keeps it.
+  }
+  await mirror('readwrite', (store) => store.put(access, LIBRARY_STORAGE)).catch(() => undefined)
+}
+
+/** The library this device syncs: one saved from a link, or the one that came with pairing. */
+export async function restoreLibrary(device: RemoteDevice | null): Promise<LibraryAccess | null> {
+  try {
+    const raw = localStorage.getItem(LIBRARY_STORAGE)
+    const parsed: unknown = raw ? JSON.parse(raw) : null
+    if (isLibrary(parsed)) return parsed
+  } catch {
+    // Fall through to the copy.
+  }
+  const copy = await mirror('readonly', (store) => store.get(LIBRARY_STORAGE)).catch(() => null)
+  if (isLibrary(copy)) {
+    await saveLibrary(copy)
+    return copy
+  }
+  if (device?.lib) {
+    const access = { relay: device.relay, anon: device.anon, lib: device.lib }
+    await saveLibrary(access)
+    return access
+  }
+  return null
+}
+
+/** Reads an "Open my notes" link's #library= fragment. */
+export function libraryFromHash(hash: string): LibraryAccess | null {
+  const fragment = new URLSearchParams(hash.replace(/^#/, '')).get('library')
+  const link = fragment ? decodeLibraryLink(fragment) : null
+  return link ? { relay: link.relay, anon: link.anon, lib: link.lib } : null
 }

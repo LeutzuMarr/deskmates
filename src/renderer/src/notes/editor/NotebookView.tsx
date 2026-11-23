@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState, type ReactNode } from 'react'
 import { ChevronLeft, Eraser, Highlighter, Lock, MoreHorizontal, Pencil, PenLine, Plus, Redo2, Undo2, Unlock } from 'lucide-react'
 import { Menu, SegmentedControl, Slider } from 'glisse'
-import { getAsset, getMeta, listItems, listPages, makePage, save, setMeta, updateNotebook, type Notebook } from '../db'
+import { assetBlob, getMeta, listItems, listPages, makePage, save, setMeta, updateNotebook, type Notebook } from '../db'
 import { DEFAULT_PAGE_STYLE, type Item, type Page, type PageStyle } from '../model'
 import type { RemoteDevice } from '../../remote/relay'
 import { NotesEngine } from './engine'
@@ -137,7 +137,7 @@ export function NotebookView({
           if (!flushTimer.current) flushTimer.current = window.setTimeout(flush, 400)
         },
         changed: refresh,
-        loadAsset: async (id) => (await getAsset(id))?.blob ?? null,
+        loadAsset: (id) => assetBlob(id),
         audioStamp: () => notebookAudio.stamp?.(initial.id)
       })
       engine.topInset = 64

@@ -6,7 +6,7 @@ import { drawPaper } from './paper'
 import { InkCache, paintItem } from './paint'
 import { templateById } from '../templates/registry'
 import { drawTemplate, type TemplateSpec } from '../templates/spec'
-import { getAsset } from '../db'
+import { assetBlob } from '../db'
 
 let shared: InkCache | null = null
 const redraws = new Set<() => void>()
@@ -14,7 +14,7 @@ const redraws = new Set<() => void>()
 /** One cache for all thumbnails; a picture that finishes loading redraws them. */
 export function thumbCache(): InkCache {
   shared ??= new InkCache(
-    async (id) => (await getAsset(id))?.blob ?? null,
+    (id) => assetBlob(id),
     () => {
       for (const r of redraws) r()
     }
