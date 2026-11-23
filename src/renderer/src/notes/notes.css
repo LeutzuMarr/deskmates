@@ -1,0 +1,105 @@
+@import 'tailwindcss';
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-card: var(--card);
+  --color-oat: var(--oat);
+  --color-rule: var(--rule);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-faint: var(--ink-faint);
+  --color-clay: var(--clay);
+  --color-clay-deep: var(--clay-deep);
+  --color-olive: var(--olive);
+  --font-sans: 'Instrument Sans Variable', system-ui, -apple-system, sans-serif;
+  --font-serif: 'Newsreader Variable', Georgia, 'Times New Roman', serif;
+}
+
+:root {
+  --canvas: #f0eee6;
+  --card: #faf9f5;
+  --oat: #e3dacc;
+  --rule: #cccbc8;
+  --ink: #141413;
+  --ink-muted: #87867f;
+  --ink-faint: #b0aea5;
+  --clay: #d97757;
+  --clay-deep: #c6613f;
+  --olive: #5f7249;
+  --glass: color-mix(in srgb, var(--card) 78%, transparent);
+  --glass-edge: color-mix(in srgb, var(--ink) 9%, transparent);
+  /* Notebook covers. */
+  --cover-clay: #c96442;
+  --cover-olive: #5f7249;
+  --cover-ink: #2d2c2a;
+  --cover-sky: #4b7fb8;
+  --cover-plum: #7a4a78;
+  --cover-sand: #c9a46a;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --canvas: #1f1e1d;
+    --card: #262624;
+    --oat: #30302e;
+    --rule: #3d3d3a;
+    --ink: #faf9f5;
+    --ink-muted: #b0aea5;
+    --ink-faint: #87867f;
+    --clay-deep: #e08a6a;
+    --olive: #9bb07f;
+    --glass: color-mix(in srgb, var(--card) 72%, transparent);
+    --glass-edge: color-mix(in srgb, #fff 9%, transparent);
+  }
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  /* An app, not a page: no rubber-band scrolling of the whole view, no tap flashes or callouts. */
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input,
+textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.glass {
+  background: var(--glass);
+  border: 1px solid var(--glass-edge);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  backdrop-filter: blur(18px) saturate(1.4);
+}
+
+/* A gentle press for anything tappable; quick in, springy out. */
+.press {
+  transition: transform 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.25);
+}
+.press:active {
+  transform: scale(0.96);
+  transition-duration: 0.08s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .press,
+  .press:active {
+    transition: none;
+    transform: none;
+  }
+}

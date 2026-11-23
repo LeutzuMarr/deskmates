@@ -3,25 +3,15 @@
  * anywhere), keeps the pairing on this phone, stands in for the desktop API, and then starts the
  * same app the PC shows, connected through the encrypted relay.
  */
-import { decodePairing, fromBase64Url } from '../../../shared/remote-crypto'
-import { RelayConnection, RelaySocket, type RemoteDevice } from './relay'
+import { fromBase64Url } from '../../../shared/remote-crypto'
+import { deviceName, keepDataForGood, pairingFromText, restoreDevice, saveDevice } from './device'
+import { RelayConnection, RelaySocket } from './relay'
 import '../styles.css'
 import '../styles/glass.css'
 import '../styles/sidebar.css'
 import '../styles/marks.css'
 
-const STORAGE = 'deskmates:remote-device'
-
-function readDevice(): RemoteDevice | null {
-  try {
-    const raw = localStorage.getItem(STORAGE)
-    return raw ? (JSON.parse(raw) as RemoteDevice) : null
-  } catch {
-    return null
-  }
-}
-
-function message(title: string, body: string): void {
+function message(title: string, body: string, action?: { label: string; run: () => void }): void {
   document.body.innerHTML = ''
   const main = document.createElement('main')
   main.style.cssText = 'max-width:380px;margin:18vh auto;padding:0 24px;font-family:system-ui,sans-serif;text-align:center;color:inherit'
@@ -32,7 +22,29 @@ function message(title: string, body: string): void {
   p.textContent = body
   p.style.cssText = 'font-size:14px;line-height:1.5;opacity:.75'
   main.append(h, p)
+  if (action) {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.textContent = action.label
+    button.style.cssText = 'margin-top:20px;padding:12px 22px;border-radius:999px;border:0;background:#c96442;color:#fff;font:600 15px system-ui,sans-serif'
+    button.onclick = action.run
+    main.append(button)
+  }
   document.body.append(main)
+}
+
+/** Not paired yet: offer to scan the PC's code from right here (the home-screen app can't use Safari's pairing). */
+function askToPair(body: string): void {
+  message('Deskmates', body, {
+    label: 'Scan the code',
+    run: () => {
+      void import('./pair').then(async ({ pairByScanning }) => {
+        const outcome = await pairByScanning()
+        if (outcome.status === 'paired') location.reload()
+        else if (outcome.status === 'failed') askToPair(outcome.message)
+      })
+    }
+  })
 }
 
 /** Web push: shown as a small button until the user allows notifications (browsers need a tap). */
@@ -62,26 +74,25 @@ async function offerNotifications(connection: RelayConnection): Promise<void> {
 }
 
 async function start(): Promise<void> {
-  const fragment = new URLSearchParams(location.hash.slice(1)).get('pair')
   let pairedNow = false
-  if (fragment) {
-    const pairing = decodePairing(fragment)
+  if (new URLSearchParams(location.hash.slice(1)).get('pair')) {
+    const pairing = pairingFromText(location.hash)
     history.replaceState(null, '', location.pathname)
-    if (!pairing) {
-      message('That link has expired', 'Make a new one in Deskmates on your PC: Settings → Phone → Add a phone.')
+    if (!pairing.ok) {
+      askToPair('That link has expired. Make a new code in Deskmates on your PC (Settings → Phone → Add a phone) and scan it.')
       return
     }
-    const device: RemoteDevice = { relay: pairing.relay, anon: pairing.anon, device: pairing.device, key: pairing.key, pc: pairing.pc, vapid: pairing.vapid }
-    localStorage.setItem(STORAGE, JSON.stringify(device))
+    await saveDevice(pairing.device)
     pairedNow = true
   }
-  const device = readDevice()
+  const device = await restoreDevice()
   if (!device) {
-    message('Deskmates', 'Open this from the link or QR code in Deskmates on your PC: Settings → Phone → Add a phone.')
+    askToPair('Scan the code in Deskmates on your PC: Settings → Phone → Add a phone.')
     return
   }
+  void keepDataForGood()
   const connection = new RelayConnection(device)
-  await connection.send({ t: 'hello', name: /iPhone|iPad/.test(navigator.userAgent) ? 'iPhone' : /Android/.test(navigator.userAgent) ? 'Android phone' : 'Browser' })
+  await connection.send({ t: 'hello', name: deviceName() })
   if (pairedNow) localStorage.setItem('deskmates:tab', 'duo')
 
   const none = (): Promise<null> => Promise.resolve(null)

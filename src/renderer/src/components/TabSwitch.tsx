@@ -4,13 +4,18 @@ import { useStore } from '../lib/store'
 import type { Tab } from '../lib/store'
 import { TAB_SHORTCUTS } from '../lib/shortcuts'
 
-const TABS: { value: Tab; label: string }[] = [
+/** In the phone and iPad web app, the notes app is one more tab; it's its own page, so it opens there. */
+const NOTES = 'notes'
+const ON_DEVICE = window.deskmates.platform === 'other'
+
+const TABS: { value: Tab | typeof NOTES; label: string }[] = [
   { value: 'duo', label: 'Duo' },
   { value: 'work', label: 'Work' },
   { value: 'design', label: 'Design' },
   { value: 'bots', label: 'Bots' },
   { value: 'agents', label: 'Agents' },
-  { value: 'extras', label: 'Extras' }
+  { value: 'extras', label: 'Extras' },
+  ...(ON_DEVICE ? [{ value: NOTES, label: 'Notes' } as const] : [])
 ]
 
 const MOD = window.deskmates.platform === 'darwin' ? '⌘' : 'Ctrl+'
@@ -31,13 +36,13 @@ export function TabSwitch() {
       const item = TABS[index]
       if (!item) return
       button.id = `tab-${item.value}`
-      button.title = `${item.label} (${MOD}${TAB_SHORTCUTS[item.value]})`
+      button.title = item.value === NOTES ? item.label : `${item.label} (${MOD}${TAB_SHORTCUTS[item.value]})`
     })
   }, [])
 
   return (
     <div ref={barRef} className="section-tabs no-drag">
-      <TabBar aria-label="Sections" items={TABS} value={tab} onValueChange={(value) => setTab(value as Tab)} />
+      <TabBar aria-label="Sections" items={TABS} value={tab} onValueChange={(value) => (value === NOTES ? location.assign('/notes') : setTab(value as Tab))} />
     </div>
   )
 }
