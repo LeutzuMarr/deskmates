@@ -4,13 +4,20 @@
  */
 import type { FillData, ImageData, Item, PaperColor, StickyData, StrokeData, TapeData, TextData } from '../model'
 import { inkOn } from './paper'
-import { boundsOf, centerPath, outlinePath, strokeOutline, type Bounds } from './stroke'
+import { boundsOf, centerPath, outlinePath, penPieces, strokeOutline, type Bounds } from './stroke'
 import { paintBrush, isBrush } from './brush'
 
 interface Cached {
   version: number
   path: Path2D
   bounds: Bounds
+  /** Solid pens are drawn as round-capped pieces (no outline that could fold into gaps). */
+  pieces?: Array<{ width: number; path: Path2D }>
+}
+
+/** Pens drawn as solid pieces: opaque ones (a see-through ink would darken where pieces overlap). */
+function solidPen(data: StrokeData): boolean {
+  return data.tool === 'pen' && (data.opacity === undefined || data.opacity >= 1)
 }
 
 const grain = new Map<string, CanvasPattern>()
@@ -63,8 +70,10 @@ export class InkCache {
     const hit = this.items.get(item.id)
     if (hit && hit.version === item.updatedAt) return hit
     const data = item.data
-    const path = data.tool === 'highlighter' ? centerPath(data.points) : outlinePath(strokeOutline(data))
-    const cached = { version: item.updatedAt, path, bounds: boundsOf(data.points, data.width) }
+    const solid = solidPen(data)
+    const path = data.tool === 'highlighter' ? centerPath(data.points) : solid ? new Path2D() : outlinePath(strokeOutline(data))
+    const pieces = solid ? penPieces(data.points, data.width, Boolean(data.shape)) : undefined
+    const cached = { version: item.updatedAt, path, bounds: boundsOf(data.points, data.width * 1.5), pieces }
     this.items.set(item.id, cached)
     return cached
   }
@@ -190,8 +199,18 @@ export function paintItem(ctx: CanvasRenderingContext2D, item: Item, cache: InkC
         paintBrush(ctx, d, paper)
         return
       }
-      const { path } = cache.strokePath(item as Item<'stroke'>)
+      const { path, pieces } = cache.strokePath(item as Item<'stroke'>)
       const color = inkOn(paper, d.color)
+      if (pieces) {
+        ctx.strokeStyle = color
+        ctx.lineCap = 'round'
+        ctx.lineJoin = 'round'
+        for (const piece of pieces) {
+          ctx.lineWidth = piece.width
+          ctx.stroke(piece.path)
+        }
+        return
+      }
       if (d.tool === 'highlighter') {
         ctx.save()
         ctx.globalAlpha = d.opacity ?? 0.38

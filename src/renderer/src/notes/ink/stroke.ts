@@ -57,6 +57,47 @@ export function freehandOptions(stroke: Pick<StrokeData, 'tool' | 'width' | 'sha
   }
 }
 
+/**
+ * A solid pen line as round-capped pieces: one smooth curve per point (from the midpoint before it
+ * to the midpoint after it), each as wide as the pressure there. Pieces of about the same width
+ * share a path, so a line is a handful of strokes. Unlike a filled outline, this can never fold
+ * over itself and leave see-through gaps, however quickly the width changes.
+ */
+export function penPieces(points: InkPoint[], width: number, uniform = false): Array<{ width: number; path: Path2D }> {
+  const buckets = new Map<number, Path2D>()
+  const add = (w: number): Path2D => {
+    const key = Math.max(0.25, Math.round(w * 4) / 4)
+    let path = buckets.get(key)
+    if (!path) {
+      path = new Path2D()
+      buckets.set(key, path)
+    }
+    return path
+  }
+  const widthAt = (p: number): number => (uniform ? width : width * (0.55 + 0.9 * Math.min(1, Math.max(0, p))))
+  const n = points.length
+  if (n === 0) return []
+  if (n === 1) {
+    const [x, y, p] = points[0]!
+    const path = add(widthAt(p))
+    path.moveTo(x, y)
+    path.lineTo(x + 0.01, y)
+  }
+  for (let i = 0; n > 1 && i < n; i++) {
+    const c = points[i]!
+    const prev = points[i - 1]
+    const next = points[i + 1]
+    const ax = prev ? (prev[0] + c[0]) / 2 : c[0]
+    const ay = prev ? (prev[1] + c[1]) / 2 : c[1]
+    const bx = next ? (c[0] + next[0]) / 2 : c[0]
+    const by = next ? (c[1] + next[1]) / 2 : c[1]
+    const path = add(widthAt(c[2]))
+    path.moveTo(ax, ay)
+    path.quadraticCurveTo(c[0], c[1], bx, by)
+  }
+  return [...buckets].map(([w, path]) => ({ width: w, path }))
+}
+
 /** The outline polygon as a smooth closed path. */
 export function outlinePath(outline: number[][]): Path2D {
   const path = new Path2D()
