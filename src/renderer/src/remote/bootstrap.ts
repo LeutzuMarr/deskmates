@@ -33,7 +33,7 @@ function message(title: string, body: string, action?: { label: string; run: () 
   document.body.append(main)
 }
 
-/** Not paired yet: offer to scan the PC's code from right here (the home-screen app can't use Safari's pairing). */
+/** Not paired yet: offer to scan the PC's code from right here (the home-screen app can't use Safari's pairing), or to paste its link. */
 function askToPair(body: string): void {
   message('Deskmates', body, {
     label: 'Scan the code',
@@ -45,6 +45,27 @@ function askToPair(body: string): void {
       })
     }
   })
+  const main = document.querySelector('main')
+  if (!main) return
+  const field = document.createElement('textarea')
+  field.placeholder = 'Or paste the link from your PC here'
+  field.rows = 3
+  field.style.cssText = 'display:block;width:100%;box-sizing:border-box;margin-top:18px;padding:10px 12px;border-radius:12px;border:1px solid rgba(128,128,128,.4);background:transparent;color:inherit;font:13px ui-monospace,monospace;word-break:break-all'
+  const go = document.createElement('button')
+  go.type = 'button'
+  go.textContent = 'Pair with the link'
+  go.style.cssText = 'margin-top:10px;padding:10px 20px;border-radius:999px;border:0;background:rgba(128,128,128,.25);color:inherit;font:600 14px system-ui,sans-serif'
+  go.onclick = () => {
+    const text = field.value.trim()
+    if (!text) return
+    go.textContent = 'Pairing…'
+    void import('./pair').then(async ({ pairByLink }) => {
+      const outcome = await pairByLink(text)
+      if (outcome.status === 'paired') location.reload()
+      else if (outcome.status === 'failed') askToPair(outcome.message)
+    })
+  }
+  main.append(field, go)
 }
 
 /** Web push: shown as a small button until the user allows notifications (browsers need a tap). */

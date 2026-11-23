@@ -143,7 +143,7 @@ export function NotebookView({
       engine = new NotesEngine(baseRef.current, wetRef.current, initial.id, state, {
         persist: (changed) => {
           for (const item of changed) queue.current.set(item.id, item)
-          if (!flushTimer.current) flushTimer.current = window.setTimeout(flush, 400)
+          if (!flushTimer.current) flushTimer.current = window.setTimeout(flush, 100)
         },
         changed: refresh,
         loadAsset: (id) => assetBlob(id),
@@ -322,7 +322,7 @@ export function NotebookView({
         </div>
         <div ref={barRef} className="toolbar-capsule glass pointer-events-auto order-3 mx-auto flex max-w-full items-center gap-1 overflow-x-auto px-2 py-1.5 [scrollbar-width:none] xl:order-2">
           {tools && (
-            <div className="shrink-0">
+            <div className="tool-segments shrink-0">
               <SegmentedControl
                 aria-label="Tools"
                 items={toolList.map((t) => ({ value: t.value, label: <span aria-label={t.label} title={t.label} className="flex px-0.5">{t.icon}</span> }))}

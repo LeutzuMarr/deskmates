@@ -33,6 +33,21 @@ export async function confirmPairing(device: RemoteDevice, timeoutMs = WELCOME_T
   }
 }
 
+/** Pairs from the "Add a phone" link pasted in (when the camera can't read the code). */
+export async function pairByLink(text: string): Promise<PairOutcome> {
+  if (!navigator.onLine) return { status: 'failed', message: 'Connect to the internet to pair. After that, notes work without it.' }
+  const result = pairingFromText(text)
+  if (!result.ok)
+    return {
+      status: 'failed',
+      message: result.reason === 'expired' ? 'That link has expired. Make a new one on your PC (Settings → Phone → Add a phone).' : 'That isn’t a Deskmates pairing link. Copy it from Settings → Phone → Add a phone on your PC.'
+    }
+  const welcomed = await confirmPairing(result.device).catch(() => false)
+  if (!welcomed) return { status: 'failed', message: 'Deskmates on your PC didn’t answer. Keep it open on the Add a phone screen and try again.' }
+  await saveDevice(result.device)
+  return { status: 'paired', device: result.device }
+}
+
 export async function pairByScanning(): Promise<PairOutcome> {
   if (!navigator.onLine) return { status: 'failed', message: 'Connect to the internet to pair. After that, notes work without it.' }
   let found: RemoteDevice | null = null

@@ -9,6 +9,7 @@ import { SearchTab, TrashTab } from './library/SearchTrash'
 import { StoreView } from './store/StoreView'
 import { loadTemplates } from './templates/registry'
 import { useLiquid } from './ui/liquid'
+import { Sheet } from './ui/Sheet'
 import { syncer } from './sync/sync'
 
 export function useOnline(): boolean {
@@ -38,6 +39,8 @@ export function NotesApp({ initialDevice }: { initialDevice: RemoteDevice | null
   const [tab, setTab] = useState<Tab>('notes')
   const [notice, setNotice] = useState<string | null>(null)
   const [pairing, setPairing] = useState(false)
+  const [pairSheet, setPairSheet] = useState(false)
+  const [pasted, setPasted] = useState('')
   const [open, setOpen] = useState<{ notebook: Notebook; pageId?: string } | null>(null)
   const [libraryKey, setLibraryKey] = useState(0)
   const tabsRef = useRef<HTMLDivElement>(null)
@@ -58,11 +61,12 @@ export function NotesApp({ initialDevice }: { initialDevice: RemoteDevice | null
 
   const say = useCallback((text: string) => setNotice(text), [])
 
-  const pair = async (): Promise<void> => {
+  const pair = async (link?: string): Promise<void> => {
     setPairing(true)
     try {
-      const { pairByScanning } = await import('../remote/pair')
-      const outcome = await pairByScanning()
+      const { pairByScanning, pairByLink } = await import('../remote/pair')
+      const outcome = link ? await pairByLink(link) : await pairByScanning()
+      if (outcome.status === 'paired') setPairSheet(false)
       if (outcome.status === 'paired') {
         setDevice(outcome.device)
         setNotice(`Paired with ${outcome.device.pc || 'your PC'}. This stays signed in.`)
@@ -74,7 +78,7 @@ export function NotesApp({ initialDevice }: { initialDevice: RemoteDevice | null
 
   const openDeskmates = (): void => {
     if (!online) setNotice('Deskmates needs the internet. Your notes work without it.')
-    else if (!device) void pair()
+    else if (!device) setPairSheet(true)
     else location.assign('/')
   }
 
@@ -104,7 +108,7 @@ export function NotesApp({ initialDevice }: { initialDevice: RemoteDevice | null
             </span>
           )}
           {!device && online && (
-            <button type="button" disabled={pairing} onClick={() => void pair()} className="press glass flex items-center gap-2 rounded-full px-4 py-2 text-[14px] font-medium">
+            <button type="button" disabled={pairing} onClick={() => setPairSheet(true)} className="press glass flex items-center gap-2 rounded-full px-4 py-2 text-[14px] font-medium">
               <QrCode size={17} /> Pair with PC
             </button>
           )}
@@ -141,6 +145,51 @@ export function NotesApp({ initialDevice }: { initialDevice: RemoteDevice | null
           />
         </div>
       </div>
+
+      {pairSheet && (
+        <Sheet title="Pair with your PC" onClose={() => setPairSheet(false)} width={460}>
+          <p className="mb-4 text-[14px] leading-relaxed text-ink-muted">On your PC, open Deskmates → Settings → Phone → Add a phone. Then scan its code, or copy its link, send it to this device (AirDrop, Messages…) and paste it here.</p>
+          <button type="button" disabled={pairing} onClick={() => void pair()} className="press flex w-full items-center justify-center gap-2 rounded-full bg-clay py-3 text-[15px] font-semibold text-white disabled:opacity-50">
+            <QrCode size={18} /> Scan the code
+          </button>
+          <form
+            className="mt-4 flex flex-col gap-2"
+            onSubmit={(e) => {
+              e.preventDefault()
+              if (pasted.trim()) void pair(pasted.trim())
+            }}
+          >
+            <label className="text-[13px] font-semibold" htmlFor="pair-link">
+              Or paste the link
+            </label>
+            <textarea
+              id="pair-link"
+              value={pasted}
+              onChange={(e) => setPasted(e.target.value)}
+              rows={3}
+              placeholder="https://…/#pair=…"
+              className="resize-none break-all rounded-xl border border-rule bg-card px-3 py-2 font-mono text-[13px] outline-none focus:border-clay"
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className="press flex-1 rounded-full bg-black/5 py-2.5 text-[14px] font-semibold dark:bg-white/10"
+                onClick={() =>
+                  void navigator.clipboard
+                    ?.readText()
+                    .then((text) => setPasted(text))
+                    .catch(() => setNotice('Tap the box and choose Paste.'))
+                }
+              >
+                Paste
+              </button>
+              <button type="submit" disabled={pairing || !pasted.trim()} className="press flex-1 rounded-full bg-clay py-2.5 text-[14px] font-semibold text-white disabled:opacity-40">
+                {pairing ? 'Pairing…' : 'Pair'}
+              </button>
+            </div>
+          </form>
+        </Sheet>
+      )}
 
       {notice && (
         <div role="status" className="glass fixed bottom-[calc(env(safe-area-inset-bottom)+86px)] left-1/2 z-50 w-[min(92vw,460px)] -translate-x-1/2 rounded-2xl px-4 py-3 text-center text-[14px] shadow-xl">

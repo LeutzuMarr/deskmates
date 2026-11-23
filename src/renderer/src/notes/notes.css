@@ -171,3 +171,18 @@ textarea {
     transform: none;
   }
 }
+
+/* Glisse's segments are 84 px wide; tools are icons, so they get less room (10 fit an upright iPad). */
+.tool-segments .lg-segmented {
+  --lg-tab-width: 48px;
+  --lg-lens-grow-x: 14px;
+}
+@media (max-width: 900px) {
+  .tool-segments .lg-segmented {
+    --lg-tab-width: 42px;
+  }
+}
+.compact-segments .lg-segmented {
+  --lg-tab-width: 58px;
+  --lg-lens-grow-x: 12px;
+}
