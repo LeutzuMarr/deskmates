@@ -1013,8 +1013,20 @@ export class NotesEngine {
           if (sweepHitsStroke(data, ax, ay, bx, by, radius)) changed = this.removeLive(gesture, item) || changed
           continue
         }
-        const pieces = cutStroke(data, bx, by, radius)
-        if (!pieces) continue
+        let pieces: InkPoint[][] = [data.points]
+        let cut = false
+        const steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / Math.max(0.5, radius * 0.5)))
+        for (let k = 0; k <= steps; k++) {
+          const sx = ax + ((bx - ax) * k) / steps
+          const sy = ay + ((by - ay) * k) / steps
+          pieces = pieces.flatMap((points) => {
+            const left = cutStroke({ ...data, points }, sx, sy, radius)
+            if (!left) return [points]
+            cut = true
+            return left
+          })
+        }
+        if (!cut) continue
         changed = this.removeLive(gesture, item) || changed
         for (const points of pieces) {
           const piece: Item<'stroke'> = { ...(item as Item<'stroke'>), id: crypto.randomUUID().replace(/-/g, '').slice(0, 24), data: { ...data, points }, updatedAt: Date.now() }
