@@ -4,7 +4,7 @@
  */
 import type { FillData, ImageData, Item, PaperColor, StickyData, StrokeData, TapeData, TextData } from '../model'
 import { inkOn } from './paper'
-import { boundsOf, centerPath, outlinePath, steady, strokeOutline, type Bounds } from './stroke'
+import { boundsOf, centerPath, outlinePath, strokeOutline, type Bounds } from './stroke'
 import { paintBrush, isBrush } from './brush'
 
 interface Cached {
@@ -63,7 +63,7 @@ export class InkCache {
     const hit = this.items.get(item.id)
     if (hit && hit.version === item.updatedAt) return hit
     const data = item.data
-    const path = data.tool === 'highlighter' ? centerPath(steady(data.points, 0.55)) : outlinePath(strokeOutline(data))
+    const path = data.tool === 'highlighter' ? centerPath(data.points) : outlinePath(strokeOutline(data))
     const cached = { version: item.updatedAt, path, bounds: boundsOf(data.points, data.width) }
     this.items.set(item.id, cached)
     return cached

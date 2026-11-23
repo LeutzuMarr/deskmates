@@ -125,6 +125,12 @@ export async function shareFile(blob: Blob, name: string): Promise<void> {
       return
     } catch (error) {
       if ((error as Error).name === 'AbortError') return
+      // iPadOS only opens the share sheet right after a tap; making the PDF took longer, so ask
+      // for one more tap.
+      if ((error as Error).name === 'NotAllowedError') {
+        offerShare(file)
+        return
+      }
     }
   }
   const url = URL.createObjectURL(blob)
@@ -133,4 +139,22 @@ export async function shareFile(blob: Blob, name: string): Promise<void> {
   a.download = name
   a.click()
   setTimeout(() => URL.revokeObjectURL(url), 10_000)
+}
+
+/** A floating button that opens the share sheet with the file (on a fresh tap). */
+function offerShare(file: File): void {
+  document.getElementById('dm-share-offer')?.remove()
+  const button = document.createElement('button')
+  button.id = 'dm-share-offer'
+  button.type = 'button'
+  button.textContent = `Share “${file.name}”`
+  button.style.cssText =
+    'position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 24px);transform:translateX(-50%);z-index:100;padding:13px 22px;border:0;border-radius:999px;background:#c96442;color:#fff;font:600 15px system-ui,-apple-system,sans-serif;box-shadow:0 10px 30px rgba(0,0,0,.25)'
+  const done = (): void => button.remove()
+  button.onclick = () => {
+    done()
+    void navigator.share({ files: [file], title: file.name }).catch(() => undefined)
+  }
+  document.body.append(button)
+  setTimeout(done, 20_000)
 }

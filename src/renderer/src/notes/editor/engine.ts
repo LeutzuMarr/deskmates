@@ -19,6 +19,7 @@ import { History, type Change } from './history'
 import { isInk, type ToolState } from './tools'
 import { recognizeShape } from './shapes'
 import { Spring } from '../ui/spring'
+import { pointInPolygon } from './transform'
 import { templateById } from '../templates/registry'
 import { drawTemplate } from '../templates/spec'
 
@@ -244,14 +245,19 @@ export class NotesEngine {
     this.applyStates(changes.map((c) => ({ id: c.id, state: c.after, previous: c.before })))
   }
 
+  /** Called before undo and redo, so tools can let go of what they hold (selection, typing). */
+  readonly beforeHistory = new Set<() => void>()
+
   undo(): void {
     this.cancelLive()
+    for (const f of this.beforeHistory) f()
     const states = this.history.undo()
     if (states) this.applyStates(states)
   }
 
   redo(): void {
     this.cancelLive()
+    for (const f of this.beforeHistory) f()
     const states = this.history.redo()
     if (states) this.applyStates(states)
   }
@@ -844,26 +850,9 @@ export class NotesEngine {
     if (!live || live.shaped) return
     const events = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : []
     for (const ev of events.length ? events : [e]) this.addPoint(live, this.sample(ev))
-    // Where the pen is heading, drawn ahead for a frame so the line keeps up with the tip.
+    // Only where the pen really went is drawn: no guess ahead of the tip, which would show as a
+    // line that wavers near the pen and then settles.
     live.predicted = []
-    const predicted = typeof e.getPredictedEvents === 'function' ? e.getPredictedEvents() : []
-    if (predicted.length) {
-      const p = predicted[predicted.length - 1]!
-      const at = this.onPage(live.slot, live.page, this.screenPoint(p))
-      const last = live.data.points[live.data.points.length - 1]
-      if (last) live.predicted.push([at.x, at.y, last[2], last[3] + 8])
-    } else if (live.data.points.length >= 3) {
-      const a = live.data.points[live.data.points.length - 2]!
-      const b = live.data.points[live.data.points.length - 1]!
-      const dt = Math.max(1, b[3] - a[3])
-      const lead = Math.min(12, 16) / dt
-      const dx = (b[0] - a[0]) * lead
-      const dy = (b[1] - a[1]) * lead
-      const reach = Math.hypot(dx, dy)
-      const cap = 14 / this.camera.scale
-      const f = reach > cap ? cap / reach : 1
-      live.predicted.push([b[0] + dx * f, b[1] + dy * f, b[2], b[3] + 12])
-    }
     this.watchStillness(live)
     this.requestOverlay()
   }
@@ -887,7 +876,7 @@ export class NotesEngine {
         live.predicted = []
         navigator.vibrate?.(8)
         this.requestOverlay()
-      }, 550)
+      }, 750)
     }
   }
 
@@ -987,12 +976,10 @@ export class NotesEngine {
   }
 
   private pointInFill(item: Item<'fill'>, x: number, y: number): boolean {
-    const path = new Path2D()
-    for (const ring of item.data.rings) {
-      ring.forEach(([px, py], i) => (i === 0 ? path.moveTo(px, py) : path.lineTo(px, py)))
-      path.closePath()
-    }
-    return this.base.isPointInPath(path, x, y, 'evenodd')
+    // Even-odd over all rings, in page space (independent of any canvas transform).
+    let inside = false
+    for (const ring of item.data.rings) if (pointInPolygon(x, y, ring)) inside = !inside
+    return inside
   }
 
   private removeLive(gesture: EraseGesture, item: Item): boolean {

@@ -104,7 +104,7 @@ export const DEFAULT_TOOLS: ToolState = {
   pressureCurve: 1,
   speedEffect: 0.6,
   tiltEffect: 0.8,
-  stabilizer: 0.15,
+  stabilizer: 0,
   advanced: false,
   brush: 'graphite',
   text: { size: 20, color: '#1c1c1e', font: 'sans' }
@@ -130,6 +130,8 @@ export function withDefaults(saved: Partial<ToolState> | null): ToolState {
     ...saved,
     pens: { ...structuredClone(DEFAULT_TOOLS.pens), ...(saved.pens ?? {}) },
     eraser: { ...DEFAULT_TOOLS.eraser, ...(saved.eraser ?? {}) },
-    text: { ...DEFAULT_TOOLS.text, ...(saved.text ?? {}) }
+    text: { ...DEFAULT_TOOLS.text, ...(saved.text ?? {}) },
+    // The old default steadied the line behind the pen; it now starts off (it can still be set).
+    stabilizer: saved.stabilizer === 0.15 ? 0 : (saved.stabilizer ?? 0)
   }
 }
