@@ -15,7 +15,7 @@ export type ScanOutcome = { status: 'scanned' } | { status: 'cancelled' } | { st
 
 const SCAN_EVERY_MS = 120
 /** Codes are read from a frame scaled down to this width: plenty for a code on a monitor, and fast. */
-const SCAN_WIDTH = 640
+const SCAN_WIDTH = 1080
 
 function cameraMessage(error: unknown): string {
   const name = (error as { name?: string } | null)?.name
@@ -29,7 +29,7 @@ export async function scanQrCode(options: ScanOptions): Promise<ScanOutcome> {
   if (!navigator.mediaDevices?.getUserMedia) return { status: 'no-camera', message: 'This browser can’t use the camera.' }
   let stream: MediaStream
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false })
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false })
   } catch (error) {
     return { status: 'no-camera', message: cameraMessage(error) }
   }
@@ -96,7 +96,7 @@ export async function scanQrCode(options: ScanOptions): Promise<ScanOutcome> {
         canvas.height = Math.round(video.videoHeight * scale)
         context.drawImage(video, 0, 0, canvas.width, canvas.height)
         const image = context.getImageData(0, 0, canvas.width, canvas.height)
-        const code = jsQR(image.data, image.width, image.height, { inversionAttempts: 'dontInvert' })
+        const code = jsQR(image.data, image.width, image.height, { inversionAttempts: 'attemptBoth' })
         if (code?.data && code.data !== lastRejected) {
           const verdict = options.accept(code.data)
           if (verdict === true) {

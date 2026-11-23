@@ -22,7 +22,8 @@ export function RemotePhones(): ReactNode {
       setQr(null)
       return
     }
-    void QRCode.toDataURL(pairing.url, { margin: 1, width: 240 }).then(setQr)
+    // Low error correction keeps the code coarse enough for a camera to read off a screen.
+    void QRCode.toDataURL(pairing.url, { margin: 2, width: 520, errorCorrectionLevel: 'L' }).then(setQr)
     const tick = (): void => {
       const seconds = Math.max(0, Math.round((pairing.until - Date.now()) / 1000))
       setLeft(seconds)
@@ -67,9 +68,9 @@ export function RemotePhones(): ReactNode {
         <>
           {pairing && qr ? (
             <div className="mt-3 flex items-center gap-4">
-              <img src={qr} width={160} height={160} alt="QR code to pair a phone" className="rounded-xl bg-white p-1" />
+              <img src={qr} width={260} height={260} alt="QR code to pair a phone" className="rounded-xl bg-white p-1" />
               <div className="min-w-0 text-[12px] text-ink-muted">
-                <p>Scan this with the phone's camera, or open the link on it. On an iPhone, then tap Share → Add to Home Screen, open it from there, and turn on notifications. Already on the home screen? Tap Pair with PC (or Scan the code) inside the app.</p>
+                <p>Scan this with the phone's camera, or send it the link (Copy the link below) and paste it in Pair with PC → Paste the link. On an iPhone, then tap Share → Add to Home Screen, open it from there, and turn on notifications. Already on the home screen? Tap Pair with PC (or Scan the code) inside the app.</p>
                 <p className="mt-2">Valid for {Math.floor(left / 60)}:{String(left % 60).padStart(2, '0')}.</p>
                 <button type="button" className="btn btn-text px-0" onClick={() => void navigator.clipboard.writeText(pairing.url).then(() => toast('Link copied'))}>
                   Copy the link

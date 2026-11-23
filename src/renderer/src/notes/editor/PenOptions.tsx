@@ -43,12 +43,14 @@ export function PenOptions({ tools, update }: { tools: ToolState; update: (next:
   return (
     <div className="flex flex-col gap-4">
       {isBrushTool(tool) && (
+        <div className="compact-segments">
         <SegmentedControl
           aria-label="Brush"
           items={BRUSHES.map((b) => ({ value: b, label: <span className="text-[12px]">{toolName(b)}</span> }))}
           value={tool}
           onValueChange={(b) => update({ ...tools, tool: b as InkTool, lastInk: b as InkTool, brush: b as InkTool })}
         />
+        </div>
       )}
       <div className="flex flex-wrap gap-2.5" role="group" aria-label="Colour">
         {[...palette, ...tools.recentColors].map((c, i) => (
