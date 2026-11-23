@@ -38,6 +38,12 @@ export class RelayConnection {
     })
   }
 
+  /** Leaves the relay channel; the connection can't be used after this. */
+  close(): void {
+    this.listeners.clear()
+    void this.channel.unsubscribe()
+  }
+
   on(listener: Listener): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
