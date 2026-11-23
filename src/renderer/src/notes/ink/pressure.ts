@@ -68,14 +68,16 @@ export class PressureTracker {
         // the time step keeps a tiny gap from reading as a huge speed, and the speed is smoothed.
         const dt = Math.max(6, sample.time - this.last.time)
         const instant = Math.hypot(sample.x - this.last.x, sample.y - this.last.y) / dt
-        this.speed = this.speed * 0.7 + instant * 0.3
+        this.speed = this.speed * 0.85 + instant * 0.15
       }
       // ~0 px/ms is a slow, heavy line; ~3 px/ms and faster is light.
       raw = 0.9 - Math.min(1, this.speed / 3) * 0.5 * this.options.speedEffect
     }
     // Smooth it so the width flows instead of jittering; the first point starts from a middle
     // weight, so the line doesn't begin with a blob.
-    this.smoothed = this.last ? this.smoothed * 0.7 + raw * 0.3 : 0.7 * 0.5 + raw * 0.5
+    const target = this.last ? this.smoothed * 0.85 + raw * 0.15 : 0.7 * 0.5 + raw * 0.5
+    // At most a small step per point, so the line never swells into beads.
+    this.smoothed = this.last ? Math.min(this.smoothed + 0.03, Math.max(this.smoothed - 0.03, target)) : target
     this.last = sample
     return applyCurve(this.smoothed, this.options.curve)
   }
