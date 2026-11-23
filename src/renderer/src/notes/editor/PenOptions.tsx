@@ -1,7 +1,8 @@
-import { useRef } from 'react'
+import { useState } from 'react'
 import { Plus, X } from 'lucide-react'
 import { Slider, SegmentedControl } from 'glisse'
-import { HIGHLIGHTS, PALETTE, WIDTHS, type Favorite, type InkTool, type ToolState } from './tools'
+import { BRUSHES, HIGHLIGHTS, PALETTE, WIDTHS, isBrushTool, type Favorite, type InkTool, type ToolState } from './tools'
+import { ColorPicker } from '../ui/ColorPicker'
 
 const TOOL_NAMES: Record<InkTool, string> = {
   pen: 'Pen',
@@ -28,7 +29,7 @@ function WidthDot({ width, max }: { width: number; max: number }) {
 export function PenOptions({ tools, update }: { tools: ToolState; update: (next: ToolState) => void }) {
   const tool = tools.tool as InkTool
   const pen = tools.pens[tool]
-  const custom = useRef<HTMLInputElement>(null)
+  const [picker, setPicker] = useState(false)
   const palette = tool === 'highlighter' ? HIGHLIGHTS : PALETTE
   const widths = WIDTHS[tool]
 
@@ -41,15 +42,23 @@ export function PenOptions({ tools, update }: { tools: ToolState; update: (next:
 
   return (
     <div className="flex flex-col gap-4">
+      {isBrushTool(tool) && (
+        <SegmentedControl
+          aria-label="Brush"
+          items={BRUSHES.map((b) => ({ value: b, label: <span className="text-[12px]">{toolName(b)}</span> }))}
+          value={tool}
+          onValueChange={(b) => update({ ...tools, tool: b as InkTool, lastInk: b as InkTool, brush: b as InkTool })}
+        />
+      )}
       <div className="flex flex-wrap gap-2.5" role="group" aria-label="Colour">
         {[...palette, ...tools.recentColors].map((c, i) => (
           <button key={`${c}-${i}`} type="button" className="swatch" aria-label={c} aria-pressed={pen.color === c} style={{ background: c }} onClick={() => setPen({ color: c })} />
         ))}
-        <button type="button" className="swatch flex items-center justify-center bg-[conic-gradient(red,yellow,lime,cyan,blue,magenta,red)]" aria-label="Pick any colour" onClick={() => custom.current?.click()}>
+        <button type="button" className="swatch flex items-center justify-center bg-[conic-gradient(red,yellow,lime,cyan,blue,magenta,red)]" aria-label="Pick any colour" aria-pressed={picker} onClick={() => setPicker(!picker)}>
           <span className="size-3 rounded-full bg-white" />
         </button>
-        <input ref={custom} type="color" className="sr-only" value={pen.color} onChange={(e) => setPen({ color: e.target.value })} />
       </div>
+      {picker && <ColorPicker value={pen.color} onChange={(color) => setPen({ color })} palette={tools.palette} onPaletteChange={(palette) => update({ ...tools, palette })} />}
 
       <div className="flex items-center gap-3">
         <span className="w-14 text-[13px] text-ink-muted">Size</span>

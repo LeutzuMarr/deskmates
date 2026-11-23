@@ -100,3 +100,50 @@ export function lassoTakes(item: Item, polygon: Array<[number, number]>, bounds:
   }
   return pointInPolygon((bounds.minX + bounds.maxX) / 2, (bounds.minY + bounds.maxY) / 2, polygon)
 }
+
+export type Quad = [[number, number], [number, number], [number, number], [number, number]]
+
+/** Maps a point of the box onto a four-cornered shape (top-left, top-right, bottom-right, bottom-left). */
+export function warpPoint(b: Bounds, q: Quad, x: number, y: number): [number, number] {
+  const u = (x - b.minX) / (b.maxX - b.minX || 1)
+  const v = (y - b.minY) / (b.maxY - b.minY || 1)
+  const [tl, tr, br, bl] = q
+  return [
+    (1 - u) * (1 - v) * tl[0] + u * (1 - v) * tr[0] + u * v * br[0] + (1 - u) * v * bl[0],
+    (1 - u) * (1 - v) * tl[1] + u * (1 - v) * tr[1] + u * v * br[1] + (1 - u) * v * bl[1]
+  ]
+}
+
+/** Bends an item from the box `b` onto the shape `q` (the lasso's distort). */
+export function warpItem(item: Item, b: Bounds, q: Quad): Item {
+  const map = (x: number, y: number): [number, number] => warpPoint(b, q, x, y)
+  switch (item.kind) {
+    case 'stroke': {
+      const d = item.data as StrokeData
+      return { ...item, data: { ...d, points: d.points.map(([x, y, p, t]): InkPoint => [...map(x, y), p, t] as InkPoint) } }
+    }
+    case 'tape': {
+      const d = item.data as TapeData
+      const [x1, y1] = map(d.x1, d.y1)
+      const [x2, y2] = map(d.x2, d.y2)
+      return { ...item, data: { ...d, x1, y1, x2, y2 } }
+    }
+    case 'fill': {
+      const d = item.data as FillData
+      return { ...item, data: { ...d, rings: d.rings.map((ring) => ring.map(([x, y]) => map(x, y))) } }
+    }
+    case 'text': {
+      const d = item.data as TextData
+      const [x, y] = map(d.x, d.y)
+      return { ...item, data: { ...d, x, y } }
+    }
+    default: {
+      // Pictures and notes keep their shape: they take the box their corners land in.
+      const d = item.data as ImageData
+      const corners = [map(d.x, d.y), map(d.x + d.width, d.y), map(d.x + d.width, d.y + d.height), map(d.x, d.y + d.height)]
+      const xs = corners.map((c) => c[0])
+      const ys = corners.map((c) => c[1])
+      return { ...item, data: { ...d, x: Math.min(...xs), y: Math.min(...ys), width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys) } } as Item
+    }
+  }
+}

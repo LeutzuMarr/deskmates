@@ -9,6 +9,7 @@ import './notes.css'
 import { keepDataForGood, libraryFromHash, restoreDevice, saveLibrary } from '../remote/device'
 import { NotesApp } from './App'
 import './features'
+import './features-pro'
 import './sync/setup'
 
 async function registerServiceWorker(): Promise<void> {

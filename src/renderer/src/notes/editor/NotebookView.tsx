@@ -5,7 +5,7 @@ import { assetBlob, getMeta, listItems, listPages, makePage, save, setMeta, upda
 import { DEFAULT_PAGE_STYLE, type Item, type Page, type PageStyle } from '../model'
 import type { RemoteDevice } from '../../remote/relay'
 import { NotesEngine } from './engine'
-import { isInk, withDefaults, type ActiveTool, type ToolState } from './tools'
+import { isBrushTool, isInk, withDefaults, type ActiveTool, type ToolState } from './tools'
 import { PenOptions, toolName } from './PenOptions'
 import { PaperPicker } from './PaperPicker'
 import { Popover, anchorOf } from '../ui/Popover'
@@ -101,6 +101,8 @@ export function NotebookView({
   const [templates, setTemplates] = useState<PageChoice | null>(null)
   const [saveTemplate, setSaveTemplate] = useState(false)
   const queue = useRef<Map<string, Item>>(new Map())
+  const setToastRef = useRef<(text: string) => void>(() => undefined)
+  const updateToolsRef = useRef<(next: ToolState) => void>(() => undefined)
   const flushTimer = useRef(0)
   useLiquid(barRef, { reach: 22 })
   useLiquid(pageBarRef, { reach: 18 })
@@ -141,9 +143,11 @@ export function NotebookView({
         audioStamp: () => notebookAudio.stamp?.(initial.id)
       })
       engine.topInset = 64
+      engine.say = setToastRef.current
       engine.dark = matchMedia('(prefers-color-scheme: dark)').matches
       engine.load(pages, items)
       engineRef.current = engine
+      engine.requestTools = (next) => updateToolsRef.current(next)
       const cleanups = (notebookExtras.setup ?? []).map((setup) => setup(engine!, { notebook: initial, refresh }))
       cleanupExtras = () => cleanups.forEach((c) => c())
       setToolsState(state)
@@ -203,11 +207,13 @@ export function NotebookView({
   }, [])
 
   const [toast, setToast] = useState<string | null>(null)
+  setToastRef.current = setToast
   useEffect(() => {
     if (!toast) return
     const timer = setTimeout(() => setToast(null), 4500)
     return () => clearTimeout(timer)
   }, [toast])
+  updateToolsRef.current = updateTools
   const engine = engineRef.current
   const context: NotebookContext | null = tools
     ? {
@@ -277,11 +283,13 @@ export function NotebookView({
   }
 
   const tool = tools?.tool
-  const toolList = [...BASE_TOOLS, ...EXTRA_TOOLS].filter((t) => !t.advanced || tools?.advanced)
+  // The brushes share one button: the one in hand, or the last one used.
+  const brushShown = tools ? (isBrushTool(tools.tool) ? tools.tool : tools.brush) : null
+  const toolList = [...BASE_TOOLS, ...EXTRA_TOOLS].filter((t) => (!t.advanced || tools?.advanced) && (!isBrushTool(t.value) || t.value === brushShown))
   const selectTool = (value: string): void => {
     if (!tools) return
     const chosen = value as ActiveTool
-    updateTools({ ...tools, tool: chosen, lastInk: isInk(chosen) ? chosen : tools.lastInk })
+    updateTools({ ...tools, tool: chosen, lastInk: isInk(chosen) ? chosen : tools.lastInk, brush: isBrushTool(chosen) ? (chosen as ToolState['brush']) : tools.brush })
   }
   const optionsLabel = !tools ? '' : isInk(tools.tool) ? toolName(tools.tool) : tools.tool === 'eraser' ? (tools.eraser.mode === 'precise' ? 'Precise' : 'Whole line') : notebookExtras.toolOptions ? (toolList.find((t) => t.value === tools.tool)?.label ?? '') : ''
 

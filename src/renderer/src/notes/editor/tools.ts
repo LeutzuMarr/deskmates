@@ -22,6 +22,8 @@ export interface ToolState {
   eraser: { mode: 'stroke' | 'precise'; size: number }
   favorites: Favorite[]
   recentColors: string[]
+  /** Colours saved in the colour picker. */
+  palette: string[]
   /** Draw with a finger too (otherwise fingers move the page). */
   fingerDraws: boolean
   /** Keep the page upright; when off, two fingers can turn it. */
@@ -38,11 +40,20 @@ export interface ToolState {
   stabilizer: number
   /** The advanced (Fresco-style) drawing tools are shown. */
   advanced: boolean
+  /** The brush the toolbar's brush button holds. */
+  brush: InkTool
   /** Text style for new text boxes. */
   text: { size: number; color: string; font: 'sans' | 'serif' | 'mono' | 'hand' }
 }
 
 export const INK_TOOLS: InkTool[] = ['pen', 'pencil', 'highlighter', 'marker', 'graphite', 'charcoal', 'airbrush', 'watercolor']
+
+/** The textured brushes, which share one button in the toolbar. */
+export const BRUSHES: InkTool[] = ['marker', 'graphite', 'charcoal', 'airbrush', 'watercolor']
+
+export function isBrushTool(tool: ActiveTool): boolean {
+  return (BRUSHES as string[]).includes(tool)
+}
 
 export function isInk(tool: ActiveTool): tool is InkTool {
   return (INK_TOOLS as string[]).includes(tool)
@@ -86,6 +97,7 @@ export const DEFAULT_TOOLS: ToolState = {
     { tool: 'highlighter', color: '#ffe55c', width: 18, opacity: 0.4 }
   ],
   recentColors: [],
+  palette: [],
   fingerDraws: false,
   rotationLocked: true,
   holdToShape: true,
@@ -94,6 +106,7 @@ export const DEFAULT_TOOLS: ToolState = {
   tiltEffect: 0.8,
   stabilizer: 0.15,
   advanced: false,
+  brush: 'graphite',
   text: { size: 20, color: '#1c1c1e', font: 'sans' }
 }
 
