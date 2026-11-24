@@ -248,13 +248,29 @@ export function lassoTool(engine: NotesEngine): ToolHandler {
   let pageId: string | null = null
 
   const near = (a: [number, number], b: [number, number] | null, r = 22): boolean => Boolean(b) && Math.hypot(a[0] - b![0], a[1] - b![1]) <= r
+  /** Things selected with a tap rather than a lasso: pictures, stickers, sticky notes. */
+  const tappable = (at: PagePoint): Item | null => engine.itemAt(at.page.id, at.x, at.y, ['image', 'sticker', 'sticky'])
+  /** On the selection, one of its handles, or on a picture/sticker. */
+  const onSelection = (at: PagePoint): boolean => {
+    if (selection.active && selection.pageId) {
+      const corners = selection.screenCorners()!
+      const b = selection.bounds()!
+      if (near(at.screen, selection.rotateHandle(), 30) || near(at.screen, corners[2]!, 30)) return true
+      if (selection.warp && selection.warp.some(([x, y]) => near(at.screen, engine.pageToScreen(selection.pageId!, x, y), 30))) return true
+      if (at.page.id === selection.pageId && at.x >= b.minX && at.x <= b.maxX && at.y >= b.minY && at.y <= b.maxY) return true
+    }
+    return Boolean(tappable(at))
+  }
 
   return {
-    down(at: PagePoint): boolean {
+    wantsTouch: onSelection,
+    down(at: PagePoint, e: PointerEvent): boolean {
+      // Fingers get bigger handles than the pen.
+      const reach = e.pointerType === 'touch' ? 30 : 22
       const screen = at.screen
       if (selection.active && selection.pageId && selection.warp) {
         const pts = selection.warp.map(([x, y]) => engine.pageToScreen(selection.pageId!, x, y))
-        const index = pts.findIndex((p) => near(screen, p, 26))
+        const index = pts.findIndex((p) => near(screen, p, reach + 4))
         if (index >= 0) {
           mode = { kind: 'corner', index }
           return true
@@ -264,11 +280,11 @@ export function lassoTool(engine: NotesEngine): ToolHandler {
       if (selection.active && selection.pageId) {
         const corners = selection.screenCorners()!
         const b = selection.bounds()!
-        if (near(screen, selection.rotateHandle())) {
+        if (near(screen, selection.rotateHandle(), reach)) {
           mode = { kind: 'rotate', start: [at.x, at.y], t: { ...IDENTITY, origin: [(b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2] } }
           return true
         }
-        if (near(screen, corners[2]!)) {
+        if (near(screen, corners[2]!, reach)) {
           mode = { kind: 'scale', start: [at.x, at.y], t: { ...IDENTITY, origin: [b.minX, b.minY] } }
           return true
         }
@@ -278,6 +294,14 @@ export function lassoTool(engine: NotesEngine): ToolHandler {
         }
         selection.clear()
       }
+      // A tap on a picture, sticker or sticky note selects it and lets it be dragged straight away.
+      const hit = tappable(at)
+      if (hit) {
+        selection.set(at.page.id, [hit])
+        mode = { kind: 'move', start: [at.x, at.y], t: IDENTITY }
+        return true
+      }
+      if (e.pointerType === 'touch') return false
       pageId = at.page.id
       mode = { kind: 'lasso', points: [[at.x, at.y]] }
       return true
