@@ -92,6 +92,42 @@ describe('hold to shape', () => {
     for (const [x, y] of rect!.points) expect(close(x, x0, 0.5) || close(x, x1, 0.5) || close(y, y0, 0.5) || close(y, y1, 0.5)).toBe(true)
   })
 
+  it('makes a square of a box with nearly equal sides', () => {
+    const corners: Array<[number, number]> = [[0, 0], [100, 4], [104, 96], [-2, 102], [0, 2]]
+    const box: Array<[number, number]> = []
+    for (let i = 0; i < corners.length - 1; i++) {
+      const [a, b] = [corners[i]!, corners[i + 1]!]
+      for (let k = 0; k < 20; k++) box.push([a[0] + ((b[0] - a[0]) * k) / 20, a[1] + ((b[1] - a[1]) * k) / 20])
+    }
+    const square = recognizeShape(points(box))
+    expect(square?.kind).toBe('polyline')
+    const xs = square!.points.map((p) => p[0])
+    const ys = square!.points.map((p) => p[1])
+    expect(close(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys), 0.01)).toBe(true)
+  })
+
+  it('finds a triangle even when it was started in the middle of a side', () => {
+    const corners: Array<[number, number]> = [[50, 100], [100, 100], [50, 10], [0, 100], [48, 100]]
+    const tri: Array<[number, number]> = []
+    for (let i = 0; i < corners.length - 1; i++) {
+      const [a, b] = [corners[i]!, corners[i + 1]!]
+      for (let k = 0; k < 20; k++) tri.push([a[0] + ((b[0] - a[0]) * k) / 20, a[1] + ((b[1] - a[1]) * k) / 20])
+    }
+    const shape = recognizeShape(points(tri))
+    expect(shape?.kind).toBe('polyline')
+    // Three corners: the outline turns sharply exactly three times.
+    const pts = shape!.points
+    let turns = 0
+    for (let i = 1; i < pts.length - 1; i++) {
+      const a = Math.atan2(pts[i]![1] - pts[i - 1]![1], pts[i]![0] - pts[i - 1]![0])
+      const b = Math.atan2(pts[i + 1]![1] - pts[i]![1], pts[i + 1]![0] - pts[i]![0])
+      let d = Math.abs(b - a)
+      if (d > Math.PI) d = 2 * Math.PI - d
+      if (d > 0.3) turns++
+    }
+    expect(turns).toBe(2)
+  })
+
   it('leaves scribbles alone', () => {
     expect(recognizeShape(wobble(80, (t) => [t * 300, Math.sin(t * 40) * 40 + Math.cos(t * 13) * 30]))).toBeNull()
   })

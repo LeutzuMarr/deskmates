@@ -53,7 +53,7 @@ notebookExtras.toolChanged = [
   }
 ]
 
-notebookExtras.overlay = [...(notebookExtras.overlay ?? []), (engine, context) => <ContentOverlay engine={engine} notice={context.notice} />]
+notebookExtras.overlay = [...(notebookExtras.overlay ?? []), (engine, context) => <ContentOverlay engine={engine} notice={context.notice} setTool={context.setTool} />]
 
 /** The "+" in a notebook's top bar: picture, camera, sticker, sticky note, paste, PDF pages. */
 function InsertMenu({ engine, context }: { engine: NotesEngine; context: NotebookContext }) {

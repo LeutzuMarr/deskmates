@@ -20,6 +20,8 @@ export interface Editing {
   isNew: boolean
   /** What's typed so far (kept here so any way of ending the edit saves it). */
   draft?: string
+  /** A sticky note's colour picked while typing. */
+  color?: string
 }
 
 type EditListener = (editing: Editing | null) => void
@@ -70,9 +72,10 @@ export function finishEditing(engine: NotesEngine, itemId?: string): void {
       else if (trimmed !== item.data.text) engine.updateItems([{ before: item, after: next }])
     }
   } else {
-    const next = { ...item, data: { ...item.data, text: trimmed } } as Item
+    const color = editing.color ?? item.data.color
+    const next = { ...item, data: { ...item.data, text: trimmed, color } } as Item
     if (editing.isNew) engine.addItems([next])
-    else if (trimmed !== item.data.text) engine.updateItems([{ before: item, after: next }])
+    else if (trimmed !== item.data.text || color !== item.data.color) engine.updateItems([{ before: item, after: next }])
   }
   engine.requestRender()
   for (const l of e.listeners) l(null)

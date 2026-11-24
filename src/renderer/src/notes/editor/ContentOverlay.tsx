@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { Copy, CopyPlus, Palette, Spline, Sticker, Trash2 } from 'lucide-react'
+import { Copy, CopyPlus, Move, Palette, Spline, Sticker, Trash2 } from 'lucide-react'
 import type { StickyData, TextData } from '../model'
 import { fontFor } from '../ink/paint'
 import type { NotesEngine } from './engine'
-import { finishEditing, onEditing, selectionToPng, type Editing } from './content'
+import { finishEditing, onEditing, selectionToPng, STICKY_COLORS, type Editing } from './content'
+import type { ActiveTool } from './tools'
 import { selectionOf } from './lasso'
 import { PALETTE } from './tools'
 import { recolorItem, transformItem } from './transform'
@@ -12,7 +13,7 @@ import { setMeta, getMeta, newId } from '../db'
 import type { Item } from '../model'
 
 /** Text boxes and sticky notes are typed into a real text field laid over the page. */
-function TextEditor({ engine, editing }: { engine: NotesEngine; editing: Editing }) {
+function TextEditor({ engine, editing, setTool }: { engine: NotesEngine; editing: Editing; setTool: (tool: ActiveTool) => void }) {
   const ref = useRef<HTMLTextAreaElement>(null)
   const item = editing.item
   const sticky = item.kind === 'sticky'
@@ -30,6 +31,8 @@ function TextEditor({ engine, editing }: { engine: NotesEngine; editing: Editing
     const away = (e: PointerEvent): void => {
       const el = ref.current
       if (!el || e.target === el) return
+      // The sticky note's own bar (move, delete, colour) handles its taps itself.
+      if ((e.target as Element | null)?.closest?.('[data-sticky-bar]')) return
       finishEditing(engine, item.id)
       if (document.activeElement === el) el.blur()
     }
@@ -59,12 +62,54 @@ function TextEditor({ engine, editing }: { engine: NotesEngine; editing: Editing
   const [sx, sy] = engine.pageToScreen(item.pageId, x, y)
   const size = sticky ? 17 : d.size
   const width = sticky ? d.width - 28 : d.width
+  /** Ends typing, then does something with the saved note. */
+  const thenWithNote = (action: (saved: Item) => void): void => {
+    finishEditing(engine, item.id)
+    if (document.activeElement === ref.current) ref.current?.blur()
+    const saved = engine.getItem(item.id)
+    if (saved) action(saved)
+  }
+  const [bx, by] = engine.pageToScreen(item.pageId, d.x, d.y)
+
   return (
     <>
       {sticky && (
+        <div data-sticky-bar className="toolbar-capsule glass absolute z-20 flex items-center gap-0.5 px-1.5 py-1 text-[13px] font-medium" style={{ left: bx, top: Math.max(64, by - 50) }}>
+          <button
+            type="button"
+            className="press flex items-center gap-1 rounded-full px-2.5 py-1.5"
+            onClick={() =>
+              thenWithNote((saved) => {
+                setTool('lasso')
+                selectionOf(engine).set(saved.pageId, [saved])
+              })
+            }
+          >
+            <Move size={15} /> Move
+          </button>
+          {STICKY_COLORS.map((c) => (
+            <button
+              key={c}
+              type="button"
+              aria-label={`Colour ${c}`}
+              className="swatch mx-0.5"
+              style={{ background: c, width: 20, height: 20 }}
+              onClick={() => {
+                // Recolour while typing: the note keeps its text and stays open.
+                editing.color = c
+                force((n) => n + 1)
+              }}
+            />
+          ))}
+          <button type="button" aria-label="Delete note" className="press rounded-full px-2.5 py-1.5 text-[#c8372d]" onClick={() => thenWithNote((saved) => engine.removeItems([saved]))}>
+            <Trash2 size={15} />
+          </button>
+        </div>
+      )}
+      {sticky && (
         <div
           className="pointer-events-none absolute origin-top-left rounded-[4px] shadow-lg"
-          style={{ left: engine.pageToScreen(item.pageId, d.x, d.y)[0], top: engine.pageToScreen(item.pageId, d.x, d.y)[1], width: d.width * scale, height: d.height * scale, background: d.color, transform: `rotate(${engine.camera.rotation}rad)` }}
+          style={{ left: engine.pageToScreen(item.pageId, d.x, d.y)[0], top: engine.pageToScreen(item.pageId, d.x, d.y)[1], width: d.width * scale, height: d.height * scale, background: editing.color ?? d.color, transform: `rotate(${engine.camera.rotation}rad)` }}
         />
       )}
       <textarea
@@ -133,7 +178,7 @@ function SelectionBar({ engine, notice }: { engine: NotesEngine; notice: (text: 
 
   return (
     <div className="absolute z-20 -translate-x-1/2" style={{ left, top: Math.max(70, top - 64) }}>
-      <div className="toolbar-capsule glass flex items-center gap-0.5 px-1.5 py-1 text-[13px] font-medium" style={{ animation: 'pop-in .24s cubic-bezier(.25,.1,.25,1)' }}>
+      <div className="toolbar-capsule glass flex items-center gap-0.5 whitespace-nowrap px-1.5 py-1 text-[13px] font-medium" style={{ animation: 'pop-in .24s cubic-bezier(.25,.1,.25,1)' }}>
         {canColor && (
           <button type="button" className="press flex items-center gap-1 rounded-full px-2.5 py-1.5" onClick={() => setColors(!colors)}>
             <Palette size={15} /> Colour
@@ -178,12 +223,12 @@ function SelectionBar({ engine, notice }: { engine: NotesEngine; notice: (text: 
   )
 }
 
-export function ContentOverlay({ engine, notice }: { engine: NotesEngine; notice: (text: string) => void }) {
+export function ContentOverlay({ engine, notice, setTool }: { engine: NotesEngine; notice: (text: string) => void; setTool: (tool: ActiveTool) => void }) {
   const [editing, setEditing] = useState<Editing | null>(null)
   useEffect(() => onEditing(engine, setEditing), [engine])
   return (
     <>
-      {editing && <TextEditor key={editing.item.id} engine={engine} editing={editing} />}
+      {editing && <TextEditor key={editing.item.id} engine={engine} editing={editing} setTool={setTool} />}
       <SelectionBar engine={engine} notice={notice} />
     </>
   )

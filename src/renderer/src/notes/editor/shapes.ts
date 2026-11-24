@@ -108,6 +108,27 @@ function fitEllipse(points: P[]): { cx: number; cy: number; rx: number; ry: numb
   return { cx, cy, rx: ax, ry: ay, angle, error: error / n }
 }
 
+/**
+ * Drops corners that aren't corners: a shape started in the middle of a side gets an extra vertex
+ * there, almost in a straight line with its neighbours.
+ */
+export function dropStraight(vertices: P[], maxAngle = (155 * Math.PI) / 180): P[] {
+  let out = [...vertices]
+  for (let changed = true; changed && out.length > 3; ) {
+    changed = false
+    for (let i = 0; i < out.length; i++) {
+      const prev = out[(i + out.length - 1) % out.length]!
+      const next = out[(i + 1) % out.length]!
+      if (angleAt(prev, out[i]!, next) > maxAngle) {
+        out = out.filter((_, j) => j !== i)
+        changed = true
+        break
+      }
+    }
+  }
+  return out
+}
+
 export function recognizeShape(points: InkPoint[]): Shape | null {
   if (points.length < 4) return null
   const pts: P[] = points.map((p) => [p[0], p[1]])
@@ -134,11 +155,11 @@ export function recognizeShape(points: InkPoint[]): Shape | null {
   if (closed) {
     const ellipse = fitEllipse(pts)
     const corners = simplify([...pts, first], size * 0.06)
-    const vertices = corners.slice(0, -1)
+    const vertices = dropStraight(corners.slice(0, -1))
     const roundish = ellipse.error < 0.12
     if (vertices.length >= 3 && vertices.length <= 6 && !(roundish && vertices.length >= 5) && plausible(corners)) {
       if (vertices.length === 4) {
-        const right = vertices.every((v, i) => Math.abs(angleAt(vertices[(i + 3) % 4]!, v, vertices[(i + 1) % 4]!) - Math.PI / 2) < (16 * Math.PI) / 180)
+        const right = vertices.every((v, i) => Math.abs(angleAt(vertices[(i + 3) % 4]!, v, vertices[(i + 1) % 4]!) - Math.PI / 2) < (20 * Math.PI) / 180)
         if (right) {
           // A clean rectangle along its own first side (snapped upright when nearly so).
           const a = vertices[0]!
@@ -147,12 +168,21 @@ export function recognizeShape(points: InkPoint[]): Shape | null {
           const uy = (dir[1] - a[1]) / (Math.hypot(dir[0] - a[0], dir[1] - a[1]) || 1)
           const us = vertices.map((v) => (v[0] - a[0]) * ux + (v[1] - a[1]) * uy)
           const vs = vertices.map((v) => -(v[0] - a[0]) * uy + (v[1] - a[1]) * ux)
-          const [u0, u1, v0, v1] = [Math.min(...us), Math.max(...us), Math.min(...vs), Math.max(...vs)]
+          let [u0, u1, v0, v1] = [Math.min(...us), Math.max(...us), Math.min(...vs), Math.max(...vs)]
+          // Sides within ~12 % of each other: a square.
+          const w = u1 - u0
+          const h = v1 - v0
+          if (Math.abs(w - h) / Math.max(w, h) < 0.12) {
+            const side = (w + h) / 2
+            const cu = (u0 + u1) / 2
+            const cv = (v0 + v1) / 2
+            ;[u0, u1, v0, v1] = [cu - side / 2, cu + side / 2, cv - side / 2, cv + side / 2]
+          }
           const at = (u: number, v: number): P => [a[0] + u * ux - v * uy, a[1] + u * uy + v * ux]
           return { kind: 'polyline', points: along([at(u0, v0), at(u1, v0), at(u1, v1), at(u0, v1), at(u0, v0)], step) }
         }
       }
-      return { kind: 'polyline', points: along([...vertices, vertices[0]!], step) }
+      if (plausible([...vertices, vertices[0]!])) return { kind: 'polyline', points: along([...vertices, vertices[0]!], step) }
     }
     if (roundish || ellipse.error < 0.2) {
       let { rx, ry, angle } = ellipse

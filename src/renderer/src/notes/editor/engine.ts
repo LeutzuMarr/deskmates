@@ -41,6 +41,8 @@ export interface ToolHandler {
   cancel(): void
   /** Draws its own marks over the page (selection box, handles…), in screen space. */
   overlay?(ctx: CanvasRenderingContext2D): void
+  /** Whether a finger here should go to the tool (e.g. grabbing a selection) instead of moving the page. */
+  wantsTouch?(at: PagePoint): boolean
 }
 
 export interface PagePoint {
@@ -64,6 +66,9 @@ interface LiveStroke {
   /** Where the pen has been still since (for hold-to-shape). */
   still: { x: number; y: number; since: number } | null
   shaped: boolean
+  /** Once straightened: the clean shape and where the pen was then, so it can follow the pen. */
+  shapeBase?: InkPoint[]
+  shapeAnchor?: Vec
   drawnUpTo: number
 }
 
@@ -697,6 +702,18 @@ export class NotesEngine {
       return
     }
     if (e.pointerType !== 'touch' && e.pointerType !== 'mouse') return
+    // A finger on a selection (or a picture, a sticker) grabs it; anywhere else it moves the page.
+    if (e.pointerType === 'touch' && this.touches.size === 0 && this.handlerPointer === null) {
+      const handler = this.handlers[this.tools.tool]
+      const at = this.pageAt(this.screenPoint(e), true)
+      if (handler?.wantsTouch && at && handler.wantsTouch(at) && handler.down(at, e)) {
+        cancelAnimationFrame(this.momentum)
+        this.handlerPointer = e.pointerId
+        this.capture(e.pointerId)
+        this.requestOverlay()
+        return
+      }
+    }
     cancelAnimationFrame(this.momentum)
     this.rotationSpring = null
     const [x, y] = this.screenPoint(e)
@@ -897,7 +914,11 @@ export class NotesEngine {
 
   private extendStroke(e: PointerEvent): void {
     const live = this.live
-    if (!live || live.shaped) return
+    if (!live) return
+    if (live.shaped) {
+      this.followPen(live, e)
+      return
+    }
     const events = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : []
     for (const ev of events.length ? events : [e]) this.addPoint(live, this.sample(ev))
     // Only where the pen really went is drawn: no guess ahead of the tip, which would show as a
@@ -913,16 +934,21 @@ export class NotesEngine {
     const last = live.data.points[live.data.points.length - 1]
     if (!last) return
     const now = performance.now()
-    const tolerance = 4 / this.camera.scale
+    // A hand can't hold a pen perfectly still: small wobbles (up to ~12 screen pixels) still count.
+    const tolerance = 12 / this.camera.scale
     if (!live.still || Math.hypot(last[0] - live.still.x, last[1] - live.still.y) > tolerance) {
       live.still = { x: last[0], y: last[1], since: now }
+      // What was drawn up to the moment the pen stopped; the wobble while holding isn't part of it.
+      const drawn = live.data.points.length
       clearTimeout((live as unknown as { timer?: number }).timer)
       ;(live as unknown as { timer?: number }).timer = window.setTimeout(() => {
         if (this.live !== live || live.shaped) return
-        const shape = recognizeShape(live.data.points)
+        const shape = recognizeShape(live.data.points.slice(0, drawn))
         if (!shape) return
         live.data = { ...live.data, points: shape.points, shape: shape.kind }
         live.shaped = true
+        live.shapeBase = shape.points
+        live.shapeAnchor = [last[0], last[1]]
         live.predicted = []
         // Grain brushes build up on the top canvas: start it again for the clean shape.
         live.drawnUpTo = 0
@@ -932,6 +958,22 @@ export class NotesEngine {
         this.requestOverlay()
       }, 750)
     }
+  }
+
+  /** A straightened shape moves with the pen until it's lifted. */
+  private followPen(live: LiveStroke, e: PointerEvent): void {
+    if (!live.shapeBase || !live.shapeAnchor) return
+    const at = this.onPage(live.slot, live.page, this.screenPoint(e))
+    const dx = at.x - live.shapeAnchor[0]
+    const dy = at.y - live.shapeAnchor[1]
+    live.data = { ...live.data, points: live.shapeBase.map(([x, y, p, t]): InkPoint => [round(x + dx), round(y + dy), p, t]) }
+    // Grain brushes build up on the top canvas: start it again for the moved shape.
+    if (isBrush(live.data.tool)) {
+      live.drawnUpTo = 0
+      this.wet.setTransform(1, 0, 0, 1, 0, 0)
+      this.wet.clearRect(0, 0, this.wetCanvas.width, this.wetCanvas.height)
+    }
+    this.requestOverlay()
   }
 
   private finishStroke(): void {
